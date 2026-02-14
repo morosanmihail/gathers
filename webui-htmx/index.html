@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Gathers - Card Search</title>
+        <script
+            src="https://unpkg.com/htmx.org@1.9.10"
+            integrity="sha384-Df3zBhm5jh6Ee1BkASwpkZmWZFA0wfUu8mCgMqppCFa90uCcSBA+o3NwTnMMJX"
+            crossorigin="anonymous"
+        ></script>
+        <link rel="stylesheet" href="/src/styles.css" />
+    </head>
+    <body hx-headers='{"Content-Type": "application/json"}'>
+        <div class="container">
+            <h1>Gathers - Card Search</h1>
+
+            <!-- Search Form -->
+            <form
+                id="search-form"
+                hx-post="/mtg/cards/search"
+                hx-target="#results-container"
+                hx-swap="innerHTML"
+            >
+                <div class="form-group">
+                    <label for="name">Card Name:</label>
+                    <input
+                        type="text"
+                        id="name"
+                        name="name"
+                        placeholder="Search by card name..."
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="set">Set Code:</label>
+                    <input
+                        type="text"
+                        id="set"
+                        name="set_code"
+                        placeholder="e.g., M21, ZNR"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="collector-number">Collector Number:</label>
+                    <input
+                        type="text"
+                        id="collector-number"
+                        name="collector_number"
+                        placeholder="e.g., 123"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="artist">Artist:</label>
+                    <input
+                        type="text"
+                        id="artist"
+                        name="artist"
+                        placeholder="Search by artist..."
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="text">Card Text:</label>
+                    <input
+                        type="text"
+                        id="text"
+                        name="text"
+                        placeholder="Search by card text..."
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="rarity">Rarity:</label>
+                    <select id="rarity" name="rarity">
+                        <option value="">Any Rarity</option>
+                        <option value="common">Common</option>
+                        <option value="uncommon">Uncommon</option>
+                        <option value="rare">Rare</option>
+                        <option value="mythic">Mythic Rare</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="colors">Color Identity:</label>
+                    <input
+                        type="text"
+                        id="colors"
+                        name="color_identities"
+                        placeholder="e.g., WUBRG (any combination)"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="limit">Limit:</label>
+                    <input
+                        type="number"
+                        id="limit"
+                        name="limit"
+                        value="20"
+                        min="1"
+                        max="100"
+                    />
+                </div>
+
+                <button type="submit" class="search-button">
+                    Search Cards
+                </button>
+            </form>
+
+            <!-- Results Container -->
+            <div id="results-container" class="results-container">
+                <p>
+                    Enter search criteria and click "Search Cards" to find
+                    cards.
+                </p>
+            </div>
+        </div>
+
+        <script src="/src/app.js"></script>
+    </body>
+</html>
