@@ -1,6 +1,6 @@
 services:
   gathers-api:
-    build: .
+    image: ghcr.io/morosanmihail/gathers-api:latest
     ports:
       - "5234:5234"
     volumes:
@@ -13,10 +13,7 @@ services:
     restart: unless-stopped
 
   gathers-webui:
-    build:
-      context: ./webui
-      args:
-        REACT_APP_COLLECTIONS_ENABLED: "true"
+    image: ghcr.io/morosanmihail/gathers-webui:latest
     ports:
       - "3000:3000"
     depends_on:

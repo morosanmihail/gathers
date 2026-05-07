@@ -351,20 +351,14 @@ async fn main() -> eyre::Result<()> {
         toml::from_str::<ServerConfig>(&content)
             .map_err(|e| eyre::eyre!("Failed to parse {}: {e}", config_path.display()))?
     } else {
-        if args.system.is_empty() {
-            eyre::bail!(
-                "--system is required when no config file exists at {}",
-                config_path.display()
-            );
-        }
-        let port = args.port.ok_or_else(|| {
-            eyre::eyre!(
-                "--port is required when no config file exists at {}",
-                config_path.display()
-            )
-        })?;
+        let systems = if args.system.is_empty() {
+            vec![Systems::RiftboundSql]
+        } else {
+            args.system.clone()
+        };
+        let port = args.port.unwrap_or(5234);
         let cfg = ServerConfig {
-            system: args.system.clone(),
+            system: systems,
             port,
             mtg_db_path: Some(
                 db_dir
@@ -376,11 +370,34 @@ async fn main() -> eyre::Result<()> {
             pokemon_db_path: Some(db_dir.join("pokemon.db").to_string_lossy().into_owned()),
             storage_db_path: Some(db_dir.join("storage.db").to_string_lossy().into_owned()),
         };
-        std::fs::create_dir_all(&gathers_dir)?;
-        std::fs::write(&config_path, toml::to_string_pretty(&cfg)?)?;
+        if let Err(e) = std::fs::create_dir_all(&gathers_dir) {
+            eprintln!(
+                "error: cannot create config directory {}: {e}\n  check permissions on {}",
+                gathers_dir.display(),
+                gathers_dir.parent().map(|p| p.display().to_string()).unwrap_or_default()
+            );
+            std::process::exit(1);
+        }
+        if let Err(e) = std::fs::write(&config_path, toml::to_string_pretty(&cfg)?) {
+            eprintln!(
+                "error: cannot write config file {}: {e}\n  check permissions on {}",
+                config_path.display(),
+                gathers_dir.display()
+            );
+            std::process::exit(1);
+        }
         println!("Created config file at {}", config_path.display());
         cfg
     };
+
+    if let Err(e) = std::fs::create_dir_all(&db_dir) {
+        eprintln!(
+            "error: cannot create database directory {}: {e}\n  check permissions on {}",
+            db_dir.display(),
+            gathers_dir.display()
+        );
+        std::process::exit(1);
+    }
 
     // CLI args override config for this session
     if !args.system.is_empty() {
