@@ -40,4 +40,4 @@ ENV MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
 ENV RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
 ENV POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
 
-CMD ["./server"]
+ENTRYPOINT ["/home/app/server"]
