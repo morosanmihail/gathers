@@ -1,0 +1,40 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ghcr.io/morosanmihail/gathers-api:latest
+
+      - name: Build and push Web UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./webui
+          push: true
+          build-args: |
+            REACT_APP_COLLECTIONS_ENABLED=true
+          tags: ghcr.io/morosanmihail/gathers-webui:latest
