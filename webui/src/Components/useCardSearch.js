@@ -14,9 +14,11 @@ export default function useCardSearch({ stringFields, arrayFields = [], startSea
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const hasParams = Object.values(initialOptions).some((v) =>
-    Array.isArray(v) ? v.length > 0 : v !== ""
-  );
+  const hasParams = Object.entries(initialOptions).some(([f, v]) => {
+    if (Array.isArray(v)) return v.length > 0;
+    const defaultVal = defaults[f] ?? "";
+    return v !== "" && v !== defaultVal && searchParams.has(f);
+  });
   const [shouldSearch, setShouldSearch] = useState(startSearch || hasParams);
 
   const handleSearchInput = (event, field) => {

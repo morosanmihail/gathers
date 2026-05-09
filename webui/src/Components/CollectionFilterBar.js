@@ -317,22 +317,24 @@ export default function CollectionFilterBar() {
           </div>
           )}
 
-          <div className="row g-2">
-            <div className="col-auto">
-              <SortControls
-                sortBy={filters.sortBy}
-                sortOrder={filters.sortOrder}
-                fields={SORT_FIELDS}
-                onChange={(field, order) => {
-                  const next = new URLSearchParams(searchParams);
-                  next.set("cf_sortBy", field);
-                  next.set("cf_sortOrder", order);
-                  next.set("page", "1");
-                  setSearchParams(next);
-                }}
-              />
+          {filters.viewMode !== "list" && (
+            <div className="row g-2">
+              <div className="col-auto">
+                <SortControls
+                  sortBy={filters.sortBy}
+                  sortOrder={filters.sortOrder}
+                  fields={SORT_FIELDS}
+                  onChange={(field, order) => {
+                    const next = new URLSearchParams(searchParams);
+                    next.set("cf_sortBy", field);
+                    next.set("cf_sortOrder", order);
+                    next.set("page", "1");
+                    setSearchParams(next);
+                  }}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
