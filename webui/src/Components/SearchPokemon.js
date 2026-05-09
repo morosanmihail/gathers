@@ -112,6 +112,7 @@ function SearchPokemon({ startSearch = false, dedicatedPage = false, sidePanel =
                   card={card}
                   details={card.details}
                   provider="PokemonSQLite"
+                  showCollectionSelect={dedicatedPage && card.details == null}
                 />
               ))}
             </div>

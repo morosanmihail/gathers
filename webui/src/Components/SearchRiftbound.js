@@ -114,6 +114,7 @@ function SearchRiftbound({ startSearch = false, dedicatedPage = false, sidePanel
                   card={card}
                   details={card.details}
                   provider="RiftboundSQLite"
+                  showCollectionSelect={dedicatedPage && card.details == null}
                 />
               ))}
             </div>
