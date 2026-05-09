@@ -407,6 +407,23 @@ async fn main() -> eyre::Result<()> {
         config.port = port;
     }
 
+    // GATHERS_SYSTEMS env var overrides config (comma-separated, e.g. "scryfall,riftbound-sql")
+    if let Ok(val) = std::env::var("GATHERS_SYSTEMS") {
+        let parsed: Vec<Systems> = val
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| {
+                Systems::from_str(s, true).map_err(|e| {
+                    eprintln!("warning: unknown system in GATHERS_SYSTEMS '{s}': {e}");
+                }).ok()
+            })
+            .collect();
+        if !parsed.is_empty() {
+            config.system = parsed;
+        }
+    }
+
     // Env vars override config for DB paths
     let mtg_db_path = std::env::var("MTG_DB_PATH").ok().or(config.mtg_db_path);
     let riftbound_db_path = std::env::var("RIFTBOUND_DB_PATH")

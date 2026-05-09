@@ -466,6 +466,11 @@ cd gathers</code>
     volumes:
       - gathers-data:/home/app/.local/share/gathers/:rw
     environment:
+      # Comma-separated list of systems to enable.
+      # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
+      # Add "sql" for offline MTG (downloads AllPrintings.db on first start).
+      # Add "pokemon-sql" for Pokémon TCG support.
+      - GATHERS_SYSTEMS=riftbound-sql,scryfall
       - STORAGE_DB_PATH=/home/app/.local/share/gathers/DB/storage.db
       - MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
       - RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
@@ -510,6 +515,7 @@ volumes:
           </div>
 
         </div>
+        <p class="install-tab-desc">For more detail on configuration, volumes, and stack managers like Portainer, see the <a href="https://codeberg.org/morosanmihail/gathers/wiki/Docker-Setup" target="_blank" rel="noopener">Docker Setup wiki page</a>.</p>
       </div>
 
     </div>

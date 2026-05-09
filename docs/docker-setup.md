@@ -62,10 +62,56 @@ The Docker container supports the following environment variables (all set by de
 
 | Variable | Default (in container) | Description |
 |---|---|---|
+| `GATHERS_SYSTEMS` | `riftbound-sql,scryfall` | Comma-separated list of systems to enable. Valid values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql` |
 | `MTG_DB_PATH` | `/home/app/.local/share/gathers/DB/AllPrintings.db` | MTG SQLite database |
 | `RIFTBOUND_DB_PATH` | `/home/app/.local/share/gathers/DB/riftbound.db` | Riftbound SQLite database |
 | `POKEMON_DB_PATH` | `/home/app/.local/share/gathers/DB/pokemon.db` | Pokémon SQLite database |
 | `STORAGE_DB_PATH` | `/home/app/.local/share/gathers/DB/storage.db` | User collection database |
+
+## Default Configuration
+
+On first start, the server auto-creates a TOML config file at:
+
+```
+/home/app/.local/share/gathers/server.toml
+```
+
+This file is stored inside the `gathers-data` named volume, so it persists across container restarts. A freshly generated config looks like:
+
+```toml
+system = ["riftbound-sql"]
+port = 5234
+
+mtg_db_path = "/home/app/.local/share/gathers/DB/AllPrintings.db"
+riftbound_db_path = "/home/app/.local/share/gathers/DB/riftbound.db"
+pokemon_db_path = "/home/app/.local/share/gathers/DB/pokemon.db"
+storage_db_path = "/home/app/.local/share/gathers/DB/storage.db"
+```
+
+### Editing the config
+
+**Option 1 — environment variables (recommended for Docker):** set the variables in `docker-compose.yml`. They override the config file each session without editing it.
+
+**Option 2 — edit the file directly:**
+
+```bash
+# Find the volume mount point
+docker volume inspect gathers-data
+
+# Or exec into the running container
+docker exec -it <container-name> sh
+vi /home/app/.local/share/gathers/server.toml
+```
+
+Then restart the container for changes to take effect:
+
+```bash
+docker-compose restart gathers-api
+```
+
+**Priority order** (highest wins): CLI flags → environment variables → `server.toml`.
+
+The `system` field controls which card databases are active. Supported values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql`. Multiple systems can be listed.
 
 ## Ports
 

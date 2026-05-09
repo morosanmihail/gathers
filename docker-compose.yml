@@ -6,6 +6,11 @@ services:
     volumes:
       - gathers-data:/home/app/.local/share/gathers/:rw
     environment:
+      # Comma-separated list of systems to enable.
+      # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
+      # Add "sql" for offline MTG (downloads AllPrintings.db on first start).
+      # Add "pokemon-sql" for Pokémon TCG support.
+      - GATHERS_SYSTEMS=riftbound-sql,scryfall
       - STORAGE_DB_PATH=/home/app/.local/share/gathers/DB/storage.db
       - MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
       - RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db

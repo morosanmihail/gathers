@@ -29,6 +29,7 @@ function Search({ startSearch = false, dedicatedPage = false, sidePanel = false 
   }, [systems, selectedSystem]);
 
   const renderSearch = () => {
+    if (!selectedSystem) return null;
     if (selectedSystem === "RiftboundSQLite") {
       return (
         <SearchRiftbound
