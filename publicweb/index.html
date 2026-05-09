@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GatheRs — Multi-Game Card Management Suite</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a class="nav-brand" href="#">
+        <span class="brand-icon">♦</span>GatheRs
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#webui">Web UI</a></li>
+        <li><a href="#retrieval">Games</a></li>
+        <li><a href="#cli">CLI</a></li>
+        <li><a href="#collections">Collections</a></li>
+        <li><a href="#install">Get Started</a></li>
+      </ul>
+      <div class="nav-repos">
+        <a class="btn btn-ghost" href="https://codeberg.org/morosanmihail/gathers" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.999.747A11.974 11.974 0 0 0 0 12.75c0 2.254.635 4.465 1.833 6.376L11.837 6.19c.072-.092.251-.092.323 0l4.178 5.402h-2.992l.065.239h3.113l.882 1.138h-3.674l.103.374h3.86l.777 1.003h-4.358l.135.483h4.593l.695.894h-5.038l.165.589h5.326l.609.785h-5.717l.182.65h6.038l.562.727h-6.397l.183.65h6.717A12.003 12.003 0 0 0 24 12.75 11.977 11.977 0 0 0 11.999.747zm3.654 19.104.182.65h5.326c.173-.204.353-.433.513-.65zm.385 1.377.18.65h3.563c.233-.198.485-.428.712-.65zm.383 1.377.182.648h1.203c.356-.204.685-.412 1.042-.648z"/></svg>
+          Codeberg
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/morosanmihail/gathers" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          GitHub
+        </a>
+      </div>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">&#9776;</button>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="hero-bg">
+      <div class="hero-orb orb1"></div>
+      <div class="hero-orb orb2"></div>
+      <div class="hero-orb orb3"></div>
+    </div>
+    <div class="container hero-content">
+<h1>GatheRs</h1>
+      <p class="hero-sub">A fast, offline-capable card management suite for <strong>Magic: The Gathering</strong>, <strong>Riftbound</strong>, and <strong>Pokémon TCG</strong>. Rust crates to search by CLI, REST API, or a full React web UI. Or build your own solution on top of the libraries provided!</p>
+      <div class="hero-cta">
+        <a href="#install" class="btn btn-primary">Get Started</a>
+        <a href="#features" class="btn btn-outline">Explore Features</a>
+      </div>
+      <div class="hero-pills">
+        <span class="pill pill-mtg">Magic: The Gathering</span>
+        <span class="pill pill-rift">Riftbound</span>
+        <span class="pill pill-poke">Pokémon TCG</span>
+      </div>
+    </div>
+    <div class="hero-screenshot-wrap">
+      <div class="mock-browser">
+        <div class="browser-bar">
+		<span class="browser-url"><a href="https://demo.gathers.cards/">https://demo.gathers.cards/</a></span>
+          <span class="dot dot-g"></span><span class="dot dot-y"></span><span class="dot dot-r"></span>
+        </div>
+        <img
+          src="images/webui1.png"
+          alt="GatheRs Web UI — card search interface"
+          class="browser-img"
+        />
+      </div>
+    </div>
+  </header>
+
+  <!-- STATS -->
+  <section class="stats-bar">
+    <div class="container stats-inner">
+      <div class="stat">
+        <span class="stat-num">3</span>
+        <span class="stat-label">Card Games</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-num">3</span>
+        <span class="stat-label">Interfaces</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-num">100%</span>
+        <span class="stat-label">Offline Capable</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <span class="stat-num">Rust</span>
+        <span class="stat-label">Backend</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES OVERVIEW -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Everything you need to manage your collection</h2>
+        <p>GatheRs provides a complete toolkit - whether you prefer typing commands, calling an API, or browsing a visual interface.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-search">&#128269;</div>
+          <h3>Powerful Search</h3>
+          <p>Filter by name, color, rarity, set, artist, card text, and more. Searches run locally at native speed - no API rate limits.</p>
+        </div>
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-offline">&#128190;</div>
+          <h3>Offline First</h3>
+          <p>Databases are downloaded or generated on demand.  Keep searching when you have no internet connection. The first download is not offline though, sadly.</p>
+        </div>
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-collection">&#128218;</div>
+	  <h3>Global Collection Tracking</h3>
+	  <p>Manage multiple collections, timestamps, and bulk import/export via CSV. Mix and match cards from all supported games. It's your collection, who am I to tell you not to put that Squirtle next to Jace?</p>
+        </div>
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-multi">&#127183;</div>
+          <h3>Multi-Game</h3>
+          <p>One unified tool for Magic: The Gathering, Riftbound, and Pokémon TCG - with a shared retrieval abstraction layer. Want to add One Piece? Or that old Star Wars TCG? PRs always welcome!</p>
+        </div>
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-api">&#128279;</div>
+          <h3>REST API</h3>
+	  <p>Self-host the server and get all the command line features exposed over HTTP. Build your own integrations with the JSON REST API, documented via OpenAPI/Swagger.</p>
+        </div>
+        <div class="feature-card" data-animate>
+          <div class="feature-icon icon-rust"><svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M23.8346 11.7033l-1.0073-.6236a13.7268 13.7268 0 00-.0283-.2936l.8656-.8069a.3483.3483 0 00-.1154-.578l-1.1066-.414a8.4958 8.4958 0 00-.087-.2856l.6904-.9587a.3462.3462 0 00-.2257-.5446l-1.1663-.1894a9.3574 9.3574 0 00-.1407-.2622l.49-1.0761a.3437.3437 0 00-.0274-.3361.3486.3486 0 00-.3006-.154l-1.1845.0416a6.7444 6.7444 0 00-.1873-.2268l.2723-1.153a.3472.3472 0 00-.417-.4172l-1.1532.2724a14.0183 14.0183 0 00-.2278-.1873l.0415-1.1845a.3442.3442 0 00-.49-.328l-1.076.491c-.0872-.0476-.1742-.0952-.2623-.1407l-.1903-1.1673A.3483.3483 0 0016.256.955l-.9597.6905a8.4867 8.4867 0 00-.2855-.086l-.414-1.1066a.3483.3483 0 00-.5781-.1154l-.8069.8666a9.2936 9.2936 0 00-.2936-.0284L12.2946.1683a.3462.3462 0 00-.5892 0l-.6236 1.0073a13.7383 13.7383 0 00-.2936.0284L9.9803.3374a.3462.3462 0 00-.578.1154l-.4141 1.1065c-.0962.0274-.1903.0567-.2855.086L7.744.955a.3483.3483 0 00-.5447.2258L7.009 2.348a9.3574 9.3574 0 00-.2622.1407l-1.0762-.491a.3462.3462 0 00-.49.328l.0416 1.1845a7.9826 7.9826 0 00-.2278.1873L3.8413 3.425a.3472.3472 0 00-.4171.4171l.2713 1.1531c-.0628.075-.1255.1509-.1863.2268l-1.1845-.0415a.3462.3462 0 00-.328.49l.491 1.0761a9.167 9.167 0 00-.1407.2622l-1.1662.1894a.3483.3483 0 00-.2258.5446l.6904.9587a13.303 13.303 0 00-.087.2855l-1.1065.414a.3483.3483 0 00-.1155.5781l.8656.807a9.2936 9.2936 0 00-.0283.2935l-1.0073.6236a.3442.3442 0 000 .5892l1.0073.6236c.008.0982.0182.1964.0283.2936l-.8656.8079a.3462.3462 0 00.1155.578l1.1065.4141c.0273.0962.0567.1914.087.2855l-.6904.9587a.3452.3452 0 00.2268.5447l1.1662.1893c.0456.088.0922.1751.1408.2622l-.491 1.0762a.3462.3462 0 00.328.49l1.1834-.0415c.0618.0769.1235.1528.1873.2277l-.2713 1.1541a.3462.3462 0 00.4171.4161l1.153-.2713c.075.0638.151.1255.2279.1863l-.0415 1.1845a.3442.3442 0 00.49.327l1.0761-.49c.087.0486.1741.0951.2622.1407l.1903 1.1662a.3483.3483 0 00.5447.2268l.9587-.6904a9.299 9.299 0 00.2855.087l.414 1.1066a.3452.3452 0 00.5781.1154l.8079-.8656c.0972.0111.1954.0203.2936.0294l.6236 1.0073a.3472.3472 0 00.5892 0l.6236-1.0073c.0982-.0091.1964-.0183.2936-.0294l.8069.8656a.3483.3483 0 00.578-.1154l.4141-1.1066a8.4626 8.4626 0 00.2855-.087l.9587.6904a.3452.3452 0 00.5447-.2268l.1903-1.1662c.088-.0456.1751-.0931.2622-.1407l1.0762.49a.3472.3472 0 00.49-.327l-.0415-1.1845a6.7267 6.7267 0 00.2267-.1863l1.1531.2713a.3472.3472 0 00.4171-.416l-.2713-1.1542c.0628-.0749.1255-.1508.1863-.2278l1.1845.0415a.3442.3442 0 00.328-.49l-.49-1.076c.0475-.0872.0951-.1742.1407-.2623l1.1662-.1893a.3483.3483 0 00.2258-.5447l-.6904-.9587.087-.2855 1.1066-.414a.3462.3462 0 00.1154-.5781l-.8656-.8079c.0101-.0972.0202-.1954.0283-.2936l1.0073-.6236a.3442.3442 0 000-.5892zm-6.7413 8.3551a.7138.7138 0 01.2986-1.396.714.714 0 11-.2997 1.396zm-.3422-2.3142a.649.649 0 00-.7715.5l-.3573 1.6685c-1.1035.501-2.3285.7795-3.6193.7795a8.7368 8.7368 0 01-3.6951-.814l-.3574-1.6684a.648.648 0 00-.7714-.499l-1.473.3158a8.7216 8.7216 0 01-.7613-.898h7.1676c.081 0 .1356-.0141.1356-.088v-2.536c0-.074-.0536-.0881-.1356-.0881h-2.0966v-1.6077h2.2677c.2065 0 1.1065.0587 1.394 1.2088.0901.3533.2875 1.5044.4232 1.8729.1346.413.6833 1.2381 1.2685 1.2381h3.5716a.7492.7492 0 00.1296-.0131 8.7874 8.7874 0 01-.8119.9526zM6.8369 20.024a.714.714 0 11-.2997-1.396.714.714 0 01.2997 1.396zM4.1177 8.9972a.7137.7137 0 11-1.304.5791.7137.7137 0 011.304-.579zm-.8352 1.9813l1.5347-.6824a.65.65 0 00.33-.8585l-.3158-.7147h1.2432v5.6025H3.5669a8.7753 8.7753 0 01-.2834-3.348zm6.7343-.5437V8.7836h2.9601c.153 0 1.0792.1772 1.0792.8697 0 .575-.7107.7815-1.2948.7815zm10.7574 1.4862c0 .2187-.008.4363-.0243.651h-.9c-.09 0-.1265.0586-.1265.1477v.413c0 .973-.5487 1.1846-1.0296 1.2382-.4576.0517-.9648-.1913-1.0275-.4717-.2704-1.5186-.7198-1.8436-1.4305-2.4034.8817-.5599 1.799-1.386 1.799-2.4915 0-1.1936-.819-1.9458-1.3769-2.3153-.7825-.5163-1.6491-.6195-1.883-.6195H5.4682a8.7651 8.7651 0 014.907-2.7699l1.0974 1.151a.648.648 0 00.9182.0213l1.227-1.1743a8.7753 8.7753 0 016.0044 4.2762l-.8403 1.8982a.652.652 0 00.33.8585l1.6178.7188c.0283.2875.0425.577.0425.8717zm-9.3006-9.5993a.7128.7128 0 11.984 1.0316.7137.7137 0 01-.984-1.0316zm8.3389 6.71a.7107.7107 0 01.9395-.3625.7137.7137 0 11-.9405.3635z"/></svg></div>
+          <h3>Rust Performance</h3>
+	  <p>We are big Rust fans in this house, so we will rep Rust. Also, it's Rust, so you know it's bug free 100%.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WEB UI -->
+  <section class="section section-alt" id="webui">
+    <div class="container">
+      <div class="section-header">
+        <h2>React Web UI</h2>
+        <p>A full-featured browser app that works alongside the local server. No cloud account needed. Unless you self-host and put some login in front of it. Again, I will not stop you. You do you queen / king / royalty!</p>
+      </div>
+      <div class="showcase-tabs">
+        <button class="tab-btn active" data-tab="search">MtG Search</button>
+        <button class="tab-btn" data-tab="collection">Collection Browser</button>
+        <button class="tab-btn" data-tab="riftbound">Riftbound Search</button>
+	<button class="tab-btn" data-tab="pokemon">Pokemon Search</button>
+      </div>
+      <div class="tab-panels">
+
+        <div class="tab-panel active" id="tab-search">
+          <div class="showcase-row">
+            <div class="showcase-img-wrap">
+              <img src="images/mtgsearch1.png" alt="Magic: The Gathering search interface" class="showcase-img" />
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-collection">
+          <div class="showcase-row">
+            <div class="showcase-img-wrap">
+              <img src="images/webui1.png" alt="Collection browser interface" class="showcase-img" />
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-riftbound">
+          <div class="showcase-row">
+            <div class="showcase-img-wrap">
+              <img src="images/riftboundsearch1.png" alt="Riftbound search interface" class="showcase-img" />
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-pokemon">
+          <div class="showcase-row">
+            <div class="showcase-img-wrap">
+              <img src="images/pokemonsearch1.png" alt="Pokemon search interface" class="showcase-img" />
+            </div>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+  </section>
+
+  <!-- RETRIEVAL SYSTEMS / GAMES -->
+  <section class="section" id="retrieval">
+    <div class="container">
+      <div class="section-header">
+        <h2>Supported Card Games</h2>
+        <p>Each game has a dedicated retrieval system that implements a common interface - making it trivial to add new games in the future.</p>
+      </div>
+      <div class="games-grid">
+
+        <div class="game-card game-mtg" data-animate>
+          <div class="game-header">
+            <span class="game-badge">Magic: The Gathering</span>
+          </div>
+          <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/MagicTheGatheringCards.jpg" alt="Magic: The Gathering cards" class="game-img" />
+          <div class="game-body">
+            <p>Two retrieval modes:</p>
+            <ul>
+              <li><strong>Scryfall API</strong> - live online queries, always up to date</li>
+              <li><strong>Local SQLite</strong> - full <em>AllPrintings.db</em> from mtgjson.com</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="game-card game-rift" data-animate>
+          <div class="game-header">
+            <span class="game-badge">Riftbound</span>
+          </div>
+          <img src="images/riftbound-card.png" alt="Riftbound logo" class="game-img" />
+          <div class="game-body">
+            <p>Dedicated local SQLite database with auto-update from official sources.</p>
+	    <p>Many thanks to <a href="https://github.com/vikkumar2021/RiftboundCardDatabase" target="_blank">vikkumar2021</a> for their amazing work.</p>
+          </div>
+        </div>
+
+        <div class="game-card game-poke" data-animate>
+          <div class="game-header">
+            <span class="game-badge">Pokémon TCG</span>
+          </div>
+          <img src="images/pokemon-cards.jpg" alt="Pokémon TCG cards in play" class="game-img" />
+          <div class="game-body">
+            <p>Local SQLite database for the Pokémon Trading Card Game.</p>
+	    <p>Many thanks to <a href="https://github.com/poketrax/pokedata" target="_blank">PokeTrax</a> for their amazing work.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- CLI -->
+  <section class="section section-alt" id="cli">
+    <div class="container">
+      <div class="section-header">
+        <h2>Command-Line Interface</h2>
+        <p>A first-class CLI for power users. Fast, scriptable, and available everywhere Rust runs.</p>
+      </div>
+      <div class="showcase-row cli-row">
+        <div class="terminal-wrap" data-animate>
+          <div class="terminal">
+            <div class="terminal-bar">
+		    <span class="terminal-title">gsh</span>
+              <span class="dot dot-g"></span><span class="dot dot-y"></span><span class="dot dot-r"></span>
+            </div>
+            <pre class="terminal-body"><span class="t-comment"># Search Magic cards by name + color</span>
+<span class="t-prompt">$</span> gathers --system sql --name "lightning" --color R
+
+<span class="t-comment"># Search Pokémon by energy type</span>
+<span class="t-prompt">$</span> gathers --system pokemon --energy Fire
+
+<span class="t-comment"># Search Riftbound by domain</span>
+<span class="t-prompt">$</span> gathers --system riftbound-sql --domain Fury --domain Mind
+
+<span class="t-comment"># Download / update databases</span>
+<span class="t-prompt">$</span> gathers --download
+
+<span class="t-comment"># Paginate results</span>
+<span class="t-prompt">$</span> gathers --name "bolt" --limit 10 --offset 20
+
+<span class="t-output">NAME                 SET  NUM  RARITY   ARTIST
+Lightning Bolt       LEA  183  Common   Christopher Rush
+Chain Lightning      LEA   51  Common   Brian Snoddy
+…</span></pre>
+          </div>
+        </div>
+        <div class="showcase-text" data-animate>
+          <h3>Full Filter Support</h3>
+          <ul class="feature-list">
+            <li>Card name (wildcard / partial match)</li>
+            <li>Color identity flags (<code>--color W</code>, <code>--color U</code>, …)</li>
+            <li>Rarity, set code, collector number</li>
+            <li>Artist name and card rules text</li>
+            <li>Card types, supertypes, and subtypes</li>
+            <li>Game-specific filters (domains, energy types)</li>
+            <li>Pagination via <code>--limit</code> and <code>--offset</code></li>
+            <li>Pretty-printed aligned table output</li>
+          </ul>
+          <div class="install-block">
+            <h4>Quick install</h4>
+            <code class="code-block">cargo install --git https://codeberg.org/morosanmihail/gathers gathers</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLLECTIONS -->
+  <section class="section" id="collections">
+    <div class="container">
+      <div class="section-header">
+        <h2>Collection Management</h2>
+        <p>Track every card you own across all supported games in a local SQLite database you fully control.</p>
+      </div>
+      <div class="collections-layout">
+        <div class="collection-features" data-animate>
+          <div class="coll-item">
+            <div class="coll-icon">&#128218;</div>
+            <div>
+              <strong>Multiple Collections</strong>
+              <p>Create unlimited named collections. "Main Deck", "Binder", "Trade Pile", whatever you need.</p>
+            </div>
+          </div>
+          <div class="coll-item">
+            <div class="coll-icon">&#128260;</div>
+            <div>
+              <strong>Move &amp; Merge</strong>
+              <p>Move selected cards or entire collections between named buckets.</p>
+            </div>
+          </div>
+          <div class="coll-item">
+            <div class="coll-icon">&#128196;</div>
+            <div>
+              <strong>Import / Export</strong>
+              <p>Bulk-import from CSV. Export any collection as a downloadable file for backup or sharing.</p>
+            </div>
+          </div>
+          <div class="coll-item">
+            <div class="coll-icon">&#128274;</div>
+            <div>
+              <strong>Local & Private</strong>
+              <p>All data lives wherever you let it live. No cloud, no account, no tracking.</p>
+            </div>
+          </div>
+        </div>
+        <div class="collection-screenshot" data-animate>
+          <img src="images/collection1.png" alt="Collection management screenshot" class="showcase-img" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- API -->
+  <section class="section section-alt" id="api">
+    <div class="container">
+      <div class="section-header">
+        <h2>REST API</h2>
+	<p>Spin up just the backend API. All functionality is exposed over HTTP. Documented via <a href="api.json" class="inline-link">OpenAPI / Swagger</a>.</p>
+      </div>
+      <div class="api-grid">
+        <div class="api-group" data-animate>
+          <h4 class="api-group-title api-mtg">MTG Routes</h4>
+          <ul class="api-list">
+            <li><span class="method post">POST</span> <code>/mtg/cards/search</code></li>
+            <li><span class="method get">GET</span> <code>/mtg/cards</code></li>
+            <li><span class="method get">GET</span> <code>/mtg/sets</code></li>
+            <li><span class="method get">GET</span> <code>/mtg/update</code></li>
+          </ul>
+        </div>
+        <div class="api-group" data-animate>
+          <h4 class="api-group-title api-rift">Riftbound Routes</h4>
+          <ul class="api-list">
+            <li><span class="method post">POST</span> <code>/riftbound/cards/search</code></li>
+            <li><span class="method get">GET</span> <code>/riftbound/cards</code></li>
+            <li><span class="method get">GET</span> <code>/riftbound/sets</code></li>
+            <li><span class="method get">GET</span> <code>/riftbound/update</code></li>
+          </ul>
+        </div>
+        <div class="api-group" data-animate>
+          <h4 class="api-group-title api-poke">Pokémon Routes</h4>
+          <ul class="api-list">
+            <li><span class="method post">POST</span> <code>/pokemon/cards/search</code></li>
+            <li><span class="method get">GET</span> <code>/pokemon/cards</code></li>
+            <li><span class="method get">GET</span> <code>/pokemon/sets</code></li>
+            <li><span class="method get">GET</span> <code>/pokemon/update</code></li>
+          </ul>
+        </div>
+        <div class="api-group" data-animate>
+          <h4 class="api-group-title api-coll">Collection Routes</h4>
+          <ul class="api-list">
+            <li><span class="method get">GET</span> <code>/collection/list</code></li>
+            <li><span class="method post">POST</span> <code>/collection/add</code></li>
+            <li><span class="method post">POST</span> <code>/collection/remove/{id}</code></li>
+            <li><span class="method post">POST</span> <code>/collection/move/{id}</code></li>
+            <li><span class="method get">GET</span> <code>/collection/cards/{id}/list</code></li>
+            <li><span class="method get">GET</span> <code>/collection/cards/{id}/count</code></li>
+            <li><span class="method post">POST</span> <code>/collection/cards/{id}/add</code></li>
+            <li><span class="method post">POST</span> <code>/collection/cards/{id}/delete</code></li>
+            <li><span class="method post">POST</span> <code>/collection/search</code></li>
+            <li><span class="method post">POST</span> <code>/collection/import</code></li>
+            <li><span class="method get">GET</span> <code>/collection/export/{id}</code></li>
+          </ul>
+        </div>
+              </div>
+    </div>
+  </section>
+
+  <!-- GET STARTED / INSTALL -->
+  <section class="section" id="install">
+    <div class="container">
+      <div class="section-header">
+        <h2>Get Started</h2>
+        <p>Choose your preferred setup method.</p>
+      </div>
+
+      <div class="install-tabs">
+        <button class="install-tab-btn" data-install-tab="source">From Source</button>
+        <button class="install-tab-btn active" data-install-tab="docker">Docker Compose</button>
+      </div>
+
+      <div class="install-tab-panel" id="install-tab-source">
+        <p class="install-tab-desc">GatheRs is a Cargo workspace. You need a stable Rust toolchain and Node.js (for the web UI).</p>
+        <div class="install-steps">
+
+          <div class="install-step" data-animate>
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Clone the repo</h4>
+              <code class="code-block">git clone https://codeberg.org/morosanmihail/gathers.git
+cd gathers</code>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Download the MTG database</h4>
+              <code class="code-block">cargo run --bin gathers -- --download</code>
+              <p class="step-note">This fetches <em>AllPrintings.db</em> from mtgjson.com and verifies the SHA-256 checksum.</p>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Start the API server</h4>
+              <code class="code-block">cargo run --bin server -- --system sql riftbound-sql pokemon-sql --port 5234</code>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Start the web UI</h4>
+              <code class="code-block">cd webui &amp;&amp; npm install &amp;&amp; npm start</code>
+              <p class="step-note">Opens at <code>http://localhost:3000</code>. API requests proxy automatically to port 5234.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="install-tab-panel active" id="install-tab-docker">
+        <p class="install-tab-desc">No Rust toolchain needed. Runs the pre-built API and web UI images via Docker Compose.</p>
+        <div class="install-steps">
+
+          <div class="install-step" data-animate>
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h4>Save <code>docker-compose.yml</code></h4>
+              <code class="code-block">services:
+  gathers-api:
+    image: ghcr.io/morosanmihail/gathers-api:latest
+    ports:
+      - "5234:5234"
+    volumes:
+      - gathers-data:/home/app/.local/share/gathers/:rw
+    environment:
+      - STORAGE_DB_PATH=/home/app/.local/share/gathers/DB/storage.db
+      - MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
+      - RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
+      - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
+    restart: unless-stopped
+
+  gathers-webui:
+    image: ghcr.io/morosanmihail/gathers-webui:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gathers-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  gathers-data:</code>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h4>Launch services</h4>
+              <code class="code-block">docker-compose up -d</code>
+              <p class="step-note">The MTG database is downloaded automatically on first startup. Card data is persisted in the <code>gathers-data</code> volume.</p>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <h4>Open the web UI</h4>
+              <code class="code-block">http://localhost:3000</code>
+              <p class="step-note">API available at <code>http://localhost:5234</code>. Stop with <code>docker-compose down</code>.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- REPOS -->
+  <section class="section section-repos">
+    <div class="container">
+      <div class="section-header">
+        <h2>Source Code</h2>
+        <p>GatheRs is open source. Primary development happens on Codeberg; GitHub is a mirror.</p>
+      </div>
+      <div class="repo-cards">
+        <a class="repo-card" href="https://codeberg.org/morosanmihail/gathers" target="_blank" rel="noopener">
+          <div class="repo-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M11.999.747A11.974 11.974 0 0 0 0 12.75c0 2.254.635 4.465 1.833 6.376L11.837 6.19c.072-.092.251-.092.323 0l4.178 5.402h-2.992l.065.239h3.113l.882 1.138h-3.674l.103.374h3.86l.777 1.003h-4.358l.135.483h4.593l.695.894h-5.038l.165.589h5.326l.609.785h-5.717l.182.65h6.038l.562.727h-6.397l.183.65h6.717A12.003 12.003 0 0 0 24 12.75 11.977 11.977 0 0 0 11.999.747zm3.654 19.104.182.65h5.326c.173-.204.353-.433.513-.65zm.385 1.377.18.65h3.563c.233-.198.485-.428.712-.65zm.383 1.377.182.648h1.203c.356-.204.685-.412 1.042-.648z"/></svg>
+          </div>
+          <div class="repo-info">
+            <strong>Codeberg</strong>
+            <span>codeberg.org/morosanmihail/gathers</span>
+            <span class="repo-tag">Primary</span>
+          </div>
+        </a>
+        <a class="repo-card" href="https://github.com/morosanmihail/gathers" target="_blank" rel="noopener">
+          <div class="repo-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          </div>
+          <div class="repo-info">
+            <strong>GitHub</strong>
+            <span>github.com/morosanmihail/gathers</span>
+            <span class="repo-tag">Mirror</span>
+          </div>
+        </a>
+           </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="brand-icon">♦</span>GatheRs
+        <span class="footer-tagline">Multi-game card management, built in Rust.</span>
+      </div>
+      <nav class="footer-nav">
+        <a href="#features">Features</a>
+        <a href="#webui">Web UI</a>
+        <a href="#retrieval">Games</a>
+        <a href="#cli">CLI</a>
+        <a href="#collections">Collections</a>
+        <a href="#api">API</a>
+        <a href="api.json">OpenAPI</a>
+        <a href="https://codeberg.org/morosanmihail/gathers" target="_blank" rel="noopener">Codeberg</a>
+        <a href="https://github.com/morosanmihail/gathers" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <p class="footer-copy">Open source. No affiliation with Wizards of the Coast, The Pokémon Company, or any card-game publisher.</p>
+      <p class="footer-copy" style="font-size:0.75rem;opacity:0.6;">MTG photo by <a href="https://commons.wikimedia.org/wiki/File:MagicTheGatheringCards.jpg" target="_blank" rel="noopener" style="color:inherit;">Izzy545454</a> via Wikimedia Commons, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:inherit;">CC BY 4.0</a>.</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
