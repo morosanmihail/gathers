@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import Card from "./Card";
 import RiftboundCard from "./RiftboundCard";
 import PokemonCard from "./PokemonCard";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useCollection, usePageNumber } from "./CollectionContext";
 import { useOperations } from "../OperationsContext";
 import { useSelectedCardsDispatch } from "./CardListContexts/SelectedCardsContext";
@@ -19,6 +19,50 @@ import {
 } from "./CardListContexts/RefreshCardListContext";
 import { useCollectionFilters, collectionFiltersActive } from "./CollectionFilterBar";
 
+const HEADER_COLS = [
+  { field: "Name",            label: "Name",   className: "card-list-name" },
+  { field: "SetCode",         label: "Set",    className: "card-list-set" },
+  { field: "Rarity",          label: "Rarity", className: "card-list-rarity" },
+  { field: "Artist",          label: "Artist", className: "card-list-artist" },
+  { field: "Quantity",        label: "Qty",    className: "card-list-qty" },
+];
+
+function ListHeader({ sortBy, sortOrder }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleSort = (field) => {
+    const next = new URLSearchParams(searchParams);
+    if (field === sortBy) {
+      next.set("cf_sortOrder", sortOrder === "Asc" ? "Desc" : "Asc");
+    } else {
+      next.set("cf_sortBy", field);
+      next.set("cf_sortOrder", "Asc");
+    }
+    next.set("page", "1");
+    setSearchParams(next);
+  };
+
+  return (
+    <div className="card-list-header">
+      <span className="card-list-provider-icon" />
+      {HEADER_COLS.map(({ field, label, className }) => {
+        const active = sortBy === field;
+        return (
+          <span
+            key={field}
+            className={`${className} card-list-header-col${active ? " active" : ""}`}
+            onClick={() => handleSort(field)}
+            title={`Sort by ${label}`}
+          >
+            {label}
+            {active && <span className="card-list-sort-arrow">{sortOrder === "Asc" ? " ↑" : " ↓"}</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function CardComponent({ viewMode, systemType, id, details }) {
   const effectiveSystem = details?.provider || systemType;
   if (effectiveSystem === "RiftboundSQLite") {
@@ -29,11 +73,17 @@ function CardComponent({ viewMode, systemType, id, details }) {
   return <Card id={id} details={details} provider={effectiveSystem} listMode={viewMode === "list"} />;
 }
 
+const COLLECTION_SORT_FIELDS = new Set(["TimeAdded", "Quantity", "FoilQuantity", "Provider"]);
+
+function sortIsCardLevel(sortBy) {
+  return sortBy && !COLLECTION_SORT_FIELDS.has(sortBy);
+}
+
 function buildListUrl(collection, filters, pageNumber, systems) {
   const params = new URLSearchParams();
   params.set("offset", String((pageNumber - 1) * pageSize));
   params.set("limit", String(pageSize));
-  if (filters.sortBy && filters.sortBy !== "Name") params.set("sort_by", filters.sortBy);
+  if (filters.sortBy && COLLECTION_SORT_FIELDS.has(filters.sortBy)) params.set("sort_by", filters.sortBy);
   if (filters.sortOrder && filters.sortOrder !== "Asc") params.set("sort_order", filters.sortOrder);
   if (filters.provider) {
     params.set("provider", filters.provider);
@@ -91,12 +141,19 @@ export default function CardList() {
   const refresh = useRefresh();
   const setRefresh = useRefreshCardList();
   const filters = useCollectionFilters();
-  const filtersActive = collectionFiltersActive(filters);
+  const filtersActive = collectionFiltersActive(filters) || sortIsCardLevel(filters.sortBy);
 
   const cards = useCards();
   const cardsDispatch = useCardsDispatch();
   const [loading, setLoading] = useState(true);
   const [cardCount, setCardCount] = useState(0);
+  const [localRefresh, setLocalRefresh] = useState(0);
+
+  useEffect(() => {
+    const handler = () => setLocalRefresh((n) => n + 1);
+    window.addEventListener("gathers:collection-updated", handler);
+    return () => window.removeEventListener("gathers:collection-updated", handler);
+  }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const filterDeps = [
@@ -158,7 +215,7 @@ export default function CardList() {
         .then((data) => setCardCount(data));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collection, pageNumber, refresh, ...filterDeps]);
+  }, [collection, pageNumber, refresh, localRefresh, ...filterDeps]);
 
   const handlePageChange = (event) => {
     navigate("/c/" + collection + "/" + (parseInt(event.selected) + 1) + location.search);
@@ -169,6 +226,9 @@ export default function CardList() {
   return (
     <>
       <div className={viewMode === "list" ? "card-list" : "card-grid list"}>
+        {viewMode === "list" && (
+          <ListHeader sortBy={filters.sortBy} sortOrder={filters.sortOrder} />
+        )}
         {(loading || refresh) && cards.length === 0 ? (
           <p>Loading...</p>
         ) : (

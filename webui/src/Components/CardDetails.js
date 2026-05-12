@@ -37,8 +37,12 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
         body: JSON.stringify(body),
       })
       .then((data) => {
-        cardsDispatch({ type: "added", card: add ? data[0] : data });
-        triggerRefresh(true);
+        if (details != null) {
+          cardsDispatch({ type: "added", card: add ? data[0] : data });
+          triggerRefresh(true);
+        } else {
+          window.dispatchEvent(new CustomEvent("gathers:collection-updated"));
+        }
       });
   };
 

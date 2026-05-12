@@ -47,6 +47,8 @@ pub struct APIRiftboundCard {
     pub name: String,
     #[serde(rename = "setCode")]
     pub set_code: String,
+    #[serde(rename = "collectorNumber")]
+    pub collector_number: String,
     pub rarity: RBRarity,
     pub artists: Vec<String>,
     pub domains: Vec<APICardDomain>,
@@ -60,6 +62,7 @@ impl From<RiftboundCard> for APIRiftboundCard {
             id: value.id,
             name: value.name,
             set_code: value.set_code,
+            collector_number: value.collector_number,
             rarity: value.rarity.into(),
             artists: value.artists,
             domains: value.domains.into_iter().map(Into::into).collect(),

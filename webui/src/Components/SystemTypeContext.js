@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
 import { useOperations } from "../OperationsContext";
 
 const SystemTypeContext = createContext({
@@ -48,10 +48,14 @@ export function SystemTypeProvider({ children }) {
       });
   }, [opsFetch]);
 
+  const setSelectedSearchSystemStable = useCallback(setSelectedSearchSystem, []);
+  const value = useMemo(
+    () => ({ systemType, systems, selectedSearchSystem, setSelectedSearchSystem: setSelectedSearchSystemStable }),
+    [systemType, systems, selectedSearchSystem, setSelectedSearchSystemStable]
+  );
+
   return (
-    <SystemTypeContext.Provider
-      value={{ systemType, systems, selectedSearchSystem, setSelectedSearchSystem }}
-    >
+    <SystemTypeContext.Provider value={value}>
       {children}
     </SystemTypeContext.Provider>
   );

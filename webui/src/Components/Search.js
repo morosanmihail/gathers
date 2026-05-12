@@ -22,11 +22,11 @@ function Search({ startSearch = false, dedicatedPage = false, sidePanel = false 
     const urlSystem = searchParams.get("system");
     if (urlSystem && systems.includes(urlSystem)) {
       if (urlSystem !== selectedSystem) setSelectedSystem(urlSystem);
-    } else if (selectedSystem) {
+    } else if (selectedSystem && searchParams.get("system") !== selectedSystem) {
       setSearchParams((prev) => { prev.set("system", selectedSystem); return prev; }, { replace: true });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systems, selectedSystem]);
+  }, [systems, selectedSystem, searchParams]);
 
   const renderSearch = () => {
     if (!selectedSystem) return null;
