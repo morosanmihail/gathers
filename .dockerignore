@@ -1,0 +1,21 @@
+# Rust build artifacts
+target/
+
+# Node
+node_modules/
+webui/node_modules/
+webui/build/
+
+# Data / databases
+data/
+publicweb/images/
+
+# Docs / dev files
+docs/
+images/
+CLAUDE.md
+.gitea/
+
+# Git
+.git/
+.gitignore

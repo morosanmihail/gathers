@@ -171,6 +171,10 @@ impl PersistenceSystem {
             }
         }
 
+        if cta.is_empty() {
+            return Err(eyre::eyre!("No cards could be resolved from the CSV"));
+        }
+
         let now = chrono::Utc::now();
         let time_added = now.to_rfc3339();
         let collection_id = self.add_collection(collection_name).await?;

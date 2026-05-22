@@ -9,6 +9,7 @@ export default function ImportCards() {
   const triggerRefresh = useRefreshCardList();
 
   const [file, setFile] = useState();
+  const [error, setError] = useState(null);
 
   const handleFileChange = (e) => {
     if (e.target.files) {
@@ -25,16 +26,18 @@ export default function ImportCards() {
     formData.append("file", file);
     formData.append("collection", collection);
 
+    setError(null);
     ops
       .fetch("Importing into " + collection, [], "/collection/import", {
         method: "post",
         body: formData,
       })
-      .then((data) => triggerRefresh(true));
+      .then(() => triggerRefresh(true))
+      .catch((e) => setError(e.message));
   };
 
   return (
-    <form className="d-flex">
+    <form className="d-flex flex-column gap-1">
       <div className="input-group">
         <input
           onChange={handleFileChange}
@@ -51,6 +54,7 @@ export default function ImportCards() {
           Import
         </button>
       </div>
+      {error && <div className="text-danger small">{error}</div>}
     </form>
   );
 }
