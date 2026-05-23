@@ -21,12 +21,14 @@ import { useCollectionFilters, collectionFiltersActive } from "./CollectionFilte
 import { useFetchPrices } from "./CardListContexts/PricesContext";
 
 const HEADER_COLS = [
-  { field: "Name",     label: "Name",   className: "card-list-name",   sortable: true },
-  { field: "SetCode",  label: "Set",    className: "card-list-set",    sortable: true },
-  { field: "Rarity",   label: "Rarity", className: "card-list-rarity", sortable: true },
-  { field: "Artist",   label: "Artist", className: "card-list-artist", sortable: true },
-  { field: null,       label: "Price",  className: "card-list-price",  sortable: false },
-  { field: "Quantity", label: "Qty",    className: "card-list-qty",    sortable: true },
+  { field: "Name",     label: "Name",    className: "card-list-name",    sortable: true },
+  { field: "SetCode",  label: "Set",     className: "card-list-set",     sortable: true },
+  { field: "Rarity",   label: "Rarity",  className: "card-list-rarity",  sortable: true },
+  { field: "Artist",   label: "Artist",  className: "card-list-artist",  sortable: true },
+  { field: null,       label: "Price",    className: "card-list-price",       sortable: false },
+  { field: null,       label: "Non-Foil", className: "card-list-qty-actions", sortable: false },
+  { field: null,       label: "Foil",     className: "card-list-qty-actions", sortable: false },
+  { field: null,       label: "History",  className: "card-list-history",     sortable: false },
 ];
 
 function ListHeader({ sortBy, sortOrder }) {

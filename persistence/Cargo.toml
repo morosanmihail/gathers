@@ -17,5 +17,6 @@ models = { path = "../models/" }
 retrieval = { path = "../retrieval/" }
 rusqlite.workspace = true
 rusqlite_migration.workspace = true
+schemars.workspace = true
 serde.workspace = true
 tokio.workspace = true

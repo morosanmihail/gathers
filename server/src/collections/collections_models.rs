@@ -124,6 +124,8 @@ pub struct CardToAdd {
     pub quantity: i32,
     #[serde(rename = "foilQuantity")]
     pub foil_quantity: i32,
+    #[serde(rename = "purchasePrice", default)]
+    pub purchase_price: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema, PartialEq)]
@@ -220,6 +222,21 @@ pub struct ResultCardInner {
 pub struct ResultCard {
     #[serde(rename = "mtGCard")]
     pub mtg_card: ResultCardInner,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PurchaseHistoryResponse {
+    pub entries: Vec<persistence::PurchaseHistoryEntry>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionValueBreakdown {
+    /// Current market value of all priced cards in the collection.
+    pub total_value: f64,
+    /// Profit (current value − paid) for cards that have purchase history with prices.
+    pub profit: f64,
+    /// Current value of cards that have a price now but no paid price on record.
+    pub untracked_value: f64,
 }
 
 fn empty_string_to_none<'de, D>(deserializer: D) -> Result<Option<APIRarity>, D::Error>

@@ -106,6 +106,48 @@ pub trait PersistenceSystemTrait {
         cards: &[CollectionCard],
         to_collection_id: CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<()>>;
+
+    fn record_purchase(
+        &mut self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+        quantity: i32,
+        foil_quantity: i32,
+        price_per_unit: Option<f64>,
+        provider: &str,
+        recorded_at: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<()>>;
+
+    fn get_purchase_history(
+        &self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<PurchaseHistoryEntry>>>;
+
+    /// Returns purchase summary per card UUID (only entries with non-null price).
+    fn get_collection_purchase_totals(
+        &self,
+        collection_id: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<CardID, PurchaseSummary>>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct PurchaseSummary {
+    /// Sum of price_per_unit * (quantity + foil_quantity) across all paid entries.
+    pub total_paid: f64,
+    /// Total normal units with a recorded price.
+    pub quantity: i32,
+    /// Total foil units with a recorded price.
+    pub foil_quantity: i32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct PurchaseHistoryEntry {
+    pub id: i64,
+    pub quantity: i32,
+    pub foil_quantity: i32,
+    pub price_per_unit: Option<f64>,
+    pub recorded_at: String,
 }
 
 impl PersistenceSystem {

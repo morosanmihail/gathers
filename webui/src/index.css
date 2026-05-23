@@ -218,10 +218,9 @@ code {
 }
 
 .card-list-price {
-    width: 90px;
+    width: 160px;
     flex-shrink: 0;
     font-size: 0.82em;
-    white-space: nowrap;
 }
 
 .price-badge {
@@ -243,6 +242,7 @@ code {
     position: fixed;
     z-index: 9999;
     background-color: #1e1e2e;
+    color: rgba(255, 255, 255, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
     padding: 6px 10px;
@@ -280,9 +280,18 @@ code {
     font-weight: 600;
 }
 
-.card-list-qty,
-.card-list-foil {
+.card-list-qty-actions {
+    width: 170px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.card-list-history {
+    width: 110px;
+    flex-shrink: 0;
+    font-size: 0.82em;
 }
 
 .card-list-header-col {
