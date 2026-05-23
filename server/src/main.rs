@@ -19,11 +19,13 @@ use crate::collections::collection_routes;
 use crate::mtg_api::mtg_routes;
 use crate::pokemon_api::pokemon_routes;
 use crate::riftbound_api::riftbound_routes;
+use crate::settings_api::settings_routes;
 
 mod collections;
 mod mtg_api;
 mod pokemon_api;
 mod riftbound_api;
+mod settings_api;
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ErrorPayload {
@@ -49,6 +51,8 @@ pub struct SystemInfo {
     pub systems: Vec<String>,
     /// Systems whose databases are currently being downloaded, with progress info.
     pub downloading: HashMap<String, DownloadProgressInfo>,
+    /// Whether the server is running in demo mode (settings endpoints disabled).
+    pub demo_mode: bool,
 }
 
 type GathersState = (Arc<Mutex<RetrievalState>>, Arc<Mutex<StorageState>>);
@@ -64,6 +68,8 @@ pub struct RetrievalState {
     mtg_prices_path: Option<String>,
     riftbound_db_path: Option<String>,
     pokemon_db_path: Option<String>,
+    /// Path to the server config file, for settings API.
+    pub config_path: std::path::PathBuf,
     /// Progress trackers for in-progress downloads, keyed by system name.
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
 }
@@ -81,6 +87,7 @@ impl RetrievalState {
         mtg_prices_path: Option<String>,
         riftbound_db_path: Option<String>,
         pokemon_db_path: Option<String>,
+        config_path: std::path::PathBuf,
     ) -> eyre::Result<RetrievalState> {
         let mut state = RetrievalState {
             mtg: None,
@@ -91,6 +98,7 @@ impl RetrievalState {
             mtg_prices_path: mtg_prices_path.clone(),
             riftbound_db_path: riftbound_db_path.clone(),
             pokemon_db_path: pokemon_db_path.clone(),
+            config_path,
             downloading: HashMap::new(),
         };
 
@@ -192,7 +200,8 @@ impl RetrievalState {
                 phase: p.phase.clone(),
             });
         }
-        SystemInfo { system, systems, downloading }
+        let demo_mode = std::env::var("DEMO_MODE").is_ok();
+        SystemInfo { system, systems, downloading, demo_mode }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -312,8 +321,8 @@ pub enum Systems {
     PokemonSql,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct ServerConfig {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
+pub struct ServerConfig {
     system: Vec<Systems>,
     port: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -481,6 +490,7 @@ async fn main() -> eyre::Result<()> {
         mtg_prices_path.clone(),
         riftbound_db_path.clone(),
         pokemon_db_path.clone(),
+        config_path.clone(),
     )?));
 
     if std::env::var("GATHERS_NO_AUTO_UPDATE").is_err() {
@@ -601,6 +611,7 @@ async fn main() -> eyre::Result<()> {
         .nest("/riftbound", riftbound_routes())
         .nest("/pokemon", pokemon_routes())
         .nest("/collection", collection_routes())
+        .nest("/settings", settings_routes())
         .api_route("/system", get(get_system_info))
         .route("/api.json", axum::routing::get(serve_api))
         .route("/swagger", Swagger::new("/api.json").axum_route())

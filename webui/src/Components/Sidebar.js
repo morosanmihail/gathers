@@ -6,7 +6,7 @@ import OperationsTracker from "./CardListNavButtons/OperationsTracker";
 import { useMode } from "../OperationsContext";
 
 function useServerStatus() {
-  const [status, setStatus] = useState({ ready: true, downloading: {} });
+  const [status, setStatus] = useState({ ready: true, downloading: {}, demoMode: false });
 
   useEffect(() => {
     let timeout;
@@ -15,17 +15,17 @@ function useServerStatus() {
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data) {
-            setStatus({ ready: false, downloading: {} });
+            setStatus((s) => ({ ...s, ready: false, downloading: {} }));
             timeout = setTimeout(poll, 3000);
           } else if (data.downloading && Object.keys(data.downloading).length > 0) {
-            setStatus({ ready: false, downloading: data.downloading });
+            setStatus({ ready: false, downloading: data.downloading, demoMode: !!data.demo_mode });
             timeout = setTimeout(poll, 1000);
           } else {
-            setStatus({ ready: true, downloading: {} });
+            setStatus({ ready: true, downloading: {}, demoMode: !!data.demo_mode });
           }
         })
         .catch(() => {
-          setStatus({ ready: false, downloading: {} });
+          setStatus((s) => ({ ...s, ready: false, downloading: {} }));
           timeout = setTimeout(poll, 3000);
         });
     };
@@ -42,6 +42,7 @@ export default function Sidebar() {
   const { mode, collectionsEnabled } = useMode();
   const isSearchOnly = mode === "search-only";
   const serverStatus = useServerStatus();
+  const { demoMode } = serverStatus;
 
   return (
     <header>
@@ -53,7 +54,7 @@ export default function Sidebar() {
             </a>
           </div>
         </nav>
-        <div className="position-sticky">
+        <div className="position-sticky d-flex flex-column" style={{ height: "calc(100vh - 56px)" }}>
           <div
             className="nav flex-column nav-pills me-3"
             role="tablist"
@@ -131,6 +132,13 @@ export default function Sidebar() {
               </React.Fragment>
             )}
           </div>
+          {!demoMode && (
+            <div className="mt-auto px-0 pb-3">
+              <Link to={"/settings"} className="btn btn-outline-secondary w-100">
+                Settings
+              </Link>
+            </div>
+          )}
         </div>
       </nav>
     </header>
