@@ -29,6 +29,21 @@ pub mod collections_models;
 
 use crate::collections::collections_models::Collection;
 
+/// For a card's prices, pick cardmarket if present, else first available retailer.
+/// Returns normal_price * qty + foil_price * foil_qty, falling back across normal/foil as needed.
+fn preferred_price_contribution(prices: &models::CardPrices, qty: i32, foil_qty: i32) -> f64 {
+    let rp = prices
+        .paper
+        .iter()
+        .find(|(k, _)| k.to_lowercase() == "cardmarket")
+        .or_else(|| prices.paper.iter().next())
+        .map(|(_, v)| v);
+    let Some(rp) = rp else { return 0.0 };
+    let normal = rp.normal.or(rp.foil).unwrap_or(0.0);
+    let foil = rp.foil.or(rp.normal).unwrap_or(0.0);
+    normal * qty as f64 + foil * foil_qty as f64
+}
+
 /// Returns all configured retrieval systems, cloned out of the state lock,
 /// keyed by their provider name.
 async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
@@ -870,6 +885,71 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Ok(Json(count))
     }
 
+    async fn collection_total_price(
+        State(state): State<GathersState>,
+        Path(collection_id): Path<String>,
+    ) -> Result<Json<serde_json::Value>, ApiError> {
+        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
+
+        // Fetch all cards in the collection (large limit = no pagination needed in practice).
+        let collection_cards = state
+            .1
+            .lock()
+            .await
+            .storage
+            .get_cards_in_collection_paginated(
+                &collection_id,
+                CollectionCardsParams {
+                    offset: 0,
+                    limit: 100_000,
+                    sort_by: None,
+                    sort_order: None,
+                    provider: None,
+                    providers: vec![],
+                },
+            )
+            .await
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload { error: format!("Failed to get cards. {e}") }),
+            ))?;
+
+        let total_count = collection_cards.len();
+
+        // Group by provider.
+        let mut by_provider: HashMap<String, Vec<models::CollectionCard>> = HashMap::new();
+        for card in collection_cards {
+            by_provider.entry(card.provider.clone()).or_default().push(card);
+        }
+
+        let mut total: f64 = 0.0;
+        let mut priced_count: usize = 0;
+
+        for (provider, cards) in &by_provider {
+            if let Some(retrieval) = retrieval_systems.get(provider) {
+                let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
+                if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
+                    for card in cards {
+                        if let Some(card_prices) = prices_map.get(&card.uuid) {
+                            let contribution =
+                                preferred_price_contribution(card_prices, card.quantity, card.foil_quantity);
+                            if contribution > 0.0 {
+                                total += contribution;
+                                priced_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Json(serde_json::json!({
+            "total": (total * 100.0).round() / 100.0,
+            "priced_count": priced_count,
+            "total_count": total_count,
+        })))
+    }
+
     ApiRouter::new()
         .api_route("/list", get(list))
         .api_route("/add", post(add))
@@ -877,6 +957,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/move/{id}", post(move_to))
         .api_route("/cards/{id}/list", get(cards_get))
         .api_route("/cards/{id}/count", get(collection_cards_count))
+        .api_route("/cards/{id}/total_price", get(collection_total_price))
         .api_route("/cards/{id}/search", post(collection_cards_search))
         .api_route("/cards/{id}/search/count", post(collection_cards_search_count))
         .api_route("/search", post(search_temp))

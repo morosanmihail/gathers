@@ -6,7 +6,6 @@ import ImportCards from "./CardListNavButtons/ImportCards";
 import DeleteCollection from "./CardListNavButtons/DeleteCollection";
 import ExportCollection from "./CardListNavButtons/ExportCollection";
 import QuickSearch from "./CardListNavButtons/QuickSearch";
-
 export default function CardListNav({ onToggleSearch, searchOpen }) {
   return (
     <nav

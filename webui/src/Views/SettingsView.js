@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { CollectionsProvider } from "../Components/CollectionContext";
 import { SystemTypeProvider } from "../Components/SystemTypeContext";
 import Header from "../Components/Layout/Header";
+import { useOperations } from "../OperationsContext";
 
 const SYSTEM_LABELS = {
   Sql: "Magic: The Gathering (SQLite)",
@@ -36,16 +37,16 @@ const PATH_FIELDS = [
 function UpdateButton({ label, endpoint }) {
   const [status, setStatus] = useState(null);
   const [running, setRunning] = useState(false);
+  const ops = useOperations();
 
   const run = useCallback(() => {
     setRunning(true);
     setStatus(null);
-    fetch(endpoint)
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => setStatus({ ok, text: ok ? body : (body.error ?? String(body)) }))
+    ops.fetch(label, null, endpoint)
+      .then((body) => setStatus({ ok: true, text: typeof body === "string" ? body : "Done" }))
       .catch((e) => setStatus({ ok: false, text: e.message }))
       .finally(() => setRunning(false));
-  }, [endpoint]);
+  }, [ops, label, endpoint]);
 
   return (
     <span className="d-inline-flex align-items-center gap-2">

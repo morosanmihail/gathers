@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSystems } from "./SystemTypeContext";
 import SortControls from "./SortControls";
+import CollectionTotalPrice from "./CardListNavButtons/CollectionTotalPrice";
 import "mana-font/css/mana.min.css";
 
 const MTG_COLOURS = [
@@ -138,6 +139,8 @@ export default function CollectionFilterBar() {
             Clear
           </button>
         )}
+
+        <CollectionTotalPrice />
 
         <div className="ms-auto">
           <div className="btn-group btn-group-sm" role="group">
