@@ -113,8 +113,26 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
             .map(|s| Json(s.iter().map(|s| s.code.clone()).collect()))
     }
 
+    async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        let mut ret = state.0.lock().await;
+        let result = {
+            let pokemon = ret.require_pokemon()?;
+            pokemon.update_backend().await
+        };
+        match result.and_then(|_| ret.reload_pokemon()) {
+            Ok(()) => Ok(Json("Update successful".to_string())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to update Pokemon DB. {e}"),
+                }),
+            )),
+        }
+    }
+
     ApiRouter::new()
         .api_route("/cards/search", post(search_pokemon_cards))
         .api_route("/cards", get(retrieve_pokemon_cards))
         .api_route("/sets", get(get_sets))
+        .api_route("/update", get(update))
 }

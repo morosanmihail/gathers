@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { CollectionsProvider } from "../Components/CollectionContext";
 import { SystemTypeProvider } from "../Components/SystemTypeContext";
 import Header from "../Components/Layout/Header";
@@ -12,6 +12,19 @@ const SYSTEM_LABELS = {
 
 const ALL_SYSTEMS = ["Sql", "Scryfall", "RiftboundSql", "PokemonSql"];
 
+const SYSTEM_ACTIONS = {
+  Sql: [
+    { label: "Update DB",     endpoint: "/mtg/update" },
+    { label: "Update Prices", endpoint: "/mtg/prices/update" },
+  ],
+  RiftboundSql: [
+    { label: "Update DB", endpoint: "/riftbound/update" },
+  ],
+  PokemonSql: [
+    { label: "Update DB", endpoint: "/pokemon/update" },
+  ],
+};
+
 const PATH_FIELDS = [
   { key: "mtg_db_path",       label: "MTG Database path" },
   { key: "mtg_prices_path",   label: "MTG Prices path" },
@@ -19,6 +32,38 @@ const PATH_FIELDS = [
   { key: "pokemon_db_path",   label: "Pokémon Database path" },
   { key: "storage_db_path",   label: "Storage Database path" },
 ];
+
+function UpdateButton({ label, endpoint }) {
+  const [status, setStatus] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  const run = useCallback(() => {
+    setRunning(true);
+    setStatus(null);
+    fetch(endpoint)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => setStatus({ ok, text: ok ? body : (body.error ?? String(body)) }))
+      .catch((e) => setStatus({ ok: false, text: e.message }))
+      .finally(() => setRunning(false));
+  }, [endpoint]);
+
+  return (
+    <span className="d-inline-flex align-items-center gap-2">
+      <button
+        className="btn btn-sm btn-outline-secondary"
+        onClick={run}
+        disabled={running}
+      >
+        {running ? "Running…" : label}
+      </button>
+      {status && (
+        <span className={`small ${status.ok ? "text-success" : "text-danger"}`}>
+          {status.text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function SettingsView() {
   const [config, setConfig] = useState(null);
@@ -30,26 +75,18 @@ export default function SettingsView() {
   useEffect(() => {
     fetch("/settings")
       .then((r) => {
-        if (r.status === 403) {
-          setDemoMode(true);
-          return null;
-        }
+        if (r.status === 403) { setDemoMode(true); return null; }
         if (!r.ok) throw new Error(`Failed to load settings (${r.status})`);
         return r.json();
       })
-      .then((data) => {
-        if (data) setConfig(data);
-      })
+      .then((data) => { if (data) setConfig(data); })
       .catch((e) => setError(e.message));
   }, []);
 
   const toggleSystem = (system) => {
     setConfig((prev) => {
       const has = prev.system.includes(system);
-      return {
-        ...prev,
-        system: has ? prev.system.filter((s) => s !== system) : [...prev.system, system],
-      };
+      return { ...prev, system: has ? prev.system.filter((s) => s !== system) : [...prev.system, system] };
     });
     setSaved(false);
   };
@@ -77,10 +114,7 @@ export default function SettingsView() {
         if (!r.ok) return r.json().then((b) => { throw new Error(b.error || `Save failed (${r.status})`); });
         return r.json();
       })
-      .then((data) => {
-        setConfig(data);
-        setSaved(true);
-      })
+      .then((data) => { setConfig(data); setSaved(true); })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
   };
@@ -90,92 +124,90 @@ export default function SettingsView() {
       <SystemTypeProvider>
         <Header />
         <main>
-      <div className="container-fluid py-4" style={{ maxWidth: 720 }}>
-        <h4 className="mb-4">Settings</h4>
+          <div className="container-fluid py-4" style={{ maxWidth: 720 }}>
+            <h4 className="mb-4">Settings</h4>
 
-        {demoMode && (
-          <div className="alert alert-warning">
-            Settings are disabled in demo mode.
-          </div>
-        )}
+            {demoMode && <div className="alert alert-warning">Settings are disabled in demo mode.</div>}
+            {error && <div className="alert alert-danger">{error}</div>}
+            {!demoMode && !config && !error && <p className="text-muted">Loading…</p>}
 
-        {error && (
-          <div className="alert alert-danger">{error}</div>
-        )}
-
-        {!demoMode && !config && !error && (
-          <p className="text-muted">Loading…</p>
-        )}
-
-        {config && (
-          <>
-            <div className="card border-secondary mb-4">
-              <div className="card-header">Systems</div>
-              <div className="card-body">
-                {ALL_SYSTEMS.map((system) => (
-                  <div key={system} className="form-check mb-2">
-                    <input
-                      type="checkbox"
-                      id={`sys-${system}`}
-                      className="form-check-input"
-                      checked={config.system.includes(system)}
-                      onChange={() => toggleSystem(system)}
-                    />
-                    <label htmlFor={`sys-${system}`} className="form-check-label">
-                      {SYSTEM_LABELS[system] ?? system}
-                    </label>
+            {config && (
+              <>
+                <div className="card border-secondary mb-4">
+                  <div className="card-header">Systems</div>
+                  <div className="card-body">
+                    {ALL_SYSTEMS.map((system) => {
+                      const actions = SYSTEM_ACTIONS[system];
+                      return (
+                        <div key={system} className="d-flex align-items-center gap-3 mb-2">
+                          <div className="form-check mb-0">
+                            <input
+                              type="checkbox"
+                              id={`sys-${system}`}
+                              className="form-check-input"
+                              checked={config.system.includes(system)}
+                              onChange={() => toggleSystem(system)}
+                            />
+                            <label htmlFor={`sys-${system}`} className="form-check-label">
+                              {SYSTEM_LABELS[system] ?? system}
+                            </label>
+                          </div>
+                          {actions && (
+                            <div className="d-flex gap-2 ms-auto">
+                              {actions.map(({ label, endpoint }) => (
+                                <UpdateButton key={endpoint} label={label} endpoint={endpoint} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="card border-secondary mb-4">
-              <div className="card-header">Server</div>
-              <div className="card-body">
-                <div className="mb-3">
-                  <label className="form-label small text-muted">Port</label>
-                  <input
-                    type="number"
-                    className="form-control form-control-sm"
-                    value={config.port}
-                    onChange={(e) => setPort(e.target.value)}
-                    style={{ maxWidth: 120 }}
-                  />
                 </div>
-              </div>
-            </div>
 
-            <div className="card border-secondary mb-4">
-              <div className="card-header">File paths</div>
-              <div className="card-body">
-                {PATH_FIELDS.map(({ key, label }) => (
-                  <div key={key} className="mb-3">
-                    <label className="form-label small text-muted">{label}</label>
-                    <input
-                      type="text"
-                      className="form-control form-control-sm font-monospace"
-                      value={config[key] ?? ""}
-                      onChange={(e) => setPath(key, e.target.value)}
-                      placeholder="(not set)"
-                    />
+                <div className="card border-secondary mb-4">
+                  <div className="card-header">Server</div>
+                  <div className="card-body">
+                    <div className="mb-0">
+                      <label className="form-label small text-muted">Port</label>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        value={config.port}
+                        onChange={(e) => setPort(e.target.value)}
+                        style={{ maxWidth: 120 }}
+                      />
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            <div className="d-flex align-items-center gap-3">
-              <button
-                className="btn btn-primary"
-                onClick={save}
-                disabled={saving}
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
-              {saved && <span className="text-success small">Saved. Restart the server for changes to take effect.</span>}
-            </div>
-          </>
-        )}
-      </div>
+                <div className="card border-secondary mb-4">
+                  <div className="card-header">File paths</div>
+                  <div className="card-body">
+                    {PATH_FIELDS.map(({ key, label }) => (
+                      <div key={key} className="mb-3">
+                        <label className="form-label small text-muted">{label}</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm font-monospace"
+                          value={config[key] ?? ""}
+                          onChange={(e) => setPath(key, e.target.value)}
+                          placeholder="(not set)"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="d-flex align-items-center gap-3">
+                  <button className="btn btn-primary" onClick={save} disabled={saving}>
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  {saved && <span className="text-success small">Saved. Restart the server for changes to take effect.</span>}
+                </div>
+              </>
+            )}
+          </div>
         </main>
       </SystemTypeProvider>
     </CollectionsProvider>
