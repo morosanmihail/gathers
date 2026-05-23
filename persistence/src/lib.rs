@@ -301,7 +301,7 @@ mod tests {
             SQLitePersistenceSystem::new(true, None).unwrap(),
         );
         let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
-            MagicSQLiteRetrievalSystem::new(None).unwrap(),
+            MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
         );
         s.import_csv("../data/test.csv".to_string(), "New Collection".to_string(), &[r.clone()], Some(sender))
             .await
