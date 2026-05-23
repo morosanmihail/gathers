@@ -3,6 +3,15 @@ import { useCollection, useCollections } from "./CollectionContext";
 import { useOperations, useMode } from "../OperationsContext";
 import { useCardsDispatch } from "../Components/CardListContexts/CardsContext";
 import { useRefreshCardList } from "./CardListContexts/RefreshCardListContext";
+import { usePrices } from "./CardListContexts/PricesContext";
+
+function preferredPrices(cardPrices) {
+  if (!cardPrices?.paper) return null;
+  const rp = Object.entries(cardPrices.paper).find(([k]) => k.toLowerCase() === "cardmarket")?.[1]
+    ?? Object.values(cardPrices.paper)[0];
+  if (!rp || (rp.normal == null && rp.foil == null)) return null;
+  return { normal: rp.normal ?? null, foil: rp.foil ?? null };
+}
 
 export default function CardDetails({ id, details = null, toggleSelected, showCollectionSelect = false }) {
   const ops = useOperations();
@@ -12,6 +21,8 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
   const cardsDispatch = useCardsDispatch();
   const triggerRefresh = useRefreshCardList();
   const [selectedCollection, setSelectedCollection] = useState(null);
+  const prices = usePrices();
+  const price = preferredPrices(prices[id]);
 
   const updateQuantity = (delta, deltaFoil) => {
     let collection = details != null
@@ -48,6 +59,16 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
 
   return (
     <div className="card-img-overlay d-flex" onClick={toggleSelected}>
+      {price && (
+        <div className="d-flex flex-column align-items-end gap-1" style={{ position: "absolute", top: 6, right: 6 }}>
+          {price.normal != null && (
+            <span className="badge bg-success">${price.normal.toFixed(2)}</span>
+          )}
+          {price.foil != null && (
+            <span className="badge" style={{ backgroundColor: "#7c3aed" }}>${price.foil.toFixed(2)} ✦</span>
+          )}
+        </div>
+      )}
       <div className="align-self-center">
         <div className="btn-group-vertical">
           {details != null ? (

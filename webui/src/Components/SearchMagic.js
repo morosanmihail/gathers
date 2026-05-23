@@ -6,6 +6,7 @@ import { useCollections } from "./CollectionContext";
 import useCardSearch from "./useCardSearch";
 import SearchPagination from "./SearchPagination";
 import SortControls from "./SortControls";
+import { useFetchPrices } from "./CardListContexts/PricesContext";
 
 const PAGE_SIZE = 24;
 
@@ -22,6 +23,7 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
   const cardSets = useCardSets();
   const collections = useCollections();
   const { collectionsEnabled } = useMode();
+  const fetchPrices = useFetchPrices();
 
   const [searchCollection, setSearchCollection] = React.useState("");
   const [setCodeFocused, setSetCodeFocused] = React.useState(false);
@@ -68,6 +70,10 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
         setCards(data);
         setLoading(false);
         setShouldSearch(false);
+        const ids = collectionsEnabled
+          ? data.map((c) => c.mtGCard?.id).filter(Boolean)
+          : data.map((c) => c.id).filter(Boolean);
+        fetchPrices(ids);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageNumber, shouldSearch]);
