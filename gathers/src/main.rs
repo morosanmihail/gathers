@@ -134,7 +134,7 @@ async fn main() -> eyre::Result<()> {
             RetrievalSystem::ScryfallRetrievalSystem(retrieval::ScryfallRetrievalSystem {})
         }
         Systems::Sql => RetrievalSystem::MagicSQLiteRetrievalSystem(
-            retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path)?,
+            retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path, None)?,
         ),
         Systems::RiftboundSql => RetrievalSystem::RiftboundSQLiteRetrievalSystem(
             retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path)?,

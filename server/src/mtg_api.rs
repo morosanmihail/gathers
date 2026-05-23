@@ -7,8 +7,8 @@ use aide::axum::{
 use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
-use models::{Card, Set};
-use retrieval::RetrievalSystemTrait;
+use models::{Card, CardPrices, Set};
+use retrieval::RetrievalSystemTrait as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -130,9 +130,51 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         }
     }
 
+    async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        let guard = state.0.lock().await;
+        let mtg = guard.require_mtg()?;
+        match mtg.update_prices().await {
+            Ok(true) => Ok(Json("Price update started".to_string())),
+            Ok(false) => Ok(Json("No price database configured".to_string())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to update prices. {e}"),
+                }),
+            )),
+        }
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    struct BulkPricesQuery {
+        #[serde(default)]
+        ids: Vec<String>,
+    }
+
+    async fn bulk_prices(
+        State(state): State<GathersState>,
+        Query(query): Query<BulkPricesQuery>,
+    ) -> Result<Json<HashMap<String, CardPrices>>, ApiError> {
+        let guard = state.0.lock().await;
+        let mtg = guard.require_mtg()?;
+        mtg.get_bulk_card_prices(query.ids)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorPayload {
+                        error: format!("Failed to retrieve prices. {e}"),
+                    }),
+                )
+            })
+            .map(Json)
+    }
+
     ApiRouter::new()
         .api_route("/cards/search", post(search_mtg_cards))
         .api_route("/cards", get(retrieve_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", get(update))
+        .api_route("/prices", get(bulk_prices))
+        .api_route("/prices/update", get(update_prices))
 }

@@ -4,9 +4,11 @@ use serde::{Deserialize, Serialize};
 pub mod filters;
 pub mod mtg;
 pub mod pokemon;
+pub mod prices;
 pub mod riftbound;
 
 pub use mtg::{CardColour, CardIdentifiers, MagicCard, Rarity};
+pub use prices::{CardPrices, RetailerPrices};
 
 use crate::pokemon::PokemonCard;
 use crate::riftbound::RiftboundCard;

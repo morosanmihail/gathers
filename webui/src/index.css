@@ -217,6 +217,69 @@ code {
     font-size: 0.82em;
 }
 
+.card-list-price {
+    width: 90px;
+    flex-shrink: 0;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.price-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background-color: rgba(40, 167, 69, 0.15);
+    color: #4caf70;
+    font-weight: 600;
+    cursor: default;
+}
+
+.price-badge-foil {
+    background-color: rgba(153, 102, 204, 0.15);
+    color: #b388ff;
+}
+
+.price-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background-color: #1e1e2e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-width: 190px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
+}
+
+.price-tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.price-tooltip-retailer {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.price-tooltip-amounts {
+    display: flex;
+    gap: 8px;
+}
+
+.price-tooltip-normal {
+    color: #4caf70;
+    font-weight: 600;
+}
+
+.price-tooltip-foil {
+    color: #b388ff;
+    font-weight: 600;
+}
+
 .card-list-qty,
 .card-list-foil {
     flex-shrink: 0;

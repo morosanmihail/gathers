@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json, error_handling::HandleErrorLayer, extract::State};
 use clap::{Parser, ValueEnum};
 use persistence::PersistenceSystem;
-use retrieval::{DownloadProgress, NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait};
+use retrieval::{DownloadProgress, NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait as _};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -61,6 +61,7 @@ pub struct RetrievalState {
     /// Which MTG system variant is active (Scryfall or Sql), for reload support.
     mtg_system_type: Option<Systems>,
     mtg_db_path: Option<String>,
+    mtg_prices_path: Option<String>,
     riftbound_db_path: Option<String>,
     pokemon_db_path: Option<String>,
     /// Progress trackers for in-progress downloads, keyed by system name.
@@ -77,6 +78,7 @@ impl RetrievalState {
     pub fn new(
         systems: Vec<Systems>,
         mtg_db_path: Option<String>,
+        mtg_prices_path: Option<String>,
         riftbound_db_path: Option<String>,
         pokemon_db_path: Option<String>,
     ) -> eyre::Result<RetrievalState> {
@@ -86,6 +88,7 @@ impl RetrievalState {
             pokemon: None,
             mtg_system_type: None,
             mtg_db_path: mtg_db_path.clone(),
+            mtg_prices_path: mtg_prices_path.clone(),
             riftbound_db_path: riftbound_db_path.clone(),
             pokemon_db_path: pokemon_db_path.clone(),
             downloading: HashMap::new(),
@@ -104,7 +107,11 @@ impl RetrievalState {
                     && !std::path::Path::new(path).exists() {
                         continue;
                     }
-            let retrieval = Self::new_retrieval(system, db_path)?;
+            let prices_path = match system {
+                Systems::Scryfall | Systems::Sql => mtg_prices_path.clone(),
+                _ => None,
+            };
+            let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
             match system {
                 Systems::Scryfall | Systems::Sql => {
                     state.mtg = Some(retrieval);
@@ -121,13 +128,14 @@ impl RetrievalState {
     pub fn new_retrieval(
         system: Systems,
         retrieval_db_path: Option<String>,
+        prices_db_path: Option<String>,
     ) -> eyre::Result<RetrievalSystem> {
         Ok(match system {
             Systems::Scryfall => {
                 RetrievalSystem::ScryfallRetrievalSystem(retrieval::ScryfallRetrievalSystem::new()?)
             }
             Systems::Sql => RetrievalSystem::MagicSQLiteRetrievalSystem(
-                retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path.clone())?,
+                retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path.clone(), prices_db_path)?,
             ),
             Systems::RiftboundSql => RetrievalSystem::RiftboundSQLiteRetrievalSystem(
                 retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path.clone())?,
@@ -222,7 +230,7 @@ impl RetrievalState {
 
     pub fn reload_mtg(&mut self) -> eyre::Result<()> {
         if let Some(system) = self.mtg_system_type {
-            self.mtg = Some(Self::new_retrieval(system, self.mtg_db_path.clone())?);
+            self.mtg = Some(Self::new_retrieval(system, self.mtg_db_path.clone(), self.mtg_prices_path.clone())?);
         }
         Ok(())
     }
@@ -233,7 +241,11 @@ impl RetrievalState {
             Systems::RiftboundSql => self.riftbound_db_path.clone(),
             Systems::PokemonSql => self.pokemon_db_path.clone(),
         };
-        let retrieval = Self::new_retrieval(system, db_path)?;
+        let prices_path = match system {
+            Systems::Scryfall | Systems::Sql => self.mtg_prices_path.clone(),
+            _ => None,
+        };
+        let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
         match system {
             Systems::Scryfall | Systems::Sql => {
                 self.mtg = Some(retrieval);
@@ -251,6 +263,7 @@ impl RetrievalState {
             self.riftbound = Some(Self::new_retrieval(
                 Systems::RiftboundSql,
                 self.riftbound_db_path.clone(),
+                None,
             )?);
         }
         Ok(())
@@ -261,6 +274,7 @@ impl RetrievalState {
             self.pokemon = Some(Self::new_retrieval(
                 Systems::PokemonSql,
                 self.pokemon_db_path.clone(),
+                None,
             )?);
         }
         Ok(())
@@ -304,6 +318,8 @@ struct ServerConfig {
     port: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtg_db_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mtg_prices_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     riftbound_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -363,6 +379,12 @@ async fn main() -> eyre::Result<()> {
             mtg_db_path: Some(
                 db_dir
                     .join("AllPrintings.db")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            mtg_prices_path: Some(
+                db_dir
+                    .join("AllPricesToday.json")
                     .to_string_lossy()
                     .into_owned(),
             ),
@@ -426,6 +448,21 @@ async fn main() -> eyre::Result<()> {
 
     // Env vars override config for DB paths
     let mtg_db_path = std::env::var("MTG_DB_PATH").ok().or(config.mtg_db_path);
+    let mtg_prices_path = std::env::var("MTG_PRICES_PATH")
+        .ok()
+        .or(config.mtg_prices_path)
+        .or_else(|| {
+            // Derive default from MTG DB path when not explicitly configured
+            // (handles old config files that predate this field).
+            mtg_db_path.as_ref().map(|p| {
+                std::path::Path::new(p)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("AllPricesToday.json")
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        });
     let riftbound_db_path = std::env::var("RIFTBOUND_DB_PATH")
         .ok()
         .or(config.riftbound_db_path);
@@ -441,6 +478,7 @@ async fn main() -> eyre::Result<()> {
     let retrieval = Arc::new(Mutex::new(RetrievalState::new(
         config.system.clone(),
         mtg_db_path.clone(),
+        mtg_prices_path.clone(),
         riftbound_db_path.clone(),
         pokemon_db_path.clone(),
     )?));
@@ -484,7 +522,7 @@ async fn main() -> eyre::Result<()> {
                         retrieval.lock().await.downloading.insert("RiftboundSql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
                         tokio::spawn(async move {
                             println!("Downloading Riftbound DB in background...");
-                            match RetrievalState::new_retrieval(Systems::RiftboundSql, riftbound_db_path) {
+                            match RetrievalState::new_retrieval(Systems::RiftboundSql, riftbound_db_path, None) {
                                 Ok(temp) => match temp.update_backend().await {
                                     Ok(_) => {
                                         let mut state = retrieval.lock().await;
@@ -516,7 +554,7 @@ async fn main() -> eyre::Result<()> {
                         retrieval.lock().await.downloading.insert("PokemonSql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
                         tokio::spawn(async move {
                             println!("Running pokedata scraper in background...");
-                            match RetrievalState::new_retrieval(Systems::PokemonSql, Some(path.clone())) {
+                            match RetrievalState::new_retrieval(Systems::PokemonSql, Some(path.clone()), None) {
                                 Ok(temp) => match temp.update_backend().await {
                                     Ok(_) => {
                                         let mut state = retrieval.lock().await;

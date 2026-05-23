@@ -3,6 +3,7 @@ mod models;
 use std::{
     collections::HashMap,
     fs,
+    io::Read,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -15,11 +16,13 @@ pub struct DownloadProgress {
     pub phase: String,
 }
 
-use ::models::{Card, CardID, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
+use ::models::{Card, CardID, CardPrices, CollectorNumber, RetailerPrices, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
+use flate2::read::GzDecoder;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use models::SqlCard;
 use rusqlite::Connection;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use tokio::sync::Mutex;
@@ -36,14 +39,18 @@ impl NamedRetrievalSystem for MagicSQLiteRetrievalSystem {
 pub struct MagicSQLiteRetrievalSystem {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     db_path: String,
+    prices_path: Option<String>,
+    prices_cache: Arc<Mutex<Option<HashMap<String, CardPrices>>>>,
 }
 
 impl MagicSQLiteRetrievalSystem {
-    pub fn new(db_path: Option<String>) -> eyre::Result<Self> {
+    pub fn new(db_path: Option<String>, prices_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/testPrintings.db".to_string());
         Ok(Self {
             connection: Arc::new(Mutex::new(Connection::open(path.clone())?)),
             db_path: path,
+            prices_path,
+            prices_cache: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -221,6 +228,58 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             .collect())
     }
 
+    async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {
+        let prices_path = match &self.prices_path {
+            Some(p) => p.clone(),
+            None => return Ok(None),
+        };
+        if !PathBuf::from(&prices_path).exists() {
+            return Ok(None);
+        }
+        let mut cache = self.prices_cache.lock().await;
+        if cache.is_none() {
+            *cache = Some(load_prices_file(&prices_path)?);
+        }
+        Ok(cache.as_ref().and_then(|m| m.get(uuid)).cloned())
+    }
+
+    async fn get_bulk_card_prices(
+        &self,
+        uuids: Vec<String>,
+    ) -> eyre::Result<HashMap<String, CardPrices>> {
+        let prices_path = match &self.prices_path {
+            Some(p) => p.clone(),
+            None => return Ok(HashMap::new()),
+        };
+        if !PathBuf::from(&prices_path).exists() {
+            return Ok(HashMap::new());
+        }
+        let mut cache = self.prices_cache.lock().await;
+        if cache.is_none() {
+            *cache = Some(load_prices_file(&prices_path)?);
+        }
+        let result = cache
+            .as_ref()
+            .map(|m| {
+                uuids
+                    .iter()
+                    .filter_map(|id| m.get(id).map(|p| (id.clone(), p.clone())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(result)
+    }
+
+    async fn update_prices(&self) -> eyre::Result<bool> {
+        let prices_path = match &self.prices_path {
+            Some(p) => p.clone(),
+            None => return Ok(false),
+        };
+        download_prices(&prices_path).await?;
+        *self.prices_cache.lock().await = None;
+        Ok(true)
+    }
+
     async fn update_backend(&self) -> eyre::Result<bool> {
         const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite";
         const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.sha256";
@@ -270,6 +329,101 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         }
     }
 }
+
+// ── Price helpers ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct PricesFile {
+    data: HashMap<String, CardPriceEntry>,
+}
+
+#[derive(Deserialize)]
+struct CardPriceEntry {
+    #[serde(default)]
+    paper: HashMap<String, PaperRetailer>,
+}
+
+#[derive(Deserialize)]
+struct PaperRetailer {
+    retail: Option<RetailSection>,
+}
+
+#[derive(Deserialize)]
+struct RetailSection {
+    normal: Option<HashMap<String, f64>>,
+    foil: Option<HashMap<String, f64>>,
+}
+
+fn latest_price(prices: &HashMap<String, f64>) -> Option<f64> {
+    prices.iter().max_by_key(|(date, _)| date.as_str()).map(|(_, p)| *p)
+}
+
+fn entry_to_card_prices(uuid: &str, entry: CardPriceEntry) -> CardPrices {
+    let paper = entry
+        .paper
+        .into_iter()
+        .map(|(retailer, data)| {
+            let normal = data
+                .retail
+                .as_ref()
+                .and_then(|r| r.normal.as_ref())
+                .and_then(latest_price);
+            let foil = data
+                .retail
+                .as_ref()
+                .and_then(|r| r.foil.as_ref())
+                .and_then(latest_price);
+            (retailer, RetailerPrices { normal, foil })
+        })
+        .collect();
+    CardPrices { uuid: uuid.to_string(), paper }
+}
+
+fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardPrices>> {
+    println!("Loading prices from {path}...");
+    let json = fs::read_to_string(path)?;
+    let root: PricesFile = serde_json::from_str(&json)?;
+    let map = root
+        .data
+        .into_iter()
+        .map(|(uuid, entry)| {
+            let prices = entry_to_card_prices(&uuid, entry);
+            (uuid, prices)
+        })
+        .collect();
+    println!("Prices loaded.");
+    Ok(map)
+}
+
+pub async fn download_prices(path: &str) -> eyre::Result<()> {
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.gz";
+
+    let target = PathBuf::from_str(path)?;
+    if let Some(parent) = target.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let temp_dir = tempfile::tempdir()?;
+    let gz_path = temp_dir.path().join("AllPricesToday.json.gz");
+
+    println!("Downloading AllPricesToday.json.gz...");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &gz_path, None, "downloading").await?;
+
+    println!("Decompressing AllPricesToday.json.gz...");
+    let gz_file = fs::File::open(&gz_path)?;
+    let mut decoder = GzDecoder::new(gz_file);
+    let mut json_content = String::new();
+    decoder.read_to_string(&mut json_content)?;
+
+    fs::write(&target, json_content.as_bytes())?;
+    println!("Prices saved to {target:?} ({} bytes).", json_content.len());
+    Ok(())
+}
+
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async fn stream_to_file(
     url: &str,
@@ -373,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_with_none() {
-        let system = MagicSQLiteRetrievalSystem::new(None);
+        let system = MagicSQLiteRetrievalSystem::new(None, None);
         assert!(system.is_ok());
         let system = system.unwrap();
         assert!(!system.db_path.is_empty());
@@ -384,7 +538,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let custom_path = temp_dir.path().join("test.db");
         let system =
-            MagicSQLiteRetrievalSystem::new(Some(custom_path.to_string_lossy().to_string()));
+            MagicSQLiteRetrievalSystem::new(Some(custom_path.to_string_lossy().to_string()), None);
         assert!(system.is_ok());
         let system = system.unwrap();
         assert_eq!(system.db_path, custom_path.to_string_lossy().to_string());
@@ -392,7 +546,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_name_filter() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             name: Some("Goblin King".to_string()),
             ..Default::default()
@@ -405,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_color_identity_filter() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             color_identities: Some(vec![CardColour::Black]),
             ..Default::default()
@@ -418,7 +572,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_artist_filter() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             artist: Some("Jason Chan".to_string()),
             ..Default::default()
@@ -431,7 +585,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_text_filter() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             text: Some("destroy target enchantment".to_string()),
             ..Default::default()
@@ -444,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_set_code_filter() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             set_code: Some("M20".to_string()),
             ..Default::default()
@@ -457,7 +611,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_with_skip_and_limit() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             name: Some("Rule of Law".to_string()),
             ..Default::default()
@@ -470,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_empty_result() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             name: Some("NonExistentCardXYZ123".to_string()),
             ..Default::default()
@@ -483,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_cards_by_ids() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let ids = vec![
             "0003caab-9ff5-5d1a-bc06-976dd0457f19".to_string(),
             "0005d268-3fd0-5424-bc6b-573ecd713aa1".to_string(),
@@ -496,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_cards_by_empty_ids() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let result = system.get_cards_by_ids(vec![]).await;
         assert!(result.is_ok());
         let cards = result.unwrap();
@@ -505,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_sets() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let result = system.get_sets().await;
         assert!(result.is_ok());
         let sets = result.unwrap();
@@ -514,7 +668,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bulk_search_cards() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let cards = vec![
             (
                 SetCode::from_str("TLE").unwrap(),
@@ -533,7 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bulk_search_cards_empty() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let result = system.bulk_search_cards(vec![]).await;
         assert!(result.is_ok());
         let results = result.unwrap();
@@ -542,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_named_retrieval_system_trait() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let name = system.name();
         assert_eq!(name, "MagicSQLite");
     }
@@ -570,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_sort_by_name_asc() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             sort_by: Some(SortField::Name),
             sort_order: Some(SortOrder::Asc),
@@ -586,7 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_sort_by_name_desc() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             sort_by: Some(SortField::Name),
             sort_order: Some(SortOrder::Desc),
@@ -602,7 +756,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_sort_by_rarity_asc() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             sort_by: Some(SortField::Rarity),
             sort_order: Some(SortOrder::Asc),
@@ -618,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_sort_by_set_code() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters = CardSearchFilters {
             sort_by: Some(SortField::SetCode),
             sort_order: Some(SortOrder::Asc),
@@ -634,7 +788,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_cards_default_sort_is_name_asc() {
-        let system = MagicSQLiteRetrievalSystem::new(None).unwrap();
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
         let filters_default = CardSearchFilters::default();
         let filters_explicit = CardSearchFilters {
             sort_by: Some(SortField::Name),
@@ -646,5 +800,346 @@ mod tests {
         let default_names: Vec<_> = default_cards.iter().map(card_name).collect();
         let explicit_names: Vec<_> = explicit_cards.iter().map(card_name).collect();
         assert_eq!(default_names, explicit_names);
+    }
+
+    // ── Price tests ───────────────────────────────────────────────────────────
+
+    // Snapshot of three real UUIDs from AllPricesToday.json (2026-05-22).
+    // uuid-00010d56: foil-only retail entries (no normal for most retailers)
+    // uuid-0001e0d0: normal-only retail entries (no foil anywhere)
+    // uuid-0003caab: both normal and foil; also has an "mtgo" section (should be ignored)
+    // All entries contain "buylist" and "currency" fields that must be silently ignored.
+    const REAL_PRICES_SNAPSHOT: &str = r#"{"data":{"00010d56-fe38-5e35-8aed-518019aa36a5":{"paper":{"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":3.07},"foil":{"2026-05-22":4.44}},"currency":"EUR"},"manapool":{"buylist":{},"retail":{"foil":{"2026-05-22":11.23}},"currency":"USD"},"cardkingdom":{"buylist":{"foil":{"2026-05-22":5.0}},"retail":{"foil":{"2026-05-22":11.99}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"foil":{"2026-05-22":12.63}},"currency":"USD"}}},"0001e0d0-2dcd-5640-aadc-a84765cf5fc9":{"paper":{"cardkingdom":{"buylist":{"normal":{"2026-05-22":4.2}},"retail":{"normal":{"2026-05-22":7.49}},"currency":"USD"},"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":4.78}},"currency":"EUR"},"manapool":{"buylist":{},"retail":{"normal":{"2026-05-22":4.12}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"normal":{"2026-05-22":5.89}},"currency":"USD"}}},"0003caab-9ff5-5d1a-bc06-976dd0457f19":{"paper":{"manapool":{"buylist":{},"retail":{"normal":{"2026-05-22":0.15},"foil":{"2026-05-22":0.48}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"foil":{"2026-05-22":2.04},"normal":{"2026-05-22":0.16}},"currency":"USD"},"cardkingdom":{"buylist":{"foil":{"2026-05-22":0.75}},"retail":{"foil":{"2026-05-22":2.49},"normal":{"2026-05-22":0.35}},"currency":"USD"},"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":0.19},"foil":{"2026-05-22":1.02}},"currency":"EUR"}},"mtgo":{"cardhoarder":{"buylist":{},"retail":{"normal":{"2026-05-22":0.03}},"currency":"USD"}}}}}"#;
+
+    // uuid-alpha/beta used for simple structural tests that don't need real prices.
+    const DUMMY_PRICES_JSON: &str = r#"{
+        "data": {
+            "uuid-alpha": {
+                "paper": {
+                    "cardkingdom": {
+                        "retail": {
+                            "normal": {"2024-01-01": 1.50},
+                            "foil":   {"2024-01-01": 3.00}
+                        }
+                    },
+                    "tcgplayer": {
+                        "retail": {
+                            "normal": {"2024-01-01": 1.25}
+                        }
+                    }
+                }
+            },
+            "uuid-beta": {
+                "paper": {
+                    "cardkingdom": {
+                        "retail": {
+                            "normal": {"2024-01-01": 0.25}
+                        }
+                    }
+                }
+            }
+        }
+    }"#;
+
+    fn write_prices(dir: &TempDir, json: &str) -> String {
+        let path = dir.path().join("prices.json");
+        std::fs::write(&path, json).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    fn write_dummy_prices(dir: &TempDir) -> String {
+        write_prices(dir, DUMMY_PRICES_JSON)
+    }
+
+    fn system_with_prices(prices_path: Option<String>) -> MagicSQLiteRetrievalSystem {
+        MagicSQLiteRetrievalSystem::new(None, prices_path).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system.get_card_prices("uuid-alpha").await.unwrap();
+        assert!(result.is_some());
+        let prices = result.unwrap();
+        assert_eq!(prices.uuid, "uuid-alpha");
+        assert_eq!(prices.paper.len(), 2);
+        let ck = prices.paper.get("cardkingdom").unwrap();
+        assert_eq!(ck.normal, Some(1.50));
+        assert_eq!(ck.foil, Some(3.00));
+        let tcp = prices.paper.get("tcgplayer").unwrap();
+        assert_eq!(tcp.normal, Some(1.25));
+        assert_eq!(tcp.foil, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_not_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system.get_card_prices("uuid-nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_no_prices_path() {
+        let system = system_with_prices(None);
+        let result = system.get_card_prices("uuid-alpha").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_file_missing() {
+        let system = system_with_prices(Some("/tmp/does_not_exist_prices.json".to_string()));
+        let result = system.get_card_prices("uuid-alpha").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_all_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system
+            .get_bulk_card_prices(vec!["uuid-alpha".to_string(), "uuid-beta".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key("uuid-alpha"));
+        assert!(result.contains_key("uuid-beta"));
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_partial_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system
+            .get_bulk_card_prices(vec![
+                "uuid-alpha".to_string(),
+                "uuid-missing".to_string(),
+                "uuid-also-missing".to_string(),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key("uuid-alpha"));
+        assert!(!result.contains_key("uuid-missing"));
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_none_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system
+            .get_bulk_card_prices(vec!["uuid-x".to_string(), "uuid-y".to_string()])
+            .await
+            .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_empty_input() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system.get_bulk_card_prices(vec![]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_no_prices_path() {
+        let system = system_with_prices(None);
+        let result = system
+            .get_bulk_card_prices(vec!["uuid-alpha".to_string()])
+            .await
+            .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_file_missing() {
+        let system = system_with_prices(Some("/tmp/does_not_exist_prices.json".to_string()));
+        let result = system
+            .get_bulk_card_prices(vec!["uuid-alpha".to_string()])
+            .await
+            .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_prices_cache_reuse() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let first = system.get_card_prices("uuid-alpha").await.unwrap();
+        let second = system.get_card_prices("uuid-beta").await.unwrap();
+        // Both calls succeed without error, proving cache is reused after first load.
+        assert!(first.is_some());
+        assert!(second.is_some());
+        assert_eq!(first.unwrap().uuid, "uuid-alpha");
+        assert_eq!(second.unwrap().uuid, "uuid-beta");
+    }
+
+    #[tokio::test]
+    async fn test_update_prices_no_path_returns_false() {
+        let system = system_with_prices(None);
+        let result = system.update_prices().await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_prices_prices_data_correctness() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = write_dummy_prices(&dir);
+        let system = system_with_prices(Some(prices_path));
+
+        let result = system
+            .get_bulk_card_prices(vec!["uuid-alpha".to_string(), "uuid-beta".to_string()])
+            .await
+            .unwrap();
+
+        let beta = result.get("uuid-beta").unwrap();
+        assert_eq!(beta.paper.len(), 1);
+        let ck = beta.paper.get("cardkingdom").unwrap();
+        assert_eq!(ck.normal, Some(0.25));
+        assert_eq!(ck.foil, None);
+    }
+
+    // ── Real-snapshot tests ───────────────────────────────────────────────────
+
+    fn write_real_prices(dir: &TempDir) -> String {
+        write_prices(dir, REAL_PRICES_SNAPSHOT)
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_all_retailers_present() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        let prices = system
+            .get_card_prices("00010d56-fe38-5e35-8aed-518019aa36a5")
+            .await
+            .unwrap()
+            .unwrap();
+        // Four retailers in the paper section.
+        assert_eq!(prices.paper.len(), 4);
+        for retailer in ["cardmarket", "manapool", "cardkingdom", "tcgplayer"] {
+            assert!(prices.paper.contains_key(retailer), "missing {retailer}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_foil_only_retailer() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        let prices = system
+            .get_card_prices("00010d56-fe38-5e35-8aed-518019aa36a5")
+            .await
+            .unwrap()
+            .unwrap();
+        // manapool has only foil retail for this card.
+        let manapool = prices.paper.get("manapool").unwrap();
+        assert_eq!(manapool.foil, Some(11.23));
+        assert_eq!(manapool.normal, None);
+        // cardkingdom also foil-only retail.
+        let ck = prices.paper.get("cardkingdom").unwrap();
+        assert_eq!(ck.foil, Some(11.99));
+        assert_eq!(ck.normal, None);
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_both_normal_and_foil() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        let prices = system
+            .get_card_prices("00010d56-fe38-5e35-8aed-518019aa36a5")
+            .await
+            .unwrap()
+            .unwrap();
+        // cardmarket has both normal and foil retail for this card.
+        let cm = prices.paper.get("cardmarket").unwrap();
+        assert_eq!(cm.normal, Some(3.07));
+        assert_eq!(cm.foil, Some(4.44));
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_normal_only_card() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        let prices = system
+            .get_card_prices("0001e0d0-2dcd-5640-aadc-a84765cf5fc9")
+            .await
+            .unwrap()
+            .unwrap();
+        // All four retailers have normal prices but no foil.
+        assert_eq!(prices.paper.len(), 4);
+        for (_, rp) in &prices.paper {
+            assert!(rp.normal.is_some(), "expected normal price");
+            assert_eq!(rp.foil, None, "expected no foil price");
+        }
+        assert_eq!(prices.paper.get("cardkingdom").unwrap().normal, Some(7.49));
+        assert_eq!(prices.paper.get("tcgplayer").unwrap().normal, Some(5.89));
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_mtgo_section_not_in_paper() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        // uuid-0003caab has an "mtgo" section; it must NOT appear in paper.
+        let prices = system
+            .get_card_prices("0003caab-9ff5-5d1a-bc06-976dd0457f19")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!prices.paper.contains_key("cardhoarder"), "mtgo retailer leaked into paper");
+        assert_eq!(prices.paper.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_bulk_returns_all_three() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        let uuids = vec![
+            "00010d56-fe38-5e35-8aed-518019aa36a5".to_string(),
+            "0001e0d0-2dcd-5640-aadc-a84765cf5fc9".to_string(),
+            "0003caab-9ff5-5d1a-bc06-976dd0457f19".to_string(),
+            "not-in-file".to_string(),
+        ];
+        let result = system.get_bulk_card_prices(uuids).await.unwrap();
+        // 3 found, 1 missing — missing card must not cause failure.
+        assert_eq!(result.len(), 3);
+        assert!(!result.contains_key("not-in-file"));
+    }
+
+    #[tokio::test]
+    async fn test_real_snapshot_buylist_not_in_retail() {
+        let dir = TempDir::new().unwrap();
+        let system = system_with_prices(Some(write_real_prices(&dir)));
+
+        // cardkingdom for uuid-0003caab: retail foil=2.49, normal=0.35.
+        // buylist foil=0.75 must NOT appear as the retail price.
+        let prices = system
+            .get_card_prices("0003caab-9ff5-5d1a-bc06-976dd0457f19")
+            .await
+            .unwrap()
+            .unwrap();
+        let ck = prices.paper.get("cardkingdom").unwrap();
+        assert_eq!(ck.normal, Some(0.35));
+        assert_eq!(ck.foil, Some(2.49));
     }
 }

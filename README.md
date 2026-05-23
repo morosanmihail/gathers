@@ -5,6 +5,9 @@ And Riftbound, apparently.
 And Pokemon, it seems.
 I really do like my modular code.
 
+Contributions always welcome! 
+I spend a lot of time designing the overall system to scale decently, but there are a lot of features I would like this to have, but don't have the time yet. One day, one day.
+
 ![Example of the UI](https://codeberg.org/morosanmihail/hometg/raw/branch/main/images/ui20230628.jpg)
 
 ![Example of the UI, Riftbound](https://codeberg.org/morosanmihail/gathers/raw/branch/main/images/riftbound1.png)

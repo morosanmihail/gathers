@@ -51,6 +51,7 @@ const SYSTEM_LABELS = {
 };
 
 function readFilters(searchParams) {
+  const storedViewMode = localStorage.getItem("cf_viewMode") ?? "grid";
   return {
     name:            searchParams.get("cf_name") ?? "",
     setCode:         searchParams.get("cf_setCode") ?? "",
@@ -60,7 +61,7 @@ function readFilters(searchParams) {
     provider:        searchParams.get("cf_provider") ?? "",
     sortBy:          searchParams.get("cf_sortBy") ?? "Name",
     sortOrder:       searchParams.get("cf_sortOrder") ?? "Asc",
-    viewMode:        searchParams.get("cf_viewMode") ?? "grid",
+    viewMode:        searchParams.get("cf_viewMode") ?? storedViewMode,
     colorIdentities: searchParams.getAll("cf_color"),
     domains:         searchParams.getAll("cf_domain"),
     energyTypes:     searchParams.getAll("cf_energy"),
@@ -143,7 +144,7 @@ export default function CollectionFilterBar() {
             <button
               type="button"
               className={`btn ${filters.viewMode === "grid" ? "btn-secondary" : "btn-outline-secondary"}`}
-              onClick={() => setFilter("cf_viewMode", "grid")}
+              onClick={() => { setFilter("cf_viewMode", "grid"); localStorage.setItem("cf_viewMode", "grid"); }}
               title="Grid view"
             >
               ⊞
@@ -151,7 +152,7 @@ export default function CollectionFilterBar() {
             <button
               type="button"
               className={`btn ${filters.viewMode === "list" ? "btn-secondary" : "btn-outline-secondary"}`}
-              onClick={() => setFilter("cf_viewMode", "list")}
+              onClick={() => { setFilter("cf_viewMode", "list"); localStorage.setItem("cf_viewMode", "list"); }}
               title="List view"
             >
               ☰

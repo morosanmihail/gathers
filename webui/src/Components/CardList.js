@@ -18,13 +18,15 @@ import {
   useRefreshCardList,
 } from "./CardListContexts/RefreshCardListContext";
 import { useCollectionFilters, collectionFiltersActive } from "./CollectionFilterBar";
+import { useFetchPrices } from "./CardListContexts/PricesContext";
 
 const HEADER_COLS = [
-  { field: "Name",            label: "Name",   className: "card-list-name" },
-  { field: "SetCode",         label: "Set",    className: "card-list-set" },
-  { field: "Rarity",          label: "Rarity", className: "card-list-rarity" },
-  { field: "Artist",          label: "Artist", className: "card-list-artist" },
-  { field: "Quantity",        label: "Qty",    className: "card-list-qty" },
+  { field: "Name",     label: "Name",   className: "card-list-name",   sortable: true },
+  { field: "SetCode",  label: "Set",    className: "card-list-set",    sortable: true },
+  { field: "Rarity",   label: "Rarity", className: "card-list-rarity", sortable: true },
+  { field: "Artist",   label: "Artist", className: "card-list-artist", sortable: true },
+  { field: null,       label: "Price",  className: "card-list-price",  sortable: false },
+  { field: "Quantity", label: "Qty",    className: "card-list-qty",    sortable: true },
 ];
 
 function ListHeader({ sortBy, sortOrder }) {
@@ -45,14 +47,14 @@ function ListHeader({ sortBy, sortOrder }) {
   return (
     <div className="card-list-header">
       <span className="card-list-provider-icon" />
-      {HEADER_COLS.map(({ field, label, className }) => {
-        const active = sortBy === field;
+      {HEADER_COLS.map(({ field, label, className, sortable }) => {
+        const active = sortable && sortBy === field;
         return (
           <span
-            key={field}
-            className={`${className} card-list-header-col${active ? " active" : ""}`}
-            onClick={() => handleSort(field)}
-            title={`Sort by ${label}`}
+            key={label}
+            className={`${className}${sortable ? " card-list-header-col" : ""}${active ? " active" : ""}`}
+            onClick={sortable ? () => handleSort(field) : undefined}
+            title={sortable ? `Sort by ${label}` : undefined}
           >
             {label}
             {active && <span className="card-list-sort-arrow">{sortOrder === "Asc" ? " ↑" : " ↓"}</span>}
@@ -145,6 +147,7 @@ export default function CardList() {
 
   const cards = useCards();
   const cardsDispatch = useCardsDispatch();
+  const fetchPrices = useFetchPrices();
   const [loading, setLoading] = useState(true);
   const [cardCount, setCardCount] = useState(0);
   const [localRefresh, setLocalRefresh] = useState(0);
@@ -183,6 +186,10 @@ export default function CardList() {
           setLoading(false);
           setRefresh(false);
           selectedDispatch({ type: "empty" });
+          const mtgIds = data
+            .filter((c) => !c.provider || c.provider === "MagicSQLite")
+            .map((c) => c.id);
+          fetchPrices(mtgIds);
         });
 
       ops
@@ -202,6 +209,10 @@ export default function CardList() {
           setLoading(false);
           setRefresh(false);
           selectedDispatch({ type: "empty" });
+          const mtgIds = data
+            .filter((c) => !c.provider || c.provider === "MagicSQLite")
+            .map((c) => c.id);
+          fetchPrices(mtgIds);
         });
 
       const countParams = new URLSearchParams();

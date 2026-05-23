@@ -3,11 +3,11 @@ mod systems;
 use std::collections::HashMap;
 
 use enum_dispatch::enum_dispatch;
-use models::{CardID, CollectorNumber, SetCode};
+use models::{CardID, CardPrices, CollectorNumber, SetCode};
 pub use systems::pokemon::PokemonSQLiteRetrievalSystem;
 pub use systems::riftsqlite::RiftboundSQLiteRetrievalSystem;
 pub use systems::scryfall::ScryfallRetrievalSystem;
-pub use systems::sqlite::{DownloadProgress, MagicSQLiteRetrievalSystem, download_mtg_db};
+pub use systems::sqlite::{DownloadProgress, MagicSQLiteRetrievalSystem, download_mtg_db, download_prices};
 
 #[enum_dispatch]
 #[derive(Debug, Clone)]
@@ -39,6 +39,21 @@ pub trait RetrievalSystemTrait {
         cards: Vec<(SetCode, CollectorNumber)>,
     ) -> eyre::Result<Vec<(SetCode, CollectorNumber, CardID)>>;
     async fn update_backend(&self) -> eyre::Result<bool>;
+
+    async fn get_card_prices(&self, _uuid: &str) -> eyre::Result<Option<CardPrices>> {
+        Ok(None)
+    }
+
+    async fn get_bulk_card_prices(
+        &self,
+        _uuids: Vec<String>,
+    ) -> eyre::Result<HashMap<String, CardPrices>> {
+        Ok(HashMap::new())
+    }
+
+    async fn update_prices(&self) -> eyre::Result<bool> {
+        Ok(false)
+    }
 }
 
 #[enum_dispatch(RetrievalSystem)]
