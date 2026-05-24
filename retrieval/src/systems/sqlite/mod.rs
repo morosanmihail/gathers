@@ -46,11 +46,20 @@ pub struct MagicSQLiteRetrievalSystem {
 impl MagicSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/testPrintings.db".to_string());
+        let prices_cache = if let Some(ref p) = prices_path {
+            if PathBuf::from(p).exists() {
+                Arc::new(Mutex::new(Some(load_prices_file(p)?)))
+            } else {
+                Arc::new(Mutex::new(None))
+            }
+        } else {
+            Arc::new(Mutex::new(None))
+        };
         Ok(Self {
             connection: Arc::new(Mutex::new(Connection::open(path.clone())?)),
             db_path: path,
             prices_path,
-            prices_cache: Arc::new(Mutex::new(None)),
+            prices_cache,
         })
     }
 }
