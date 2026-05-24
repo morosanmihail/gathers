@@ -4,6 +4,7 @@ import { useOperations, useMode } from "../OperationsContext";
 import { useCardsDispatch } from "../Components/CardListContexts/CardsContext";
 import { useRefreshCardList } from "./CardListContexts/RefreshCardListContext";
 import { usePrices } from "./CardListContexts/PricesContext";
+import { usePricingEnabled } from "./SystemTypeContext";
 
 const ROW_STYLE = {
   background: "rgba(0,0,0,0.45)",
@@ -39,6 +40,7 @@ function preferredPrices(cardPrices) {
 export default function CardDetails({ id, details = null, toggleSelected, showCollectionSelect = false }) {
   const ops = useOperations();
   const { collectionsEnabled } = useMode();
+  const pricingEnabled = usePricingEnabled();
   const currentCollection = useCollection();
   const collections = useCollections();
   const cardsDispatch = useCardsDispatch();
@@ -100,7 +102,7 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
 
   return (
     <div className="card-img-overlay d-flex" onClick={toggleSelected}>
-      {price && (
+      {pricingEnabled && price && (
         <div className="d-flex flex-column align-items-end gap-1" style={{ position: "absolute", top: 6, right: 6 }}>
           {price.normal != null && (
             <span className="badge bg-success">${price.normal.toFixed(2)}</span>
@@ -114,14 +116,14 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
         {details != null ? (
           <>
             <div className="d-flex align-items-center gap-1" style={ROW_STYLE}>
-              <PriceInput value={purchasePriceInput} onChange={setPurchasePriceInput} />
-              <button onClick={() => updateQuantity(1, 0, purchasePriceInput)} className="btn btn-sm btn-outline-success">+</button>
+              {pricingEnabled && <PriceInput value={purchasePriceInput} onChange={setPurchasePriceInput} />}
+              <button onClick={() => updateQuantity(1, 0, pricingEnabled ? purchasePriceInput : "")} className="btn btn-sm btn-outline-success">+</button>
               <span className="badge bg-secondary">{details.quantity}</span>
               <button onClick={() => updateQuantity(-1, 0, "")} className="btn btn-sm btn-outline-danger">-</button>
             </div>
             <div className="d-flex align-items-center gap-1" style={ROW_STYLE}>
-              <PriceInput value={foilPurchasePriceInput} onChange={setFoilPurchasePriceInput} />
-              <button onClick={() => updateQuantity(0, 1, foilPurchasePriceInput)} className="btn btn-sm btn-outline-success">+</button>
+              {pricingEnabled && <PriceInput value={foilPurchasePriceInput} onChange={setFoilPurchasePriceInput} />}
+              <button onClick={() => updateQuantity(0, 1, pricingEnabled ? foilPurchasePriceInput : "")} className="btn btn-sm btn-outline-success">+</button>
               <span className="badge bg-info">{details.foilQuantity}</span>
               <button onClick={() => updateQuantity(0, -1, "")} className="btn btn-sm btn-outline-danger">-</button>
             </div>
@@ -141,12 +143,12 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
               </select>
             )}
             <div className="d-flex align-items-center gap-1" style={ROW_STYLE}>
-              <PriceInput value={purchasePriceInput} onChange={setPurchasePriceInput} />
-              <button onClick={() => updateQuantity(1, 0, purchasePriceInput)} className="btn btn-sm btn-light">Add</button>
+              {pricingEnabled && <PriceInput value={purchasePriceInput} onChange={setPurchasePriceInput} />}
+              <button onClick={() => updateQuantity(1, 0, pricingEnabled ? purchasePriceInput : "")} className="btn btn-sm btn-light">Add</button>
             </div>
             <div className="d-flex align-items-center gap-1" style={ROW_STYLE}>
-              <PriceInput value={foilPurchasePriceInput} onChange={setFoilPurchasePriceInput} />
-              <button onClick={() => updateQuantity(0, 1, foilPurchasePriceInput)} className="btn btn-sm btn-info">Add Foil</button>
+              {pricingEnabled && <PriceInput value={foilPurchasePriceInput} onChange={setFoilPurchasePriceInput} />}
+              <button onClick={() => updateQuantity(0, 1, pricingEnabled ? foilPurchasePriceInput : "")} className="btn btn-sm btn-info">Add Foil</button>
             </div>
           </>
         ) : null}

@@ -19,6 +19,7 @@ import {
 } from "./CardListContexts/RefreshCardListContext";
 import { useCollectionFilters, collectionFiltersActive } from "./CollectionFilterBar";
 import { useFetchPrices } from "./CardListContexts/PricesContext";
+import { usePricingEnabled } from "./SystemTypeContext";
 
 const HEADER_COLS = [
   { field: "Name",     label: "Name",    className: "card-list-name",    sortable: true },
@@ -32,6 +33,7 @@ const HEADER_COLS = [
 ];
 
 function ListHeader({ sortBy, sortOrder }) {
+  const pricingEnabled = usePricingEnabled();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const handleSort = (field) => {
@@ -49,7 +51,9 @@ function ListHeader({ sortBy, sortOrder }) {
   return (
     <div className="card-list-header">
       <span className="card-list-provider-icon" />
-      {HEADER_COLS.map(({ field, label, className, sortable }) => {
+      {HEADER_COLS.filter(({ label }) =>
+        pricingEnabled || (label !== "Price" && label !== "History")
+      ).map(({ field, label, className, sortable }) => {
         const active = sortable && sortBy === field;
         return (
           <span

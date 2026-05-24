@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import ViewProviders from "./ViewProviders";
+import { usePricingEnabled } from "../Components/SystemTypeContext";
 
 function formatDate(iso) {
   const d = new Date(iso);
@@ -10,11 +11,12 @@ function formatDate(iso) {
 
 function PurchaseHistoryContent() {
   const { collection } = useParams();
+  const pricingEnabled = usePricingEnabled();
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!collection) return;
+    if (!collection || !pricingEnabled) return;
     fetch(`/collection/cards/${encodeURIComponent(collection)}/purchase_history`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -48,6 +50,12 @@ function PurchaseHistoryContent() {
           </span>
         )}
       </div>
+
+      {!pricingEnabled && (
+        <div className="alert alert-warning">
+          Pricing is disabled. Enable it in <Link to="/settings">Settings</Link> to track purchase history.
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-danger">{error}</div>

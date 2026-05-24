@@ -66,5 +66,8 @@ async fn post_settings(
             Json(ErrorPayload { error: format!("Failed to write config: {e}") }),
         )
     })?;
+    let mut ret = state.0.lock().await;
+    ret.pricing_enabled = new_config.pricing_enabled;
+    drop(ret);
     Ok(Json(new_config))
 }

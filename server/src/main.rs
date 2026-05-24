@@ -53,6 +53,8 @@ pub struct SystemInfo {
     pub downloading: HashMap<String, DownloadProgressInfo>,
     /// Whether the server is running in demo mode (settings endpoints disabled).
     pub demo_mode: bool,
+    /// Whether pricing support is enabled (market prices, purchase history, etc.).
+    pub pricing_enabled: bool,
 }
 
 type GathersState = (Arc<Mutex<RetrievalState>>, Arc<Mutex<StorageState>>);
@@ -72,6 +74,7 @@ pub struct RetrievalState {
     pub config_path: std::path::PathBuf,
     /// Progress trackers for in-progress downloads, keyed by system name.
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
+    pub pricing_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +91,7 @@ impl RetrievalState {
         riftbound_db_path: Option<String>,
         pokemon_db_path: Option<String>,
         config_path: std::path::PathBuf,
+        pricing_enabled: bool,
     ) -> eyre::Result<RetrievalState> {
         let mut state = RetrievalState {
             mtg: None,
@@ -100,6 +104,7 @@ impl RetrievalState {
             pokemon_db_path: pokemon_db_path.clone(),
             config_path,
             downloading: HashMap::new(),
+            pricing_enabled,
         };
 
         for system in systems {
@@ -201,7 +206,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, downloading, demo_mode }
+        SystemInfo { system, systems, downloading, demo_mode, pricing_enabled: self.pricing_enabled }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -321,10 +326,14 @@ pub enum Systems {
     PokemonSql,
 }
 
+fn default_pricing_enabled() -> bool { true }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct ServerConfig {
     system: Vec<Systems>,
     port: usize,
+    #[serde(default = "default_pricing_enabled")]
+    pub pricing_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtg_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -385,6 +394,7 @@ async fn main() -> eyre::Result<()> {
         let cfg = ServerConfig {
             system: systems,
             port,
+            pricing_enabled: true,
             mtg_db_path: Some(
                 db_dir
                     .join("AllPrintings.db")
@@ -491,6 +501,7 @@ async fn main() -> eyre::Result<()> {
         riftbound_db_path.clone(),
         pokemon_db_path.clone(),
         config_path.clone(),
+        config.pricing_enabled,
     )?));
 
     if std::env::var("GATHERS_NO_AUTO_UPDATE").is_err() {

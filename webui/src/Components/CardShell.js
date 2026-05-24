@@ -8,6 +8,7 @@ import { usePrices } from "./CardListContexts/PricesContext";
 import { useOperations } from "../OperationsContext";
 import { useCardsDispatch } from "./CardListContexts/CardsContext";
 import { useRefreshCardList } from "./CardListContexts/RefreshCardListContext";
+import { usePricingEnabled } from "./SystemTypeContext";
 
 function ProviderIcon({ provider }) {
   if (provider?.includes("Riftbound")) return <span className="card-list-provider-icon" title="Riftbound">⚡</span>;
@@ -69,6 +70,7 @@ function preferredRetailerPrices(cardPrices) {
 }
 
 function PriceCell({ uuid }) {
+  const pricingEnabled = usePricingEnabled();
   const prices = usePrices();
   const cardPrices = prices[uuid];
   const [tooltipPos, setTooltipPos] = useState(null);
@@ -89,6 +91,7 @@ function PriceCell({ uuid }) {
 
   const cancelHide = useCallback(() => clearTimeout(hideTimer.current), []);
 
+  if (!pricingEnabled) return <span className="card-list-price" />;
   const rp = preferredRetailerPrices(cardPrices);
   if (!rp) return <span className="card-list-price" />;
 
@@ -154,20 +157,21 @@ function PurchaseHistoryTooltip({ pos, entries, onMouseEnter, onMouseLeave }) {
 }
 
 function PurchaseHistoryBadge({ collectionId, cardUuid }) {
+  const pricingEnabled = usePricingEnabled();
   const [entries, setEntries] = useState(null);
   const [tooltipPos, setTooltipPos] = useState(null);
   const badgeRef = useRef(null);
   const hideTimer = useRef(null);
 
   useEffect(() => {
-    if (!collectionId || !cardUuid) return;
+    if (!pricingEnabled || !collectionId || !cardUuid) return;
     fetch(
       `/collection/cards/${encodeURIComponent(collectionId)}/purchase_history/${encodeURIComponent(cardUuid)}`
     )
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setEntries(data?.entries ?? []))
       .catch(() => {});
-  }, [collectionId, cardUuid]);
+  }, [pricingEnabled, collectionId, cardUuid]);
 
   const showTooltip = useCallback(() => {
     clearTimeout(hideTimer.current);
@@ -183,6 +187,7 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
 
   const cancelHide = useCallback(() => clearTimeout(hideTimer.current), []);
 
+  if (!pricingEnabled) return null;
   if (!entries || entries.length === 0) return null;
 
   const latest = entries[0];
@@ -214,6 +219,7 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
 }
 
 function QtyActionCell({ id, details, foil }) {
+  const pricingEnabled = usePricingEnabled();
   const ops = useOperations();
   const cardsDispatch = useCardsDispatch();
   const triggerRefresh = useRefreshCardList();
@@ -258,20 +264,22 @@ function QtyActionCell({ id, details, foil }) {
   return (
     <span className="card-list-qty-actions" onClick={(e) => e.stopPropagation()}>
       <span className={`badge ${foil ? "bg-info text-dark" : "bg-secondary"}`}>×{qty}</span>
-      <input
-        type="number"
-        min="0"
-        step="0.01"
-        value={priceInput}
-        placeholder="$"
-        onChange={(e) => setPriceInput(e.target.value)}
-        style={{ width: 54, fontSize: "0.72rem", padding: "1px 3px" }}
-        className="form-control form-control-sm"
-      />
+      {pricingEnabled && (
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={priceInput}
+          placeholder="$"
+          onChange={(e) => setPriceInput(e.target.value)}
+          style={{ width: 54, fontSize: "0.72rem", padding: "1px 3px" }}
+          className="form-control form-control-sm"
+        />
+      )}
       <button
         className="btn btn-sm btn-outline-success"
         style={{ padding: "1px 5px", fontSize: "0.75rem" }}
-        onClick={() => mutate(1, priceInput)}
+        onClick={() => mutate(1, pricingEnabled ? priceInput : "")}
       >+</button>
       <button
         className="btn btn-sm btn-outline-danger"
@@ -283,6 +291,7 @@ function QtyActionCell({ id, details, foil }) {
 }
 
 export default function CardShell({ id, card = null, details = null, provider = null, detailPath, getImagePath, showCollectionSelect = false, listMode = false }) {
+  const pricingEnabled = usePricingEnabled();
   const [_card, setCard] = useState(card);
   const [loadFailed, setLoadFailed] = useState(false);
   const [selected, setSelected] = useState(false);
@@ -332,14 +341,16 @@ export default function CardShell({ id, card = null, details = null, provider = 
             </span>
             <span className="card-list-rarity text-muted">{_card.rarity ?? ""}</span>
             <span className="card-list-artist text-muted">{getArtist(_card)}</span>
-            <PriceCell uuid={id} />
+            {pricingEnabled && <PriceCell uuid={id} />}
             <QtyActionCell id={id} details={details} foil={false} />
             <QtyActionCell id={id} details={details} foil={true} />
-            <span className="card-list-history" onClick={(e) => e.stopPropagation()}>
-              {details != null && (
-                <PurchaseHistoryBadge collectionId={details.collectionId} cardUuid={id} />
-              )}
-            </span>
+            {pricingEnabled && (
+              <span className="card-list-history" onClick={(e) => e.stopPropagation()}>
+                {details != null && (
+                  <PurchaseHistoryBadge collectionId={details.collectionId} cardUuid={id} />
+                )}
+              </span>
+            )}
           </>
         )}
       </div>
