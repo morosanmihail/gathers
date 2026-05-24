@@ -23,7 +23,7 @@ export default function DeleteCollection() {
           .fetch(
             "Deleting collection " + collection,
             {},
-            "/collection/remove/" +
+            "/api/collection/remove/" +
               collection +
               "?keepCardsInCollection=" +
               input,

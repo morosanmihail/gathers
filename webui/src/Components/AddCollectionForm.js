@@ -24,7 +24,7 @@ function AddCollectionForm() {
     event.preventDefault();
     setError(null);
     ops
-      .fetch("Adding new collection", {}, "/collection/add", {
+      .fetch("Adding new collection", {}, "/api/collection/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: newItem }),

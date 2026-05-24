@@ -71,7 +71,7 @@ export default function CardDetails({ id, details = null, toggleSelected, showCo
       : (showCollectionSelect ? (selectedCollection ?? collections[0]?.id ?? currentCollection) : currentCollection);
     let add = parseInt(delta) >= 0 && parseInt(deltaFoil) >= 0;
     let url =
-      "/collection/cards/" + collection + "/" + (add ? "add" : "delete");
+      "/api/collection/cards/" + collection + "/" + (add ? "add" : "delete");
     const parsedPrice = parseFloat(priceInputValue);
     let body = {
       id: id,

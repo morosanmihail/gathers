@@ -42,7 +42,7 @@ export function SystemTypeProvider({ children }) {
   const refreshSystemInfo = useCallback(() => setRefreshTick((n) => n + 1), []);
 
   useEffect(() => {
-    opsFetch("Getting system info", null, "/system", {})
+    opsFetch("Getting system info", null, "/api/system", {})
       .then((r) => {
         if (r && r.system) {
           setSystemType(r.system);

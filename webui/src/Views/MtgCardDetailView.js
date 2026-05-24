@@ -47,7 +47,7 @@ export default function MtgCardDetailView() {
   const { id } = useParams();
   return (
     <CardDetailLayout
-      fetchUrl={`/mtg/cards?ids=${encodeURIComponent(id)}`}
+      fetchUrl={`/api/mtg/cards?ids=${encodeURIComponent(id)}`}
       cardId={id}
       renderImage={renderImage}
       renderRows={renderRows}

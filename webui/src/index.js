@@ -8,7 +8,6 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <BaseApp
     mode={process.env.REACT_APP_MODE || "full"}
-    collectionsEnabled={process.env.REACT_APP_COLLECTIONS_ENABLED === "true"}
   />
 );
 

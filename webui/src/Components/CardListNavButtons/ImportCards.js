@@ -28,7 +28,7 @@ export default function ImportCards() {
 
     setError(null);
     ops
-      .fetch("Importing into " + collection, [], "/collection/import", {
+      .fetch("Importing into " + collection, [], "/api/collection/import", {
         method: "post",
         body: formData,
       })

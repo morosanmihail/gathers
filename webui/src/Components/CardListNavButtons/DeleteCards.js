@@ -23,7 +23,7 @@ export default function DeleteCards() {
             ops.fetch(
               "Removing " + card.id + " from " + collection,
               [],
-              "/collection/cards/" + collection + "/delete",
+              "/api/collection/cards/" + collection + "/delete",
               {
                 method: "post",
                 headers: {

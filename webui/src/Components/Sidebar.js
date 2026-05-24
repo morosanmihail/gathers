@@ -11,7 +11,7 @@ function useServerStatus() {
   useEffect(() => {
     let timeout;
     const poll = () => {
-      fetch("/system")
+      fetch("/api/system")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data) {

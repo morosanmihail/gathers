@@ -58,7 +58,7 @@ export default function CollectionTotalPrice() {
 
   useEffect(() => {
     if (!collection) return;
-    fetch(`/collection/cards/${encodeURIComponent(collection)}/value_breakdown`)
+    fetch(`/api/collection/cards/${encodeURIComponent(collection)}/value_breakdown`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setBreakdown(d))
       .catch(() => setBreakdown(null));

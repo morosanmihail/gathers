@@ -45,7 +45,7 @@ function CardDetailContent({ fetchUrl, cardId, renderImage, renderRows }) {
       })
       .catch(() => setError("Failed to load card."));
 
-    fetch(`/mtg/prices?ids=${encodeURIComponent(cardId)}`)
+    fetch(`/api/mtg/prices?ids=${encodeURIComponent(cardId)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data?.[cardId]) setPrices(data[cardId]); })
       .catch(() => {});

@@ -98,7 +98,7 @@ function buildListUrl(collection, filters, pageNumber, systems) {
   } else if (systems.length > 0) {
     params.set("providers", systems.join(","));
   }
-  return `/collection/cards/${collection}/list?${params.toString()}`;
+  return `/api/collection/cards/${collection}/list?${params.toString()}`;
 }
 
 function buildSearchBody(filters) {
@@ -133,7 +133,7 @@ function buildSearchUrl(collection, filters, pageNumber, systems, isCount = fals
   } else if (systems.length > 0) {
     params.set("providers", systems.join(","));
   }
-  const base = `/collection/cards/${collection}/search`;
+  const base = `/api/collection/cards/${collection}/search`;
   return isCount ? `${base}/count?${params.toString()}` : `${base}?${params.toString()}`;
 }
 
@@ -228,7 +228,7 @@ export default function CardList() {
         countParams.set("providers", systems.join(","));
       }
       ops
-        .fetch("Getting card count in " + collection, 0, `/collection/cards/${collection}/count?${countParams.toString()}`)
+        .fetch("Getting card count in " + collection, 0, `/api/collection/cards/${collection}/count?${countParams.toString()}`)
         .then((data) => setCardCount(data));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

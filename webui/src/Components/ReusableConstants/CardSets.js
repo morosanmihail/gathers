@@ -17,7 +17,7 @@ export function CardSetsProvider({ children }) {
 
   useEffect(() => {
     if (!systems.some((s) => MTG_SYSTEMS.includes(s))) return;
-    opsFetch("Getting all available sets", [], "/mtg/sets").then((data) => {
+    opsFetch("Getting all available sets", [], "/api/mtg/sets").then((data) => {
       setSets([{ code: "", name: "" }, ...data]);
     });
   }, [opsFetch, systems]);

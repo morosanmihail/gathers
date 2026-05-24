@@ -34,7 +34,7 @@ export default function RiftboundCardDetailView() {
   const { id } = useParams();
   return (
     <CardDetailLayout
-      fetchUrl={`/riftbound/cards?ids=${encodeURIComponent(id)}`}
+      fetchUrl={`/api/riftbound/cards?ids=${encodeURIComponent(id)}`}
       cardId={id}
       renderImage={renderImage}
       renderRows={renderRows}

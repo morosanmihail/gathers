@@ -17,7 +17,7 @@ function PurchaseHistoryContent() {
 
   useEffect(() => {
     if (!collection || !pricingEnabled) return;
-    fetch(`/collection/cards/${encodeURIComponent(collection)}/purchase_history`)
+    fetch(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { OperationsProvider, ModeProvider } from "./OperationsContext";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import CardListView from "./Views/CardListView";
@@ -9,7 +9,18 @@ import RiftboundCardDetailView from "./Views/RiftboundCardDetailView";
 import PokemonCardDetailView from "./Views/PokemonCardDetailView";
 import PurchaseHistoryView from "./Views/PurchaseHistoryView";
 
-export default function BaseApp({ mode = "full", collectionsEnabled = false }) {
+export default function BaseApp({ mode = "full" }) {
+  const [collectionsEnabled, setCollectionsEnabled] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/system")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setCollectionsEnabled(data.collections_enabled !== false);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <ModeProvider mode={mode} collectionsEnabled={collectionsEnabled}>
       <OperationsProvider>

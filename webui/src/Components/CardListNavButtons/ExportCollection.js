@@ -6,7 +6,7 @@ export default function ExportCollection() {
 
   return (
     <div className="d-flex">
-      <a href={"/collection/export/" + collection}>
+      <a href={"/api/collection/export/" + collection}>
         <button type="button" className="btn btn-info">
           Export
         </button>

@@ -62,13 +62,13 @@ All config options can also be changed at runtime via the Settings page in the w
 
 ## Retrieval Database
 
-The `sql` system requires the MTG database from www.mtgjson.com. You can trigger a background download via the `/mtg/update` endpoint:
+The `sql` system requires the MTG database from www.mtgjson.com. You can trigger a background download via the `/api/mtg/update` endpoint:
 
 ```bash
-curl http://localhost:5234/mtg/update -H "Accept: application/json"
+curl http://localhost:5234/api/mtg/update -H "Accept: application/json"
 ```
 
 Similarly:
-- Riftbound database: `/riftbound/update`
-- Pokémon database: `/pokemon/update`
-- MTG prices: `/mtg/prices/update`
+- Riftbound database: `/api/riftbound/update`
+- Pokémon database: `/api/pokemon/update`
+- MTG prices: `/api/mtg/prices/update`

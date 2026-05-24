@@ -55,6 +55,8 @@ pub struct SystemInfo {
     pub demo_mode: bool,
     /// Whether pricing support is enabled (market prices, purchase history, etc.).
     pub pricing_enabled: bool,
+    /// Whether collection management is enabled.
+    pub collections_enabled: bool,
 }
 
 type GathersState = (Arc<Mutex<RetrievalState>>, Arc<Mutex<StorageState>>);
@@ -75,6 +77,7 @@ pub struct RetrievalState {
     /// Progress trackers for in-progress downloads, keyed by system name.
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
     pub pricing_enabled: bool,
+    pub collections_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +95,7 @@ impl RetrievalState {
         pokemon_db_path: Option<String>,
         config_path: std::path::PathBuf,
         pricing_enabled: bool,
+        collections_enabled: bool,
     ) -> eyre::Result<RetrievalState> {
         let mut state = RetrievalState {
             mtg: None,
@@ -105,6 +109,7 @@ impl RetrievalState {
             config_path,
             downloading: HashMap::new(),
             pricing_enabled,
+            collections_enabled,
         };
 
         for system in systems {
@@ -206,7 +211,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, downloading, demo_mode, pricing_enabled: self.pricing_enabled }
+        SystemInfo { system, systems, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -327,6 +332,7 @@ pub enum Systems {
 }
 
 fn default_pricing_enabled() -> bool { true }
+fn default_collections_enabled() -> bool { true }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct ServerConfig {
@@ -334,6 +340,8 @@ pub struct ServerConfig {
     port: usize,
     #[serde(default = "default_pricing_enabled")]
     pub pricing_enabled: bool,
+    #[serde(default = "default_collections_enabled")]
+    pub collections_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtg_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -395,6 +403,7 @@ async fn main() -> eyre::Result<()> {
             system: systems,
             port,
             pricing_enabled: true,
+            collections_enabled: true,
             mtg_db_path: Some(
                 db_dir
                     .join("AllPrintings.db")
@@ -502,6 +511,7 @@ async fn main() -> eyre::Result<()> {
         pokemon_db_path.clone(),
         config_path.clone(),
         config.pricing_enabled,
+        config.collections_enabled,
     )?));
 
     if std::env::var("GATHERS_NO_AUTO_UPDATE").is_err() {
@@ -618,12 +628,12 @@ async fn main() -> eyre::Result<()> {
 
     let cors = CorsLayer::permissive();
     let app = ApiRouter::new()
-        .nest("/mtg", mtg_routes())
-        .nest("/riftbound", riftbound_routes())
-        .nest("/pokemon", pokemon_routes())
-        .nest("/collection", collection_routes())
-        .nest("/settings", settings_routes())
-        .api_route("/system", get(get_system_info))
+        .nest("/api/mtg", mtg_routes())
+        .nest("/api/riftbound", riftbound_routes())
+        .nest("/api/pokemon", pokemon_routes())
+        .nest("/api/collection", collection_routes())
+        .nest("/api/settings", settings_routes())
+        .api_route("/api/system", get(get_system_info))
         .route("/api.json", axum::routing::get(serve_api))
         .route("/swagger", Swagger::new("/api.json").axum_route())
         .finish_api(&mut api)

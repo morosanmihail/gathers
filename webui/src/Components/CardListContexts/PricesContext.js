@@ -10,7 +10,7 @@ export function PricesProvider({ children }) {
     if (!ids || ids.length === 0) return;
     try {
       const params = new URLSearchParams(ids.map((id) => ["ids", id]));
-      const res = await fetch(`/mtg/prices?${params.toString()}`);
+      const res = await fetch(`/api/mtg/prices?${params.toString()}`);
       if (!res.ok) return;
       const data = await res.json();
       setPrices((prev) => ({ ...prev, ...data }));

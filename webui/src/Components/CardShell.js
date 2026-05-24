@@ -166,7 +166,7 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
   useEffect(() => {
     if (!pricingEnabled || !collectionId || !cardUuid) return;
     fetch(
-      `/collection/cards/${encodeURIComponent(collectionId)}/purchase_history/${encodeURIComponent(cardUuid)}`
+      `/api/collection/cards/${encodeURIComponent(collectionId)}/purchase_history/${encodeURIComponent(cardUuid)}`
     )
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setEntries(data?.entries ?? []))
@@ -242,7 +242,7 @@ function QtyActionCell({ id, details, foil }) {
 
   const mutate = (delta, priceVal) => {
     const add = delta > 0;
-    const url = `/collection/cards/${encodeURIComponent(details.collectionId)}/${add ? "add" : "delete"}`;
+    const url = `/api/collection/cards/${encodeURIComponent(details.collectionId)}/${add ? "add" : "delete"}`;
     const parsedPrice = parseFloat(priceVal);
     const body = {
       id,

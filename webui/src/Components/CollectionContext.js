@@ -16,7 +16,7 @@ export function CollectionsProvider({ children }) {
 
   useEffect(() => {
     if (!collectionsEnabled) return;
-    opsFetch("Listing collections", [], "/collection/list").then((data) => {
+    opsFetch("Listing collections", [], "/api/collection/list").then((data) => {
       collectionsDispatch({
         type: "overwrite",
         collections: data,

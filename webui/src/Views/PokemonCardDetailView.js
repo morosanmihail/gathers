@@ -33,7 +33,7 @@ export default function PokemonCardDetailView() {
   const { id } = useParams();
   return (
     <CardDetailLayout
-      fetchUrl={`/pokemon/cards?ids=${encodeURIComponent(id)}`}
+      fetchUrl={`/api/pokemon/cards?ids=${encodeURIComponent(id)}`}
       cardId={id}
       renderImage={renderImage}
       renderRows={renderRows}

@@ -68,6 +68,7 @@ async fn post_settings(
     })?;
     let mut ret = state.0.lock().await;
     ret.pricing_enabled = new_config.pricing_enabled;
+    ret.collections_enabled = new_config.collections_enabled;
     drop(ret);
     Ok(Json(new_config))
 }

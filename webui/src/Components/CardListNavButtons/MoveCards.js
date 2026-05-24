@@ -23,7 +23,7 @@ export default function MoveCards() {
       .fetch(
         "Moving items between " + collection + " and " + destinationCollection,
         [],
-        "/collection/move/" + destinationCollection,
+        "/api/collection/move/" + destinationCollection,
         {
           method: "post",
           headers: {

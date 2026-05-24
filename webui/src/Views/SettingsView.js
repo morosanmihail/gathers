@@ -15,14 +15,14 @@ const ALL_SYSTEMS = ["Sql", "Scryfall", "RiftboundSql", "PokemonSql"];
 
 const SYSTEM_ACTIONS = {
   Sql: [
-    { label: "Update DB",     endpoint: "/mtg/update" },
-    { label: "Update Prices", endpoint: "/mtg/prices/update" },
+    { label: "Update DB",     endpoint: "/api/mtg/update" },
+    { label: "Update Prices", endpoint: "/api/mtg/prices/update" },
   ],
   RiftboundSql: [
-    { label: "Update DB", endpoint: "/riftbound/update" },
+    { label: "Update DB", endpoint: "/api/riftbound/update" },
   ],
   PokemonSql: [
-    { label: "Update DB", endpoint: "/pokemon/update" },
+    { label: "Update DB", endpoint: "/api/pokemon/update" },
   ],
 };
 
@@ -75,7 +75,7 @@ function SettingsContent() {
   const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {
-    fetch("/settings")
+    fetch("/api/settings")
       .then((r) => {
         if (r.status === 403) { setDemoMode(true); return null; }
         if (!r.ok) throw new Error(`Failed to load settings (${r.status})`);
@@ -108,11 +108,16 @@ function SettingsContent() {
     setSaved(false);
   };
 
+  const toggleCollections = () => {
+    setConfig((prev) => ({ ...prev, collections_enabled: !prev.collections_enabled }));
+    setSaved(false);
+  };
+
   const save = () => {
     setSaving(true);
     setSaved(false);
     setError(null);
-    fetch("/settings", {
+    fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
@@ -190,6 +195,19 @@ function SettingsContent() {
                 <div className="card border-secondary mb-4">
                   <div className="card-header">Features</div>
                   <div className="card-body">
+                    <div className="form-check mb-2">
+                      <input
+                        type="checkbox"
+                        id="collections-enabled"
+                        className="form-check-input"
+                        checked={config.collections_enabled ?? true}
+                        onChange={toggleCollections}
+                      />
+                      <label htmlFor="collections-enabled" className="form-check-label">
+                        Enable collections
+                        <small className="text-muted ms-2">Track owned cards across named collections</small>
+                      </label>
+                    </div>
                     <div className="form-check">
                       <input
                         type="checkbox"

@@ -30,9 +30,9 @@ export function CardLoaderProvider({ children }) {
     });
   }
 
-  const mtgLoader = makeLoader("/mtg/cards");
-  const riftboundLoader = makeLoader("/riftbound/cards");
-  const pokemonLoader = makeLoader("/pokemon/cards");
+  const mtgLoader = makeLoader("/api/mtg/cards");
+  const riftboundLoader = makeLoader("/api/riftbound/cards");
+  const pokemonLoader = makeLoader("/api/pokemon/cards");
 
   function getLoader(provider) {
     if (provider === "RiftboundSQLite") return riftboundLoader;

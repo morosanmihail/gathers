@@ -43,7 +43,7 @@ function SearchPokemon({ startSearch = false, dedicatedPage = false, sidePanel =
   useEffect(() => {
     if (!shouldSearch) return;
     setLoading(true);
-    const url = `/pokemon/cards/search?limit=${PAGE_SIZE}&skip=${(pageNumber - 1) * PAGE_SIZE}`;
+    const url = `/api/pokemon/cards/search?limit=${PAGE_SIZE}&skip=${(pageNumber - 1) * PAGE_SIZE}`;
     ops
       .fetch("Searching", [], url, {
         method: "post",
