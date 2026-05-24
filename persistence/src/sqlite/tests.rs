@@ -47,12 +47,15 @@ async fn record_purchase(
     foil: i32,
     price: Option<f64>,
 ) {
+    let normal_price = if qty > 0 { price } else { None };
+    let foil_price = if foil > 0 { price } else { None };
     p.record_purchase(
         &col.to_string(),
         &uuid.to_string(),
         qty,
         foil,
-        price,
+        normal_price,
+        foil_price,
         "prov",
         OLD_TIME,
     )
@@ -680,7 +683,8 @@ async fn test_purchase_totals_single_entry() {
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 2);
     assert_eq!(s.foil_quantity, 0);
-    assert!((s.total_paid - 10.0).abs() < 1e-9);
+    assert!((s.total_normal_paid - 10.0).abs() < 1e-9);
+    assert_eq!(s.total_foil_paid, 0.0);
 }
 
 #[tokio::test]
@@ -692,7 +696,7 @@ async fn test_purchase_totals_multiple_entries_same_card() {
     let s = p.get_collection_purchase_totals(&col).await.unwrap();
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 3);
-    assert!((s.total_paid - 17.0).abs() < 1e-9);
+    assert!((s.total_normal_paid - 17.0).abs() < 1e-9);
 }
 
 #[tokio::test]
@@ -704,7 +708,7 @@ async fn test_purchase_totals_mixed_null_and_priced() {
     let s = p.get_collection_purchase_totals(&col).await.unwrap();
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 2);
-    assert!((s.total_paid - 10.0).abs() < 1e-9);
+    assert!((s.total_normal_paid - 10.0).abs() < 1e-9);
 }
 
 #[tokio::test]
@@ -717,7 +721,8 @@ async fn test_purchase_totals_foil_and_normal_separate() {
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 2);
     assert_eq!(s.foil_quantity, 1);
-    assert!((s.total_paid - 20.0).abs() < 1e-9);
+    assert!((s.total_normal_paid - 8.0).abs() < 1e-9);
+    assert!((s.total_foil_paid - 12.0).abs() < 1e-9);
 }
 
 #[tokio::test]
@@ -729,5 +734,5 @@ async fn test_purchase_totals_partial_history_qty() {
     let s = p.get_collection_purchase_totals(&col).await.unwrap();
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 2);
-    assert!((s.total_paid - 16.0).abs() < 1e-9);
+    assert!((s.total_normal_paid - 16.0).abs() < 1e-9);
 }

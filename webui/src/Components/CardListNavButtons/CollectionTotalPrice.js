@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactDOM from "react-dom";
+import { Link } from "react-router-dom";
 import { useCollection } from "../CollectionContext";
 
-function BreakdownTooltip({ pos, breakdown, priced_count, total_count, onMouseEnter, onMouseLeave }) {
+function BreakdownTooltip({ pos, breakdown, onMouseEnter, onMouseLeave }) {
   const profitColor = breakdown.profit >= 0 ? "#4ade80" : "#f87171";
   return ReactDOM.createPortal(
     <div
@@ -34,7 +35,7 @@ function BreakdownTooltip({ pos, breakdown, priced_count, total_count, onMouseEn
         </div>
       )}
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4, paddingTop: 4, fontSize: "0.65rem", opacity: 0.5 }}>
-        {priced_count} of {total_count} cards priced
+        {breakdown.priced_count} of {breakdown.total_count} cards priced
       </div>
     </div>,
     document.body
@@ -43,7 +44,6 @@ function BreakdownTooltip({ pos, breakdown, priced_count, total_count, onMouseEn
 
 export default function CollectionTotalPrice() {
   const collection = useCollection();
-  const [data, setData] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [tick, setTick] = useState(0);
   const [tooltipPos, setTooltipPos] = useState(null);
@@ -58,10 +58,6 @@ export default function CollectionTotalPrice() {
 
   useEffect(() => {
     if (!collection) return;
-    fetch(`/collection/cards/${encodeURIComponent(collection)}/total_price`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d))
-      .catch(() => setData(null));
     fetch(`/collection/cards/${encodeURIComponent(collection)}/value_breakdown`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setBreakdown(d))
@@ -82,24 +78,31 @@ export default function CollectionTotalPrice() {
 
   const cancelHide = useCallback(() => clearTimeout(hideTimer.current), []);
 
-  if (!data || data.priced_count === 0) return null;
+  if (!breakdown || breakdown.priced_count === 0) return null;
 
   return (
-    <span
-      ref={badgeRef}
-      className="small text-muted"
-      style={{ cursor: breakdown ? "default" : undefined }}
-      onMouseEnter={breakdown ? showTooltip : undefined}
-      onMouseLeave={breakdown ? hideTooltip : undefined}
-    >
-      Total: <strong className="text-success">${data.total.toFixed(2)}</strong>
-      <span className="ms-1 opacity-50">({data.priced_count}/{data.total_count})</span>
-      {tooltipPos && breakdown && (
+    <span className="d-flex align-items-center gap-2">
+      <span
+        ref={badgeRef}
+        className="small text-muted"
+        style={{ cursor: "default" }}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+      >
+        Total: <strong className="text-success">${breakdown.total_value.toFixed(2)}</strong>
+        <span className="ms-1 opacity-50">({breakdown.priced_count}/{breakdown.total_count})</span>
+      </span>
+      <Link
+        to={`/c/${encodeURIComponent(collection)}/history`}
+        className="btn btn-outline-secondary btn-sm"
+        style={{ fontSize: "0.7rem", padding: "1px 6px" }}
+      >
+        History
+      </Link>
+      {tooltipPos && (
         <BreakdownTooltip
           pos={tooltipPos}
           breakdown={breakdown}
-          priced_count={data.priced_count}
-          total_count={data.total_count}
           onMouseEnter={cancelHide}
           onMouseLeave={hideTooltip}
         />

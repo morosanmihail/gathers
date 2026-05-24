@@ -20,7 +20,8 @@ use crate::{
     ApiError, ErrorPayload, GathersState,
     collections::collections_models::{
         APICardSearchFilters, CardIdentInner, CardToAdd, CollectionAddResponse, CollectionCard,
-        CollectionCardsQuery, CollectionRemoveResponse, CollectionValueBreakdown,
+        CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
+        CollectionPurchaseHistoryEntry, CollectionValueBreakdown,
         CollectionsSearchQuery, PurchaseHistoryResponse, ResultCard, ResultCardInner,
     },
 };
@@ -41,11 +42,6 @@ fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
     let normal = rp.normal.or(rp.foil).unwrap_or(0.0);
     let foil = rp.foil.or(rp.normal).unwrap_or(0.0);
     (normal, foil)
-}
-
-fn preferred_price_contribution(prices: &models::CardPrices, qty: i32, foil_qty: i32) -> f64 {
-    let (normal, foil) = preferred_unit_prices(prices);
-    normal * qty as f64 + foil * foil_qty as f64
 }
 
 /// Returns all configured retrieval systems, cloned out of the state lock,
@@ -455,13 +451,16 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             && input.purchase_price.map_or(false, |p| p > 0.0)
         {
             let now = chrono::Utc::now().to_rfc3339();
+            let normal_price = if input.quantity > 0 { input.purchase_price } else { None };
+            let foil_price = if input.foil_quantity > 0 { input.purchase_price } else { None };
             let _ = storage
                 .record_purchase(
                     &collection_id,
                     &input.id,
                     input.quantity.max(0),
                     input.foil_quantity.max(0),
-                    input.purchase_price,
+                    normal_price,
+                    foil_price,
                     &provider,
                     &now,
                 )
@@ -910,71 +909,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Ok(Json(count))
     }
 
-    async fn collection_total_price(
-        State(state): State<GathersState>,
-        Path(collection_id): Path<String>,
-    ) -> Result<Json<serde_json::Value>, ApiError> {
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-
-        // Fetch all cards in the collection (large limit = no pagination needed in practice).
-        let collection_cards = state
-            .1
-            .lock()
-            .await
-            .storage
-            .get_cards_in_collection_paginated(
-                &collection_id,
-                CollectionCardsParams {
-                    offset: 0,
-                    limit: 100_000,
-                    sort_by: None,
-                    sort_order: None,
-                    provider: None,
-                    providers: vec![],
-                },
-            )
-            .await
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload { error: format!("Failed to get cards. {e}") }),
-            ))?;
-
-        let total_count = collection_cards.len();
-
-        // Group by provider.
-        let mut by_provider: HashMap<String, Vec<models::CollectionCard>> = HashMap::new();
-        for card in collection_cards {
-            by_provider.entry(card.provider.clone()).or_default().push(card);
-        }
-
-        let mut total: f64 = 0.0;
-        let mut priced_count: usize = 0;
-
-        for (provider, cards) in &by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider) {
-                let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
-                if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
-                    for card in cards {
-                        if let Some(card_prices) = prices_map.get(&card.uuid) {
-                            let contribution =
-                                preferred_price_contribution(card_prices, card.quantity, card.foil_quantity);
-                            if contribution > 0.0 {
-                                total += contribution;
-                                priced_count += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(Json(serde_json::json!({
-            "total": (total * 100.0).round() / 100.0,
-            "priced_count": priced_count,
-            "total_count": total_count,
-        })))
-    }
-
     async fn purchase_history(
         State(state): State<GathersState>,
         Path((collection_id, card_uuid)): Path<(String, String)>,
@@ -1035,9 +969,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             by_provider.entry(card.provider.clone()).or_default().push(card);
         }
 
+        let total_count = by_provider.values().map(|v| v.len()).sum::<usize>();
         let mut total_value: f64 = 0.0;
         let mut profit: f64 = 0.0;
         let mut untracked_value: f64 = 0.0;
+        let mut priced_count: usize = 0;
 
         for (provider, cards) in &by_provider {
             if let Some(retrieval) = retrieval_systems.get(provider) {
@@ -1052,22 +988,33 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                                 continue;
                             }
                             total_value += current;
+                            priced_count += 1;
 
                             if let Some(summary) = purchase_totals.get(&card.uuid) {
-                                // Only count up to current holdings; paid_qty may exceed
-                                // current qty if cards were removed after purchase.
                                 let paid_normal = summary.quantity.min(card.quantity);
                                 let paid_foil = summary.foil_quantity.min(card.foil_quantity);
-                                let unpaid_normal = (card.quantity - paid_normal).max(0);
-                                let unpaid_foil = (card.foil_quantity - paid_foil).max(0);
+
+                                let cost_normal = if summary.quantity > 0 {
+                                    summary.total_normal_paid * paid_normal as f64
+                                        / summary.quantity as f64
+                                } else {
+                                    0.0
+                                };
+                                let cost_foil = if summary.foil_quantity > 0 {
+                                    summary.total_foil_paid * paid_foil as f64
+                                        / summary.foil_quantity as f64
+                                } else {
+                                    0.0
+                                };
 
                                 let current_of_paid =
                                     unit_normal * paid_normal as f64 + unit_foil * paid_foil as f64;
-                                profit += current_of_paid - summary.total_paid;
+                                profit += current_of_paid - (cost_normal + cost_foil);
 
-                                let untracked =
-                                    unit_normal * unpaid_normal as f64 + unit_foil * unpaid_foil as f64;
-                                untracked_value += untracked;
+                                let unpaid_normal = (card.quantity - paid_normal).max(0);
+                                let unpaid_foil = (card.foil_quantity - paid_foil).max(0);
+                                untracked_value += unit_normal * unpaid_normal as f64
+                                    + unit_foil * unpaid_foil as f64;
                             } else {
                                 untracked_value += current;
                             }
@@ -1082,7 +1029,70 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             total_value: round2(total_value),
             profit: round2(profit),
             untracked_value: round2(untracked_value),
+            priced_count,
+            total_count,
         }))
+    }
+
+    async fn all_purchase_history(
+        State(state): State<GathersState>,
+        Path(collection_id): Path<String>,
+    ) -> Result<Json<CollectionAllPurchaseHistoryResponse>, ApiError> {
+        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
+
+        let entries = state
+            .1
+            .lock()
+            .await
+            .storage
+            .get_all_purchase_history(&collection_id)
+            .await
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload { error: format!("Failed to get purchase history. {e}") }),
+            ))?;
+
+        let mut uuids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in &entries {
+            uuids_by_provider
+                .entry(entry.provider.clone())
+                .or_default()
+                .push(entry.card_uuid.clone());
+        }
+        for ids in uuids_by_provider.values_mut() {
+            ids.sort();
+            ids.dedup();
+        }
+
+        let mut card_info: HashMap<String, models::Card> = HashMap::new();
+        for (provider, uuids) in &uuids_by_provider {
+            if let Some(retrieval) = retrieval_systems.get(provider) {
+                if let Ok(data) = retrieval.get_cards_by_ids(uuids.clone()).await {
+                    card_info.extend(data);
+                }
+            }
+        }
+
+        let result = entries
+            .into_iter()
+            .map(|e| {
+                let card = card_info.get(&e.card_uuid);
+                CollectionPurchaseHistoryEntry {
+                    id: e.id,
+                    card_name: card.map(|c| card_name(c).to_string()),
+                    set_code: card.map(|c| c.get_set()),
+                    card_uuid: e.card_uuid,
+                    quantity: e.quantity,
+                    foil_quantity: e.foil_quantity,
+                    normal_price_per_unit: e.normal_price_per_unit,
+                    foil_price_per_unit: e.foil_price_per_unit,
+                    provider: e.provider,
+                    recorded_at: e.recorded_at,
+                }
+            })
+            .collect();
+
+        Ok(Json(CollectionAllPurchaseHistoryResponse { entries: result }))
     }
 
     ApiRouter::new()
@@ -1092,13 +1102,13 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/move/{id}", post(move_to))
         .api_route("/cards/{id}/list", get(cards_get))
         .api_route("/cards/{id}/count", get(collection_cards_count))
-        .api_route("/cards/{id}/total_price", get(collection_total_price))
         .api_route("/cards/{id}/search", post(collection_cards_search))
         .api_route("/cards/{id}/search/count", post(collection_cards_search_count))
         .api_route("/search", post(search_temp))
         .api_route("/cards/{id}/add", post(cards_add))
         .api_route("/cards/{id}/delete", post(cards_remove))
         .api_route("/cards/{id}/purchase_history/{card_uuid}", get(purchase_history))
+        .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
         .api_route("/cards/{id}/value_breakdown", get(collection_value_breakdown))
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export))

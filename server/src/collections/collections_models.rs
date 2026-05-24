@@ -231,12 +231,30 @@ pub struct PurchaseHistoryResponse {
 
 #[derive(Serialize, JsonSchema)]
 pub struct CollectionValueBreakdown {
-    /// Current market value of all priced cards in the collection.
     pub total_value: f64,
-    /// Profit (current value − paid) for cards that have purchase history with prices.
     pub profit: f64,
-    /// Current value of cards that have a price now but no paid price on record.
     pub untracked_value: f64,
+    pub priced_count: usize,
+    pub total_count: usize,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionPurchaseHistoryEntry {
+    pub id: i64,
+    pub card_uuid: String,
+    pub card_name: Option<String>,
+    pub set_code: Option<String>,
+    pub quantity: i32,
+    pub foil_quantity: i32,
+    pub normal_price_per_unit: Option<f64>,
+    pub foil_price_per_unit: Option<f64>,
+    pub provider: String,
+    pub recorded_at: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionAllPurchaseHistoryResponse {
+    pub entries: Vec<CollectionPurchaseHistoryEntry>,
 }
 
 fn empty_string_to_none<'de, D>(deserializer: D) -> Result<Option<APIRarity>, D::Error>

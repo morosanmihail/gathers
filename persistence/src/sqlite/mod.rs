@@ -168,7 +168,8 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         card_uuid: &CardID,
         quantity: i32,
         foil_quantity: i32,
-        price_per_unit: Option<f64>,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
         provider: &str,
         recorded_at: &str,
     ) -> eyre::Result<()> {
@@ -179,7 +180,8 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
             card_uuid,
             quantity,
             foil_quantity,
-            price_per_unit,
+            normal_price_per_unit,
+            foil_price_per_unit,
             provider,
             recorded_at,
         )
@@ -192,6 +194,14 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<Vec<PurchaseHistoryEntry>> {
         let conn = self.connection.lock().await;
         purchase_history::get_history(&conn, collection_id, card_uuid)
+    }
+
+    async fn get_all_purchase_history(
+        &self,
+        collection_id: &CollectionID,
+    ) -> eyre::Result<Vec<PurchaseHistoryEntry>> {
+        let conn = self.connection.lock().await;
+        purchase_history::get_all_history(&conn, collection_id)
     }
 
     async fn get_collection_purchase_totals(

@@ -135,10 +135,14 @@ function PurchaseHistoryTooltip({ pos, entries, onMouseEnter, onMouseLeave }) {
             {e.quantity > 0 && ` ×${e.quantity}`}
             {e.foil_quantity > 0 && ` ✦×${e.foil_quantity}`}
           </span>
-          <span className="price-tooltip-amounts">
-            {e.price_per_unit != null ? (
-              <span className="price-tooltip-normal">${e.price_per_unit.toFixed(2)}</span>
-            ) : (
+          <span className="price-tooltip-amounts" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+            {e.normal_price_per_unit != null && (
+              <span className="price-tooltip-normal">${e.normal_price_per_unit.toFixed(2)}</span>
+            )}
+            {e.foil_price_per_unit != null && (
+              <span className="price-tooltip-foil">${e.foil_price_per_unit.toFixed(2)} ✦</span>
+            )}
+            {e.normal_price_per_unit == null && e.foil_price_per_unit == null && (
               <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>—</span>
             )}
           </span>
@@ -182,6 +186,8 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
   if (!entries || entries.length === 0) return null;
 
   const latest = entries[0];
+  const latestPrice = latest.normal_price_per_unit ?? latest.foil_price_per_unit;
+  const latestIsFoil = latest.normal_price_per_unit == null && latest.foil_price_per_unit != null;
   return (
     <span style={{ display: "inline-flex", alignItems: "center" }}>
       <span
@@ -191,7 +197,9 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
       >
-        {latest.price_per_unit != null ? `$${latest.price_per_unit.toFixed(2)} paid` : "no price"}
+        {latestPrice != null
+          ? `$${latestPrice.toFixed(2)}${latestIsFoil ? " ✦" : ""} paid`
+          : "no price"}
       </span>
       {tooltipPos && entries.length > 0 && (
         <PurchaseHistoryTooltip
