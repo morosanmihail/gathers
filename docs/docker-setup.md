@@ -123,6 +123,14 @@ docker-compose restart gathers-api
 
 The `system` field controls which card databases are active. Supported values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql`. Multiple systems can be listed.
 
+**Option 3 - mount a local path instead of a volume:**
+
+```yaml
+    volumes:
+      - /some/local/folder:/home/app/.local/share/gathers/:rw
+```
+
+
 ## Ports
 
 - `3000`: Web UI
