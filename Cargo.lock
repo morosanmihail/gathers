@@ -1534,6 +1534,7 @@ dependencies = [
  "retrieval",
  "rusqlite",
  "rusqlite_migration",
+ "schemars",
  "serde",
  "tokio",
 ]

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { CollectionsProvider } from "../Components/CollectionContext";
-import { SystemTypeProvider } from "../Components/SystemTypeContext";
+import { SystemTypeProvider, useRefreshSystemInfo } from "../Components/SystemTypeContext";
 import Header from "../Components/Layout/Header";
 import { useOperations } from "../OperationsContext";
 
@@ -66,7 +66,8 @@ function UpdateButton({ label, endpoint }) {
   );
 }
 
-export default function SettingsView() {
+function SettingsContent() {
+  const refreshSystemInfo = useRefreshSystemInfo();
   const [config, setConfig] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -102,6 +103,11 @@ export default function SettingsView() {
     setSaved(false);
   };
 
+  const togglePricing = () => {
+    setConfig((prev) => ({ ...prev, pricing_enabled: !prev.pricing_enabled }));
+    setSaved(false);
+  };
+
   const save = () => {
     setSaving(true);
     setSaved(false);
@@ -115,16 +121,15 @@ export default function SettingsView() {
         if (!r.ok) return r.json().then((b) => { throw new Error(b.error || `Save failed (${r.status})`); });
         return r.json();
       })
-      .then((data) => { setConfig(data); setSaved(true); })
+      .then((data) => { setConfig(data); setSaved(true); refreshSystemInfo(); })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
   };
 
   return (
-    <CollectionsProvider>
-      <SystemTypeProvider>
-        <Header />
-        <main>
+    <>
+      <Header />
+      <main>
           <div className="container-fluid py-4" style={{ maxWidth: 720 }}>
             <h4 className="mb-4">Settings</h4>
 
@@ -183,6 +188,25 @@ export default function SettingsView() {
                 </div>
 
                 <div className="card border-secondary mb-4">
+                  <div className="card-header">Features</div>
+                  <div className="card-body">
+                    <div className="form-check">
+                      <input
+                        type="checkbox"
+                        id="pricing-enabled"
+                        className="form-check-input"
+                        checked={config.pricing_enabled ?? true}
+                        onChange={togglePricing}
+                      />
+                      <label htmlFor="pricing-enabled" className="form-check-label">
+                        Enable pricing
+                        <small className="text-muted ms-2">Show market prices, purchase price inputs, and purchase history</small>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card border-secondary mb-4">
                   <div className="card-header">File paths</div>
                   <div className="card-body">
                     {PATH_FIELDS.map(({ key, label }) => (
@@ -204,12 +228,21 @@ export default function SettingsView() {
                   <button className="btn btn-primary" onClick={save} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
                   </button>
-                  {saved && <span className="text-success small">Saved. Restart the server for changes to take effect.</span>}
+                  {saved && <span className="text-success small">Saved. Some changes (e.g. port, paths) require a server restart.</span>}
                 </div>
               </>
             )}
           </div>
-        </main>
+      </main>
+    </>
+  );
+}
+
+export default function SettingsView() {
+  return (
+    <CollectionsProvider>
+      <SystemTypeProvider>
+        <SettingsContent />
       </SystemTypeProvider>
     </CollectionsProvider>
   );

@@ -19,17 +19,21 @@ import {
 } from "./CardListContexts/RefreshCardListContext";
 import { useCollectionFilters, collectionFiltersActive } from "./CollectionFilterBar";
 import { useFetchPrices } from "./CardListContexts/PricesContext";
+import { usePricingEnabled } from "./SystemTypeContext";
 
 const HEADER_COLS = [
-  { field: "Name",     label: "Name",   className: "card-list-name",   sortable: true },
-  { field: "SetCode",  label: "Set",    className: "card-list-set",    sortable: true },
-  { field: "Rarity",   label: "Rarity", className: "card-list-rarity", sortable: true },
-  { field: "Artist",   label: "Artist", className: "card-list-artist", sortable: true },
-  { field: null,       label: "Price",  className: "card-list-price",  sortable: false },
-  { field: "Quantity", label: "Qty",    className: "card-list-qty",    sortable: true },
+  { field: "Name",     label: "Name",    className: "card-list-name",    sortable: true },
+  { field: "SetCode",  label: "Set",     className: "card-list-set",     sortable: true },
+  { field: "Rarity",   label: "Rarity",  className: "card-list-rarity",  sortable: true },
+  { field: "Artist",   label: "Artist",  className: "card-list-artist",  sortable: true },
+  { field: null,       label: "Price",    className: "card-list-price",       sortable: false },
+  { field: null,       label: "Non-Foil", className: "card-list-qty-actions", sortable: false },
+  { field: null,       label: "Foil",     className: "card-list-qty-actions", sortable: false },
+  { field: null,       label: "History",  className: "card-list-history",     sortable: false },
 ];
 
 function ListHeader({ sortBy, sortOrder }) {
+  const pricingEnabled = usePricingEnabled();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const handleSort = (field) => {
@@ -47,7 +51,9 @@ function ListHeader({ sortBy, sortOrder }) {
   return (
     <div className="card-list-header">
       <span className="card-list-provider-icon" />
-      {HEADER_COLS.map(({ field, label, className, sortable }) => {
+      {HEADER_COLS.filter(({ label }) =>
+        pricingEnabled || (label !== "Price" && label !== "History")
+      ).map(({ field, label, className, sortable }) => {
         const active = sortable && sortBy === field;
         return (
           <span

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useSystems } from "./SystemTypeContext";
+import { useSystems, usePricingEnabled } from "./SystemTypeContext";
 import SortControls from "./SortControls";
 import CollectionTotalPrice from "./CardListNavButtons/CollectionTotalPrice";
 import "mana-font/css/mana.min.css";
@@ -89,6 +89,7 @@ export function collectionFiltersActive(filters) {
 
 export default function CollectionFilterBar() {
   const systems = useSystems();
+  const pricingEnabled = usePricingEnabled();
   const [searchParams, setSearchParams] = useSearchParams();
   const [open, setOpen] = useState(false);
   const filters = readFilters(searchParams);
@@ -140,7 +141,7 @@ export default function CollectionFilterBar() {
           </button>
         )}
 
-        <CollectionTotalPrice />
+        {pricingEnabled && <CollectionTotalPrice />}
 
         <div className="ms-auto">
           <div className="btn-group btn-group-sm" role="group">

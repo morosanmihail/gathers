@@ -7,6 +7,7 @@ import SettingsView from "./Views/SettingsView";
 import MtgCardDetailView from "./Views/MtgCardDetailView";
 import RiftboundCardDetailView from "./Views/RiftboundCardDetailView";
 import PokemonCardDetailView from "./Views/PokemonCardDetailView";
+import PurchaseHistoryView from "./Views/PurchaseHistoryView";
 
 export default function BaseApp({ mode = "full", collectionsEnabled = false }) {
   return (
@@ -23,6 +24,7 @@ export default function BaseApp({ mode = "full", collectionsEnabled = false }) {
             {collectionsEnabled ? (
               <Route path="/c/:collection">
                 <Route index element={<Navigate to="1" replace />} />
+                <Route path="history" element={<PurchaseHistoryView />} />
                 <Route path=":pageNumber" element={<CardListView />} />
               </Route>
             ) : (

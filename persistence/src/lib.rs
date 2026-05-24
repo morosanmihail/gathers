@@ -106,6 +106,54 @@ pub trait PersistenceSystemTrait {
         cards: &[CollectionCard],
         to_collection_id: CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<()>>;
+
+    fn record_purchase(
+        &mut self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+        quantity: i32,
+        foil_quantity: i32,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
+        provider: &str,
+        recorded_at: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<()>>;
+
+    fn get_purchase_history(
+        &self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<PurchaseHistoryEntry>>>;
+
+    fn get_all_purchase_history(
+        &self,
+        collection_id: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<PurchaseHistoryEntry>>>;
+
+    fn get_collection_purchase_totals(
+        &self,
+        collection_id: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<CardID, PurchaseSummary>>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct PurchaseSummary {
+    pub total_normal_paid: f64,
+    pub total_foil_paid: f64,
+    pub quantity: i32,
+    pub foil_quantity: i32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct PurchaseHistoryEntry {
+    pub id: i64,
+    pub card_uuid: String,
+    pub quantity: i32,
+    pub foil_quantity: i32,
+    pub normal_price_per_unit: Option<f64>,
+    pub foil_price_per_unit: Option<f64>,
+    pub provider: String,
+    pub recorded_at: String,
 }
 
 impl PersistenceSystem {
