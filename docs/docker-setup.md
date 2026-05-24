@@ -69,6 +69,7 @@ The Docker container supports the following environment variables (all set by de
 |---|---|---|
 | `GATHERS_SYSTEMS` | `riftbound-sql,scryfall` | Comma-separated list of systems to enable. Valid values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql` |
 | `MTG_DB_PATH` | `/home/app/.local/share/gathers/DB/AllPrintings.db` | MTG SQLite database |
+| `MTG_PRICES_PATH` | `/home/app/.local/share/gathers/DB/AllPricesToday.json` | MTG price data |
 | `RIFTBOUND_DB_PATH` | `/home/app/.local/share/gathers/DB/riftbound.db` | Riftbound SQLite database |
 | `POKEMON_DB_PATH` | `/home/app/.local/share/gathers/DB/pokemon.db` | Pokémon SQLite database |
 | `STORAGE_DB_PATH` | `/home/app/.local/share/gathers/DB/storage.db` | User collection database |
@@ -86,8 +87,10 @@ This file is stored inside the `gathers-data` named volume, so it persists acros
 ```toml
 system = ["riftbound-sql"]
 port = 5234
+pricing_enabled = true
 
 mtg_db_path = "/home/app/.local/share/gathers/DB/AllPrintings.db"
+mtg_prices_path = "/home/app/.local/share/gathers/DB/AllPricesToday.json"
 riftbound_db_path = "/home/app/.local/share/gathers/DB/riftbound.db"
 pokemon_db_path = "/home/app/.local/share/gathers/DB/pokemon.db"
 storage_db_path = "/home/app/.local/share/gathers/DB/storage.db"
@@ -114,7 +117,9 @@ Then restart the container for changes to take effect:
 docker-compose restart gathers-api
 ```
 
-**Priority order** (highest wins): CLI flags → environment variables → `server.toml`.
+> **Note:** `pricing_enabled` can be toggled live via the Settings page in the web UI without a restart.
+
+**Priority order** (highest wins): environment variables → `server.toml`.
 
 The `system` field controls which card databases are active. Supported values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql`. Multiple systems can be listed.
 

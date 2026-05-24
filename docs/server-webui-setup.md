@@ -40,9 +40,25 @@ Environment variables override the paths set in the config file:
 | Variable | Default | Description |
 |---|---|---|
 | `MTG_DB_PATH` | `~/.local/share/gathers/DB/AllPrintings.db` | MTG SQLite database (`sql` system) |
+| `MTG_PRICES_PATH` | `~/.local/share/gathers/DB/AllPricesToday.json` | MTG price data (`sql` system) |
 | `RIFTBOUND_DB_PATH` | `~/.local/share/gathers/DB/riftbound.db` | Riftbound SQLite database (`riftbound-sql` system) |
 | `POKEMON_DB_PATH` | `~/.local/share/gathers/DB/pokemon.db` | Pokémon SQLite database (`pokemon-sql` system) |
 | `STORAGE_DB_PATH` | `~/.local/share/gathers/DB/storage.db` | User collection database |
+
+## Config File Options
+
+The `server.toml` config supports these keys beyond `system` and `port`:
+
+| Key | Default | Description |
+|---|---|---|
+| `pricing_enabled` | `true` | Show market prices, purchase price inputs, and purchase history in the UI |
+| `mtg_db_path` | see env var default | Path to `AllPrintings.db` |
+| `mtg_prices_path` | see env var default | Path to `AllPricesToday.json` |
+| `riftbound_db_path` | see env var default | Path to `riftbound.db` |
+| `pokemon_db_path` | see env var default | Path to `pokemon.db` |
+| `storage_db_path` | see env var default | Path to `storage.db` |
+
+All config options can also be changed at runtime via the Settings page in the web UI (`/settings`). Changes to `pricing_enabled` take effect immediately; other changes (paths, port, systems) require a server restart.
 
 ## Retrieval Database
 
@@ -52,4 +68,7 @@ The `sql` system requires the MTG database from www.mtgjson.com. You can trigger
 curl http://localhost:5234/mtg/update -H "Accept: application/json"
 ```
 
-Similarly, the Riftbound database can be updated via `/riftbound/update`.
+Similarly:
+- Riftbound database: `/riftbound/update`
+- Pokémon database: `/pokemon/update`
+- MTG prices: `/mtg/prices/update`
