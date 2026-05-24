@@ -7,7 +7,7 @@ mod tests;
 use include_dir::{Dir, include_dir};
 use models::CardID;
 use models::CollectionID;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use rusqlite_migration::Migrations;
 use std::sync::Arc;
 use std::sync::LazyLock;

@@ -1,7 +1,7 @@
 use crate::{CollectionCard, CollectionCardsParams, CollectionSortField};
 use models::CollectionID;
 use models::filters::SortOrder;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 
 pub(super) fn add_cards(
     conn: &Connection,
