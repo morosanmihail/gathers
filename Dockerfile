@@ -10,6 +10,7 @@ COPY ./persistence/Cargo.toml ./persistence/Cargo.toml
 COPY ./retrieval/Cargo.toml ./retrieval/Cargo.toml
 COPY ./models/Cargo.toml ./models/Cargo.toml
 COPY ./benches/Cargo.toml ./benches/Cargo.toml
+COPY ./e2e/Cargo.toml ./e2e/Cargo.toml
 
 COPY ./gathers/src ./gathers/src
 COPY ./server/src ./server/src
@@ -17,6 +18,8 @@ COPY ./persistence/src ./persistence/src
 COPY ./retrieval/src ./retrieval/src
 COPY ./models/src ./models/src
 COPY ./benches/src ./benches/src
+COPY ./e2e/src ./e2e/src
+COPY ./e2e/examples ./e2e/examples
 COPY ./persistence/migrations ./persistence/migrations
 
 RUN cargo build --release --bin server
