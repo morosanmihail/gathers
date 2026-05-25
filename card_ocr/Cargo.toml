@@ -1,0 +1,25 @@
+[package]
+name = "card_ocr"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "card_ocr"
+path = "src/main.rs"
+
+[[bin]]
+name = "card_ocr_live"
+path = "src/bin/live.rs"
+
+[dependencies]
+models = { path = "../models" }
+retrieval = { path = "../retrieval" }
+eyre = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+image = "0.25"
+imageproc = "0.26"
+leptess = "0.14"
+bevy = "0.15"
+nokhwa = { version = "0.10", features = ["input-native"] }
