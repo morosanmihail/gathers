@@ -96,9 +96,17 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 provider: provider.to_string(),
             }],
         )?;
-        result
+        let card = result
             .pop()
-            .ok_or_else(|| eyre::eyre!("No card returned from upsert"))
+            .ok_or_else(|| eyre::eyre!("No card returned from upsert"))?;
+        purchase_history::trim_history_to_collection(
+            &conn,
+            collection_id,
+            card_uuid,
+            card.quantity,
+            card.foil_quantity,
+        )?;
+        Ok(card)
     }
 
     async fn add_cards_to_collection(
@@ -107,7 +115,17 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         input_cards: &[CollectionCard],
     ) -> eyre::Result<Vec<CollectionCard>> {
         let conn = self.connection.lock().await;
-        cards::add_cards(&conn, collection_id, input_cards)
+        let result = cards::add_cards(&conn, collection_id, input_cards)?;
+        for card in &result {
+            purchase_history::trim_history_to_collection(
+                &conn,
+                collection_id,
+                &card.uuid,
+                card.quantity,
+                card.foil_quantity,
+            )?;
+        }
+        Ok(result)
     }
 
     async fn move_cards_between_collections(
@@ -118,6 +136,9 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let conn = self.connection.lock().await;
         for c in input_cards {
             if c.quantity == 0 && c.foil_quantity == 0 {
+                continue;
+            }
+            if c.collection == to_collection_id {
                 continue;
             }
             let source_results = cards::add_cards(
@@ -131,6 +152,18 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     time_added: c.time_added.clone(),
                     provider: c.provider.clone(),
                 }],
+            )?;
+            let (src_qty, src_foil_qty) = source_results
+                .first()
+                .map(|sc| (sc.quantity, sc.foil_quantity))
+                .unwrap_or((0, 0));
+            purchase_history::transfer_trimmed_history_to_collection(
+                &conn,
+                &c.collection,
+                &to_collection_id,
+                &c.uuid,
+                src_qty,
+                src_foil_qty,
             )?;
             let provider = source_results
                 .first()

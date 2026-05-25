@@ -12,6 +12,26 @@ fn migrations_test() {
     assert!(MIGRATIONS.validate().is_ok());
 }
 
+#[test]
+fn test_new_with_file_path() {
+    let dir = std::env::temp_dir();
+    let path = dir.join("gathers_test_persistence.db");
+    let _ = std::fs::remove_file(&path); // clean up any prior run
+    let p = SQLitePersistenceSystem::new(false, Some(path.to_str().unwrap().to_string()));
+    assert!(p.is_ok());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_new_creates_parent_directories() {
+    let dir = std::env::temp_dir().join("gathers_test_nested_dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("sub").join("persistence.db");
+    let p = SQLitePersistenceSystem::new(false, Some(path.to_str().unwrap().to_string()));
+    assert!(p.is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 async fn get_time_updated(
     persistence: &SQLitePersistenceSystem,
     collection_id: &str,
@@ -453,6 +473,58 @@ async fn test_collection_filter_by_provider() {
 }
 
 #[tokio::test]
+async fn test_collection_filter_by_providers_multi() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"mtg1".to_string(), 1, 0, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"rb1".to_string(), 1, 0, OLD_TIME, "RiftboundSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"pk1".to_string(), 1, 0, OLD_TIME, "PokemonSQLite").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
+        offset: 0, limit: 10, sort_by: None, sort_order: None,
+        provider: None,
+        providers: vec!["MagicSQLite".to_string(), "RiftboundSQLite".to_string()],
+    }).await.unwrap();
+    assert_eq!(cards.len(), 2);
+    assert!(cards.iter().any(|c| c.uuid == "mtg1"));
+    assert!(cards.iter().any(|c| c.uuid == "rb1"));
+    assert!(!cards.iter().any(|c| c.uuid == "pk1"));
+}
+
+#[tokio::test]
+async fn test_collection_filter_by_providers_single_entry() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"mtg1".to_string(), 1, 0, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"rb1".to_string(), 1, 0, OLD_TIME, "RiftboundSQLite").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
+        offset: 0, limit: 10, sort_by: None, sort_order: None,
+        provider: None,
+        providers: vec!["RiftboundSQLite".to_string()],
+    }).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].uuid, "rb1");
+}
+
+#[tokio::test]
+async fn test_collection_filter_provider_takes_precedence_over_providers() {
+    // if both `provider` and `providers` are set, `provider` wins
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"mtg1".to_string(), 1, 0, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"rb1".to_string(), 1, 0, OLD_TIME, "RiftboundSQLite").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
+        offset: 0, limit: 10, sort_by: None, sort_order: None,
+        provider: Some("MagicSQLite".to_string()),
+        providers: vec!["RiftboundSQLite".to_string()],
+    }).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].uuid, "mtg1");
+}
+
+#[tokio::test]
 async fn test_collection_filter_by_provider_no_match() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
@@ -657,6 +729,40 @@ async fn test_timeupdated_updated_on_remove_collection_merge() {
     assert_ne!(get_time_updated(&p, &col_b, "card1").await.unwrap(), OLD_TIME);
 }
 
+// ── card count with provider filter ───────────────────────────────────────
+
+#[tokio::test]
+async fn test_get_cards_count_with_providers_filter() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"mtg1".to_string(), 2, 0, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"mtg2".to_string(), 1, 0, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"rb1".to_string(), 1, 0, OLD_TIME, "RiftboundSQLite").await.unwrap();
+
+    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string()]).await.unwrap();
+    assert_eq!(count, 2);
+
+    let count = p.get_cards_in_collection_count(col.clone(), &["RiftboundSQLite".to_string()]).await.unwrap();
+    assert_eq!(count, 1);
+
+    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string(), "RiftboundSQLite".to_string()]).await.unwrap();
+    assert_eq!(count, 3);
+
+    let count = p.get_cards_in_collection_count(col.clone(), &["Unknown".to_string()]).await.unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn test_get_cards_count_no_provider_filter() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"card1".to_string(), 1, 0, OLD_TIME, "A").await.unwrap();
+    p.add_card_to_collection(&col, &"card2".to_string(), 1, 0, OLD_TIME, "B").await.unwrap();
+
+    let count = p.get_cards_in_collection_count(col.clone(), &[]).await.unwrap();
+    assert_eq!(count, 2);
+}
+
 // ── purchase history ───────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -735,4 +841,289 @@ async fn test_purchase_totals_partial_history_qty() {
     let s = s.get("card1").unwrap();
     assert_eq!(s.quantity, 2);
     assert!((s.total_normal_paid - 16.0).abs() < 1e-9);
+}
+
+// ── get_all_purchase_history ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_get_all_purchase_history_empty() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    assert!(p.get_all_purchase_history(&col).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_get_all_purchase_history_multiple_cards() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
+    record_purchase(&mut p, &col, "card2", 1, 0, Some(7.0)).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(5.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist.len(), 3);
+    let card1_entries: Vec<_> = hist.iter().filter(|e| e.card_uuid == "card1").collect();
+    assert_eq!(card1_entries.len(), 2);
+    let card2_entries: Vec<_> = hist.iter().filter(|e| e.card_uuid == "card2").collect();
+    assert_eq!(card2_entries.len(), 1);
+}
+
+#[tokio::test]
+async fn test_get_all_purchase_history_isolated_by_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("A".to_string()).await.unwrap();
+    let col_b = p.add_collection("B".to_string()).await.unwrap();
+    record_purchase(&mut p, &col_a, "card1", 1, 0, Some(1.0)).await;
+    record_purchase(&mut p, &col_b, "card1", 1, 0, Some(2.0)).await;
+
+    let hist_a = p.get_all_purchase_history(&col_a).await.unwrap();
+    assert_eq!(hist_a.len(), 1);
+    assert_eq!(hist_a[0].normal_price_per_unit, Some(1.0));
+
+    let hist_b = p.get_all_purchase_history(&col_b).await.unwrap();
+    assert_eq!(hist_b.len(), 1);
+    assert_eq!(hist_b[0].normal_price_per_unit, Some(2.0));
+}
+
+// ── purchase history trimming on card removal ──────────────────────────────
+
+#[tokio::test]
+async fn test_remove_cards_history_not_trimmed_when_sufficient() {
+    // history sum <= collection quantity: no entries removed
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 5, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(5.0)).await;
+
+    // remove 1 → collection=4, history sum=3 → no trim
+    add_card(&mut p, &col, &"card1".to_string(), -1, 0).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    assert_eq!(hist.len(), 2);
+    let total: i32 = hist.iter().map(|e| e.quantity).sum();
+    assert_eq!(total, 3);
+}
+
+#[tokio::test]
+async fn test_remove_cards_trims_lowest_price_entries() {
+    // history sum > collection after removal: delete cheapest entries first
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 5, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(1.0)).await; // cheapest
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await; // most expensive
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(3.0)).await;
+
+    // remove 3 → collection=2, history sum=5 → trim 3 cheapest cards worth
+    add_card(&mut p, &col, &"card1".to_string(), -3, 0).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    // cheapest entry (qty=2 @ $1) fully gone, middle entry (qty=1 @ $3) fully gone
+    // expensive entry (qty=2 @ $5) survives
+    let total: i32 = hist.iter().map(|e| e.quantity).sum();
+    assert_eq!(total, 2);
+    assert!(hist.iter().all(|e| e.normal_price_per_unit == Some(5.0)));
+}
+
+#[tokio::test]
+async fn test_remove_cards_partial_entry_trim() {
+    // excess < cheapest entry's quantity: reduce that entry rather than delete
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 5, 0).await;
+    record_purchase(&mut p, &col, "card1", 3, 0, Some(1.0)).await; // cheapest, qty=3
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(9.0)).await;
+
+    // remove 2 → collection=3, history sum=5 → trim 2 from cheapest entry
+    add_card(&mut p, &col, &"card1".to_string(), -2, 0).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    assert_eq!(hist.len(), 2);
+    let cheap = hist.iter().find(|e| e.normal_price_per_unit == Some(1.0)).unwrap();
+    assert_eq!(cheap.quantity, 1); // reduced from 3 to 1
+    let exp = hist.iter().find(|e| e.normal_price_per_unit == Some(9.0)).unwrap();
+    assert_eq!(exp.quantity, 2); // unchanged
+}
+
+#[tokio::test]
+async fn test_remove_all_cards_clears_history() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(4.0)).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(7.0)).await;
+
+    add_card(&mut p, &col, &"card1".to_string(), -3, 0).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    assert!(hist.is_empty());
+}
+
+#[tokio::test]
+async fn test_remove_cards_null_price_trimmed_first() {
+    // NULL price treated as cheapest (NULLS FIRST)
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 4, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, None).await;      // no price → cheapest
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
+
+    // remove 2 → collection=2, history sum=4 → trim 2 from null-price entry
+    add_card(&mut p, &col, &"card1".to_string(), -2, 0).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    let total: i32 = hist.iter().map(|e| e.quantity).sum();
+    assert_eq!(total, 2);
+    // only the priced entry should remain
+    assert!(hist.iter().all(|e| e.normal_price_per_unit == Some(5.0)));
+}
+
+#[tokio::test]
+async fn test_foil_history_trimmed_independently() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 0, 4).await;
+    record_purchase(&mut p, &col, "card1", 0, 2, Some(2.0)).await;  // cheaper foil
+    record_purchase(&mut p, &col, "card1", 0, 2, Some(8.0)).await;
+
+    // remove 2 foil → collection foil=2, history foil sum=4 → trim 2 cheapest foil
+    add_card(&mut p, &col, &"card1".to_string(), 0, -2).await;
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    let foil_total: i32 = hist.iter().map(|e| e.foil_quantity).sum();
+    assert_eq!(foil_total, 2);
+    assert!(hist.iter().all(|e| e.foil_price_per_unit == Some(8.0)));
+}
+
+#[tokio::test]
+async fn test_move_same_collection_no_history_corruption() {
+    // moving to same collection must not touch purchase history
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
+    record_purchase(&mut p, &col, "card1", 3, 0, Some(5.0)).await;
+
+    p.move_cards_between_collections(
+        &[CollectionCard {
+            uuid: "card1".to_string(),
+            quantity: 3,
+            foil_quantity: 0,
+            time_added: OLD_TIME.to_string(),
+            collection: col.clone(),
+            provider: "".to_string(),
+        }],
+        col.clone(),
+    )
+    .await
+    .unwrap();
+
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    let total: i32 = hist.iter().map(|e| e.quantity).sum();
+    assert_eq!(total, 3);
+}
+
+#[tokio::test]
+async fn test_move_cards_trims_source_history() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    add_card(&mut p, &col_a, &"card1".to_string(), 4, 0).await;
+    record_purchase(&mut p, &col_a, "card1", 2, 0, Some(1.0)).await;
+    record_purchase(&mut p, &col_a, "card1", 2, 0, Some(9.0)).await;
+
+    // move 3 → source has 1 left, history sum=4 → trim cheapest 3
+    p.move_cards_between_collections(
+        &[CollectionCard {
+            uuid: "card1".to_string(),
+            quantity: 3,
+            foil_quantity: 0,
+            time_added: OLD_TIME.to_string(),
+            collection: col_a.clone(),
+            provider: "".to_string(),
+        }],
+        col_b.clone(),
+    )
+    .await
+    .unwrap();
+
+    let hist = p.get_purchase_history(&col_a, &"card1".to_string()).await.unwrap();
+    let total: i32 = hist.iter().map(|e| e.quantity).sum();
+    assert_eq!(total, 1);
+    assert!(hist.iter().all(|e| e.normal_price_per_unit == Some(9.0)));
+}
+
+#[tokio::test]
+async fn test_move_cards_transfers_history_to_destination() {
+    // trimmed entries go to destination rather than being deleted
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    add_card(&mut p, &col_a, &"card1".to_string(), 4, 0).await;
+    record_purchase(&mut p, &col_a, "card1", 2, 0, Some(1.0)).await; // cheap → trimmed
+    record_purchase(&mut p, &col_a, "card1", 2, 0, Some(9.0)).await; // expensive → kept
+
+    // move 3 → source keeps 1, history sum=4 → 3 cheapest transferred to col_b
+    p.move_cards_between_collections(
+        &[CollectionCard {
+            uuid: "card1".to_string(),
+            quantity: 3,
+            foil_quantity: 0,
+            time_added: OLD_TIME.to_string(),
+            collection: col_a.clone(),
+            provider: "".to_string(),
+        }],
+        col_b.clone(),
+    )
+    .await
+    .unwrap();
+
+    // source: 1 card, 1 history entry (the expensive one, reduced to qty=1)
+    let hist_a = p.get_purchase_history(&col_a, &"card1".to_string()).await.unwrap();
+    let total_a: i32 = hist_a.iter().map(|e| e.quantity).sum();
+    assert_eq!(total_a, 1);
+    assert!(hist_a.iter().all(|e| e.normal_price_per_unit == Some(9.0)));
+
+    // destination received the 3 transferred cards' worth of history
+    let hist_b = p.get_purchase_history(&col_b, &"card1".to_string()).await.unwrap();
+    let total_b: i32 = hist_b.iter().map(|e| e.quantity).sum();
+    assert_eq!(total_b, 3);
+    // cheap entry (qty=2 @ $1) and partial expensive (qty=1 @ $9)
+    let cheap = hist_b.iter().find(|e| e.normal_price_per_unit == Some(1.0)).unwrap();
+    assert_eq!(cheap.quantity, 2);
+    let expensive = hist_b.iter().find(|e| e.normal_price_per_unit == Some(9.0)).unwrap();
+    assert_eq!(expensive.quantity, 1);
+}
+
+#[tokio::test]
+async fn test_move_cards_foil_history_transferred() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    add_card(&mut p, &col_a, &"card1".to_string(), 0, 3).await;
+    record_purchase(&mut p, &col_a, "card1", 0, 2, Some(2.0)).await;
+    record_purchase(&mut p, &col_a, "card1", 0, 1, Some(8.0)).await;
+
+    p.move_cards_between_collections(
+        &[CollectionCard {
+            uuid: "card1".to_string(),
+            quantity: 0,
+            foil_quantity: 2,
+            time_added: OLD_TIME.to_string(),
+            collection: col_a.clone(),
+            provider: "".to_string(),
+        }],
+        col_b.clone(),
+    )
+    .await
+    .unwrap();
+
+    let hist_a = p.get_purchase_history(&col_a, &"card1".to_string()).await.unwrap();
+    let foil_a: i32 = hist_a.iter().map(|e| e.foil_quantity).sum();
+    assert_eq!(foil_a, 1);
+    assert!(hist_a.iter().all(|e| e.foil_price_per_unit == Some(8.0)));
+
+    let hist_b = p.get_purchase_history(&col_b, &"card1".to_string()).await.unwrap();
+    let foil_b: i32 = hist_b.iter().map(|e| e.foil_quantity).sum();
+    assert_eq!(foil_b, 2);
 }

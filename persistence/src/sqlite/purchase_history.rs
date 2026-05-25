@@ -80,6 +80,136 @@ pub(super) fn get_all_history(
     Ok(entries)
 }
 
+pub(super) fn trim_history_to_collection(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    card_uuid: &CardID,
+    target_qty: i32,
+    target_foil_qty: i32,
+) -> eyre::Result<()> {
+    trim_by_type(conn, collection_id, None, card_uuid, target_qty, false)?;
+    trim_by_type(conn, collection_id, None, card_uuid, target_foil_qty, true)?;
+    conn.execute(
+        "DELETE FROM purchase_history \
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND quantity <= 0 AND foil_quantity <= 0",
+        params![collection_id, card_uuid],
+    )?;
+    Ok(())
+}
+
+pub(super) fn transfer_trimmed_history_to_collection(
+    conn: &Connection,
+    src_collection: &CollectionID,
+    dst_collection: &CollectionID,
+    card_uuid: &CardID,
+    target_qty: i32,
+    target_foil_qty: i32,
+) -> eyre::Result<()> {
+    trim_by_type(conn, src_collection, Some(dst_collection), card_uuid, target_qty, false)?;
+    trim_by_type(conn, src_collection, Some(dst_collection), card_uuid, target_foil_qty, true)?;
+    conn.execute(
+        "DELETE FROM purchase_history \
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND quantity <= 0 AND foil_quantity <= 0",
+        params![src_collection, card_uuid],
+    )?;
+    Ok(())
+}
+
+struct TrimEntry {
+    id: i64,
+    qty: i32,
+    normal_price: Option<f64>,
+    foil_price: Option<f64>,
+    provider: String,
+    recorded_at: String,
+}
+
+fn trim_by_type(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    transfer_to: Option<&CollectionID>,
+    card_uuid: &CardID,
+    target: i32,
+    foil: bool,
+) -> eyre::Result<()> {
+    let (qty_col, price_col) = if foil {
+        ("foil_quantity", "foil_price_per_unit")
+    } else {
+        ("quantity", "normal_price_per_unit")
+    };
+
+    let total: i32 = conn.query_row(
+        &format!(
+            "SELECT COALESCE(SUM({qty_col}), 0) FROM purchase_history \
+             WHERE collection_id = ?1 AND card_uuid = ?2"
+        ),
+        params![collection_id, card_uuid],
+        |row| row.get(0),
+    )?;
+
+    if total <= target {
+        return Ok(());
+    }
+
+    let mut excess = total - target;
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, {qty_col}, normal_price_per_unit, foil_price_per_unit, provider, recorded_at \
+         FROM purchase_history \
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND {qty_col} > 0 \
+         ORDER BY {price_col} ASC NULLS FIRST, id ASC"
+    ))?;
+    let entries: Vec<TrimEntry> = stmt
+        .query_map(params![collection_id, card_uuid], |row| {
+            Ok(TrimEntry {
+                id: row.get(0)?,
+                qty: row.get(1)?,
+                normal_price: row.get(2)?,
+                foil_price: row.get(3)?,
+                provider: row.get(4)?,
+                recorded_at: row.get(5)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+
+    for entry in entries {
+        if excess <= 0 {
+            break;
+        }
+        let remove = entry.qty.min(excess);
+        conn.execute(
+            &format!("UPDATE purchase_history SET {qty_col} = {qty_col} - ?1 WHERE id = ?2"),
+            params![remove, entry.id],
+        )?;
+        if let Some(dst) = transfer_to {
+            let (new_qty, new_foil_qty, new_normal_price, new_foil_price) = if foil {
+                (0i32, remove, None::<f64>, entry.foil_price)
+            } else {
+                (remove, 0i32, entry.normal_price, None::<f64>)
+            };
+            conn.execute(
+                "INSERT INTO purchase_history \
+                 (collection_id, card_uuid, quantity, foil_quantity, \
+                  normal_price_per_unit, foil_price_per_unit, provider, recorded_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    dst,
+                    card_uuid,
+                    new_qty,
+                    new_foil_qty,
+                    new_normal_price,
+                    new_foil_price,
+                    entry.provider,
+                    entry.recorded_at,
+                ],
+            )?;
+        }
+        excess -= remove;
+    }
+
+    Ok(())
+}
+
 pub(super) fn get_collection_totals(
     conn: &Connection,
     collection_id: &CollectionID,
