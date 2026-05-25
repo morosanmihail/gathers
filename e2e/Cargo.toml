@@ -1,0 +1,19 @@
+[package]
+name = "e2e"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "e2e"
+
+[[example]]
+name = "collection_lifecycle"
+
+[dependencies]
+chrono = { workspace = true }
+eyre = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

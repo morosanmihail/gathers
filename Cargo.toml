@@ -1,5 +1,5 @@
 [workspace]
-members = ["models", "retrieval", "gathers", "server", "persistence", "benches"]
+members = ["models", "retrieval", "gathers", "server", "persistence", "benches", "e2e"]
 resolver = "2"
 
 [workspace.package]
