@@ -26,7 +26,7 @@ pub(super) fn remove_collection(
         conn.execute(query, params![target, name])?;
     }
     conn.execute(
-        "DELETE FROM cards WHERE collection IN (SELECT name FROM collection WHERE name = ?1)",
+        "DELETE FROM cards WHERE collection = ?1",
         params![name],
     )?;
     conn.execute(
@@ -40,20 +40,16 @@ pub(super) fn list_collections(
     conn: &Connection,
     filter: Option<&str>,
 ) -> eyre::Result<Vec<CollectionID>> {
-    let mut collections = Vec::new();
-    if let Some(f) = filter {
-        let pattern = format!("%{f}%");
-        let mut stmt =
-            conn.prepare("SELECT name FROM collection WHERE name LIKE ?1")?;
-        for row in stmt.query_map(params![pattern], |r| r.get::<_, String>(0))? {
-            collections.push(row?);
-        }
+    let pattern = filter.map(|f| format!("%{f}%"));
+    let collections = if let Some(p) = &pattern {
+        let mut stmt = conn.prepare("SELECT name FROM collection WHERE name LIKE ?1")?;
+        stmt.query_map(params![p], |r| r.get::<_, String>(0))?
+            .collect::<Result<_, _>>()?
     } else {
         let mut stmt = conn.prepare("SELECT name FROM collection")?;
-        for row in stmt.query_map(params![], |r| r.get::<_, String>(0))? {
-            collections.push(row?);
-        }
-    }
+        stmt.query_map(params![], |r| r.get::<_, String>(0))?
+            .collect::<Result<_, _>>()?
+    };
     Ok(collections)
 }
 
@@ -64,13 +60,13 @@ pub(super) fn get_cards_count(
 ) -> eyre::Result<usize> {
     let count: usize = if providers.is_empty() {
         let mut stmt =
-            conn.prepare("SELECT COUNT(ALL uuid) FROM cards WHERE collection = ?1")?;
+            conn.prepare("SELECT COUNT(*) FROM cards WHERE collection = ?1")?;
         stmt.query_row(params![collection_id], |r| r.get::<_, u32>(0))? as usize
     } else {
         let placeholders: Vec<String> =
             (2..=providers.len() + 1).map(|i| format!("?{i}")).collect();
         let query = format!(
-            "SELECT COUNT(ALL uuid) FROM cards WHERE collection = ?1 AND provider IN ({})",
+            "SELECT COUNT(*) FROM cards WHERE collection = ?1 AND provider IN ({})",
             placeholders.join(", ")
         );
         let mut query_params: Vec<String> = vec![collection_id.clone()];

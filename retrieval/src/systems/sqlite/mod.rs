@@ -17,7 +17,7 @@ pub struct DownloadProgress {
 }
 
 use ::models::{Card, CardID, CardPrices, CollectorNumber, RetailerPrices, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
-use flate2::read::GzDecoder;
+use bzip2::read::BzDecoder;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use models::SqlCard;
@@ -116,7 +116,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         }
         if let Some(rarity) = &filters.rarity {
             conditions.push(format!("a.rarity = ?{i}"));
-            params.push(rarity.to_single_string().to_string());
+            params.push(rarity.to_single_string().to_owned());
             i += 1;
         }
         if let Some(collector_number) = &filters.collector_number
@@ -148,6 +148,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             for t in types {
                 conditions.push(format!("a.types LIKE ?{i}"));
                 params.push(format!("%{t}%"));
+                i += 1;
             }
         }
         if !conditions.is_empty() {
@@ -164,9 +165,9 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let sort_dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) { "DESC" } else { "ASC" };
         query.push_str(&format!(" ORDER BY {sort_col} COLLATE NOCASE {sort_dir}"));
         if let Some(limit) = limit {
-            query.push_str(format!(" LIMIT {limit} COLLATE NOCASE").as_str());
+            query.push_str(&format!(" LIMIT {limit}"));
         } else {
-            query.push_str(" LIMIT 1 COLLATE NOCASE");
+            query.push_str(" LIMIT 1");
         }
         if let Some(skip) = skip {
             query.push_str(format!(" OFFSET {skip}").as_str())
@@ -175,13 +176,13 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let user_iter =
             stmt.query_map(rusqlite::params_from_iter(params.iter()), SqlCard::from_row)?;
 
-        Ok(user_iter
-            .filter(|c| c.is_ok())
-            .map(|c| Card::Magic(c.unwrap().into()))
-            .collect())
+        Ok(user_iter.flatten().map(|c| Card::Magic(c.into())).collect())
     }
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
         let conn = self.connection.lock().await;
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!(
@@ -190,10 +191,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
-        Ok(iter
-            .flatten()
-            .map(|c| (c.clone().id, Card::Magic(c.clone().into())))
-            .collect())
+        Ok(iter.flatten().map(|c| (c.id.clone(), Card::Magic(c.into()))).collect())
     }
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
@@ -290,10 +288,11 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {
-        const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite";
-        const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.sha256";
+        const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2";
+        const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
 
         let local_file_path = PathBuf::from_str(&self.db_path)?;
+        let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", local_file_path.display()));
 
         let temp_dir = tempfile::tempdir()?;
         let crc_file_path = temp_dir.path().join("remote_crc.sha");
@@ -301,10 +300,10 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         stream_to_file(CRC_URL, "SHA256 fetched", &crc_file_path, None, "checking").await?;
         let remote_crc = fs::read_to_string(&crc_file_path)?.trim().to_lowercase();
 
-        let local_crc = if local_file_path.exists() {
-            calculate_sha256(&local_file_path)?
+        let local_crc = if sidecar_path.exists() {
+            fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
         } else {
-            String::from("invalid") // Dummy value that won't match
+            String::from("none")
         };
 
         if remote_crc != local_crc {
@@ -315,20 +314,25 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
 
             tokio::spawn(async move {
                 let temp_dir = tempfile::tempdir().expect("Gotta be able to create a temp dir");
-                let download_file_path = temp_dir.path().join("downloaded_file");
+                let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
 
-                println!("Download from {DOWNLOAD_URL:?} to {download_file_path:?}...");
-                stream_to_file(DOWNLOAD_URL, "Download complete", &download_file_path, None, "downloading")
+                println!("Download from {DOWNLOAD_URL:?} to {bz2_path:?}...");
+                let result = stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading")
                     .await
-                    .and_then(|_| calculate_sha256(&download_file_path))
-                    .map(|downloaded_crc| {
+                    .and_then(|_| calculate_sha256(&bz2_path))
+                    .and_then(|downloaded_crc| {
                         if downloaded_crc == remote_crc {
-                            fs::copy(&download_file_path, local_file_path)
-                                .expect("File failed to copy");
+                            decompress_bz2(&bz2_path, &local_file_path)?;
+                            fs::write(&sidecar_path, &downloaded_crc)?;
                             println!("File replaced successfully.");
+                        } else {
+                            println!("Downloaded CRC mismatch: expected {remote_crc}, got {downloaded_crc}");
                         }
-                    })
-                    .map_err(|e| println!("Failed to download due to {e}"))
+                        Ok(())
+                    });
+                if let Err(e) = result {
+                    println!("Failed to download due to {e}");
+                }
             });
 
             Ok(true)
@@ -405,7 +409,7 @@ fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardPrices>> {
 }
 
 pub async fn download_prices(path: &str) -> eyre::Result<()> {
-    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.gz";
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.bz2";
 
     let target = PathBuf::from_str(path)?;
     if let Some(parent) = target.parent()
@@ -416,14 +420,14 @@ pub async fn download_prices(path: &str) -> eyre::Result<()> {
     }
 
     let temp_dir = tempfile::tempdir()?;
-    let gz_path = temp_dir.path().join("AllPricesToday.json.gz");
+    let bz2_path = temp_dir.path().join("AllPricesToday.json.bz2");
 
-    println!("Downloading AllPricesToday.json.gz...");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &gz_path, None, "downloading").await?;
+    println!("Downloading AllPricesToday.json.bz2...");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading").await?;
 
-    println!("Decompressing AllPricesToday.json.gz...");
-    let gz_file = fs::File::open(&gz_path)?;
-    let mut decoder = GzDecoder::new(gz_file);
+    println!("Decompressing AllPricesToday.json.bz2...");
+    let bz2_file = fs::File::open(&bz2_path)?;
+    let mut decoder = BzDecoder::new(bz2_file);
     let mut json_content = String::new();
     decoder.read_to_string(&mut json_content)?;
 
@@ -481,14 +485,23 @@ fn calculate_sha256(path: &Path) -> eyre::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+fn decompress_bz2(src: &Path, dst: &Path) -> eyre::Result<()> {
+    let file = fs::File::open(src)?;
+    let mut decoder = BzDecoder::new(file);
+    let mut out = fs::File::create(dst)?;
+    std::io::copy(&mut decoder, &mut out)?;
+    Ok(())
+}
+
 pub async fn download_mtg_db(
     path: &str,
     progress: Option<Arc<Mutex<DownloadProgress>>>,
 ) -> eyre::Result<()> {
-    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite";
-    const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.sha256";
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2";
+    const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
 
     let target = PathBuf::from_str(path)?;
+    let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", target.display()));
 
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
@@ -499,32 +512,41 @@ pub async fn download_mtg_db(
 
     let temp_dir = tempfile::tempdir()?;
 
-    println!("Fetching remote SHA256 for AllPrintings.db...");
+    println!("Fetching remote SHA256 for AllPrintings.sqlite.bz2...");
     let crc_path = temp_dir.path().join("remote.sha256");
     stream_to_file(CRC_URL, "SHA256 fetched", &crc_path, progress.as_ref(), "checking").await?;
     let remote_crc = fs::read_to_string(&crc_path)?.trim().to_lowercase();
 
-    if target.exists() && calculate_sha256(&target)? == remote_crc {
+    let local_crc = if sidecar_path.exists() {
+        fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
+    } else {
+        String::new()
+    };
+    if target.exists() && local_crc == remote_crc {
         println!("AllPrintings.db is already up to date (CRC: {remote_crc}).");
         return Ok(());
     }
 
-    println!("Downloading AllPrintings.db to {target:?}...");
-    let download_path = temp_dir.path().join("AllPrintings.db.download");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &download_path, progress.as_ref(), "downloading").await?;
+    println!("Downloading AllPrintings.sqlite.bz2 to {target:?}...");
+    let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, progress.as_ref(), "downloading").await?;
 
     if let Some(p) = &progress {
         p.lock().await.phase = "verifying".to_string();
     }
-    let downloaded_crc = calculate_sha256(&download_path)?;
+    let downloaded_crc = calculate_sha256(&bz2_path)?;
     if downloaded_crc != remote_crc {
         eyre::bail!(
-            "AllPrintings.db CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
+            "AllPrintings.sqlite.bz2 CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
         );
     }
 
-    fs::copy(&download_path, &target)?;
-    println!("AllPrintings.db downloaded and verified (CRC: {downloaded_crc}).");
+    if let Some(p) = &progress {
+        p.lock().await.phase = "decompressing".to_string();
+    }
+    decompress_bz2(&bz2_path, &target)?;
+    fs::write(&sidecar_path, &downloaded_crc)?;
+    println!("AllPrintings.db downloaded, verified, and decompressed (CRC: {downloaded_crc}).");
     Ok(())
 }
 
@@ -717,6 +739,13 @@ mod tests {
         }
     }
 
+    fn card_types(c: &::models::Card) -> Vec<String> {
+        match c {
+            ::models::Card::Magic(m) => m.types.clone(),
+            _ => vec![],
+        }
+    }
+
     fn card_rarity(c: &::models::Card) -> String {
         match c {
             ::models::Card::Magic(m) => format!("{:?}", m.rarity).to_lowercase(),
@@ -809,6 +838,57 @@ mod tests {
         let default_names: Vec<_> = default_cards.iter().map(card_name).collect();
         let explicit_names: Vec<_> = explicit_cards.iter().map(card_name).collect();
         assert_eq!(default_names, explicit_names);
+    }
+
+    // ── Multi-type filter tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_search_cards_multiple_types_mutually_exclusive_returns_empty() {
+        // Regression: the types loop was missing `i += 1`, so all conditions
+        // reused the same parameter index and effectively checked only the
+        // first type. With two mutually-exclusive types the old code returned
+        // the same results as a single-type filter; the fix returns zero.
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+        let filters = CardSearchFilters {
+            // No card can be both a Creature and a Sorcery.
+            types: Some(vec!["Creature".to_string(), "Sorcery".to_string()]),
+            ..Default::default()
+        };
+        let cards = system.search_cards(filters, None, Some(200)).await.unwrap();
+        // card_types used here so the helper is not flagged dead_code.
+        assert!(
+            cards.iter().all(|c| {
+                let t = card_types(c);
+                t.iter().any(|x| x.eq_ignore_ascii_case("Creature"))
+                    && t.iter().any(|x| x.eq_ignore_ascii_case("Sorcery"))
+            }),
+            "no card can be both Creature and Sorcery, got {} results",
+            cards.len()
+        );
+        assert!(cards.is_empty(), "expected zero results for impossible type combo");
+    }
+
+    #[tokio::test]
+    async fn test_search_cards_two_type_filter_is_stricter_than_one() {
+        // Regression: before the fix both conditions resolved to the same
+        // parameter, making the two-type filter identical to the one-type
+        // filter. After the fix, AND semantics hold and the result set shrinks.
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+        let single = CardSearchFilters {
+            types: Some(vec!["Creature".to_string()]),
+            ..Default::default()
+        };
+        let dual = CardSearchFilters {
+            // Creatures-only vs Creature-AND-Sorcery (impossible combo → 0 results).
+            types: Some(vec!["Creature".to_string(), "Sorcery".to_string()]),
+            ..Default::default()
+        };
+        let single_count = system.search_cards(single, None, Some(200)).await.unwrap().len();
+        let dual_count = system.search_cards(dual, None, Some(200)).await.unwrap().len();
+        assert!(
+            single_count > dual_count,
+            "one-type filter ({single_count}) should return more results than mutually-exclusive two-type AND ({dual_count})"
+        );
     }
 
     // ── Price tests ───────────────────────────────────────────────────────────

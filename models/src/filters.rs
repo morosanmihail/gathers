@@ -48,22 +48,7 @@ pub struct CardSearchFilters {
 
 impl CardSearchFilters {
     pub fn new() -> Self {
-        Self {
-            name: None,
-            color_identities: None,
-            set_code: None,
-            collector_number: None,
-            artist: None,
-            text: None,
-            rarity: None,
-            subtypes: None,
-            supertypes: None,
-            types: None,
-            domains: None,
-            energy_types: None,
-            sort_by: None,
-            sort_order: None,
-        }
+        Self::default()
     }
 
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
@@ -198,6 +183,59 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_all_fields() {
+        use crate::{CardColour, Rarity, pokemon::EnergyType, riftbound::CardDomain};
+
+        let filters = CardSearchFilters::new()
+            .with_name("Bolt")
+            .with_color_identities(vec![CardColour::Red])
+            .with_set_code("M13")
+            .with_collector_number("42")
+            .with_artist("Volkan")
+            .with_text("deals 3 damage")
+            .with_rarity(Rarity::Rare)
+            .with_subtypes(vec!["Instant".to_string()])
+            .with_supertypes("Legendary")
+            .with_types(vec!["Sorcery".to_string()])
+            .with_domains(vec![CardDomain::Fury])
+            .with_energy_types(vec![EnergyType::Fire]);
+
+        assert_eq!(filters.name, Some("Bolt".to_string()));
+        assert_eq!(filters.color_identities, Some(vec![CardColour::Red]));
+        assert_eq!(filters.set_code, Some("M13".to_string()));
+        assert_eq!(filters.collector_number, Some("42".to_string()));
+        assert_eq!(filters.artist, Some("Volkan".to_string()));
+        assert_eq!(filters.text, Some("deals 3 damage".to_string()));
+        assert_eq!(filters.rarity, Some(Rarity::Rare));
+        assert_eq!(filters.subtypes, Some(vec!["Instant".to_string()]));
+        assert_eq!(filters.supertypes, Some("Legendary".to_string()));
+        assert_eq!(filters.types, Some(vec!["Sorcery".to_string()]));
+        assert_eq!(filters.domains, Some(vec![CardDomain::Fury]));
+        assert_eq!(filters.energy_types, Some(vec![EnergyType::Fire]));
+    }
+
+    #[test]
+    fn test_rarity_deserialization_from_string() {
+        let json = r#"{"rarity":"Rare"}"#;
+        let f: CardSearchFilters = serde_json::from_str(json).unwrap();
+        assert_eq!(f.rarity, Some(Rarity::Rare));
+    }
+
+    #[test]
+    fn test_rarity_empty_string_becomes_none() {
+        let json = r#"{"rarity":""}"#;
+        let f: CardSearchFilters = serde_json::from_str(json).unwrap();
+        assert!(f.rarity.is_none());
+    }
+
+    #[test]
+    fn test_rarity_absent_becomes_none() {
+        let json = r#"{}"#;
+        let f: CardSearchFilters = serde_json::from_str(json).unwrap();
+        assert!(f.rarity.is_none());
+    }
+
+    #[test]
     fn test_filters_serde_preserves_sort_fields() {
         let original = CardSearchFilters::new()
             .with_name("Lightning Bolt")
@@ -219,7 +257,8 @@ where
     Ok(match opt.as_deref() {
         Some("") | None => None,
         Some(s) => {
-            Some(serde_json::from_str(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)?)
+            let v = serde_json::Value::String(s.to_owned());
+            Some(serde_json::from_value(v).map_err(serde::de::Error::custom)?)
         }
     })
 }

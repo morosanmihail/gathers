@@ -88,7 +88,7 @@ impl std::fmt::Display for PokemonRarity {
 }
 
 impl PokemonRarity {
-    pub fn to_single_string(&self) -> String {
+    pub fn to_single_string(&self) -> &'static str {
         match self {
             PokemonRarity::Common => "common",
             PokemonRarity::Uncommon => "uncommon",
@@ -116,7 +116,6 @@ impl PokemonRarity {
             PokemonRarity::MegaHyperRare => "mega hyper rare",
             PokemonRarity::MegaAttackRare => "mega attack rare",
         }
-        .to_string()
     }
 }
 
@@ -147,7 +146,7 @@ impl From<String> for PokemonRarity {
             "ace spec rare" => PokemonRarity::AceSpecRare,
             "black white rare" => PokemonRarity::BlackWhiteRare,
             "mega hyper rare" => PokemonRarity::MegaHyperRare,
-            "mega attack rare" | "Mega Attack Rare" => PokemonRarity::MegaAttackRare,
+            "mega attack rare" => PokemonRarity::MegaAttackRare,
             _ => PokemonRarity::Common,
         }
     }

@@ -61,6 +61,9 @@ struct Args {
 
     #[clap(short, long)]
     download: bool,
+
+    #[clap(long)]
+    price: Option<String>,
 }
 
 #[tokio::main]
@@ -134,7 +137,7 @@ async fn main() -> eyre::Result<()> {
             RetrievalSystem::ScryfallRetrievalSystem(retrieval::ScryfallRetrievalSystem {})
         }
         Systems::Sql => RetrievalSystem::MagicSQLiteRetrievalSystem(
-            retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path, None)?,
+            retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path, args.price.clone())?,
         ),
         Systems::RiftboundSql => RetrievalSystem::RiftboundSQLiteRetrievalSystem(
             retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path)?,
@@ -147,7 +150,7 @@ async fn main() -> eyre::Result<()> {
     let color_identities: Option<Vec<CardColour>> = if args.color.is_empty() {
         None
     } else {
-        Some(args.color.iter().map(CardColour::from).collect())
+        Some(args.color.iter().map(|s| CardColour::from(s.as_str())).collect())
     };
 
     let domains: Option<Vec<CardDomain>> = if args.domain.is_empty() {
@@ -196,43 +199,84 @@ async fn main() -> eyre::Result<()> {
 
     match args.system {
         Systems::Scryfall | Systems::Sql => {
-            println!(
-                "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15}",
-                "Name",
-                "Set",
-                "Rarity",
-                "Colors",
-                "Artist",
-                "Number",
-                "Subtype",
-                "Supertype",
-                "Types"
-            );
-            println!("{}", "-".repeat(140));
-            for card in cards {
-                let card = if let Card::Magic(card) = card {
-                    card
-                } else {
-                    panic!("Not a Magic card")
-                };
+            let magic_cards: Vec<_> = cards
+                .into_iter()
+                .map(|card| {
+                    if let Card::Magic(card) = card {
+                        card
+                    } else {
+                        panic!("Not a Magic card")
+                    }
+                })
+                .collect();
+
+            let prices = if args.price.is_some() {
+                let uuids = magic_cards.iter().map(|c| c.id.clone()).collect();
+                retrieval.get_bulk_card_prices(uuids).await?
+            } else {
+                std::collections::HashMap::new()
+            };
+
+            if args.price.is_some() {
+                println!(
+                    "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15} {:<12} {:<12}",
+                    "Name", "Set", "Rarity", "Colors", "Artist", "Number", "Subtype", "Supertype", "Types", "Normal", "Foil"
+                );
+                println!("{}", "-".repeat(165));
+            } else {
+                println!(
+                    "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15}",
+                    "Name", "Set", "Rarity", "Colors", "Artist", "Number", "Subtype", "Supertype", "Types"
+                );
+                println!("{}", "-".repeat(140));
+            }
+
+            for card in magic_cards {
                 let color_str: String = card
                     .color_identity
                     .iter()
                     .map(|c| format!("{}", c))
                     .collect::<Vec<_>>()
                     .join("");
-                println!(
-                    "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15}",
-                    card.name,
-                    card.set_code,
-                    card.rarity.to_string().to_lowercase(),
-                    color_str,
-                    card.artist,
-                    card.collector_number,
-                    card.supertypes.join(","),
-                    card.types.join(","),
-                    card.subtypes.join(","),
-                );
+                if args.price.is_some() {
+                    let fmt_price = |f: fn(&models::RetailerPrices) -> Option<f64>| {
+                        prices
+                            .get(&card.id)
+                            .and_then(|p| {
+                                p.paper.values().filter_map(f).reduce(f64::min).map(|v| format!("${:.2}", v))
+                            })
+                            .unwrap_or_else(|| "N/A".to_string())
+                    };
+                    let normal = fmt_price(|r| r.normal);
+                    let foil = fmt_price(|r| r.foil);
+                    println!(
+                        "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15} {:<12} {:<12}",
+                        card.name,
+                        card.set_code,
+                        card.rarity.to_string().to_lowercase(),
+                        color_str,
+                        card.artist,
+                        card.collector_number,
+                        card.supertypes.join(","),
+                        card.types.join(","),
+                        card.subtypes.join(","),
+                        normal,
+                        foil,
+                    );
+                } else {
+                    println!(
+                        "{:<30} {:<5} {:<10} {:<7} {:<25} {:<10} {:<15} {:<15} {:<15}",
+                        card.name,
+                        card.set_code,
+                        card.rarity.to_string().to_lowercase(),
+                        color_str,
+                        card.artist,
+                        card.collector_number,
+                        card.supertypes.join(","),
+                        card.types.join(","),
+                        card.subtypes.join(","),
+                    );
+                }
             }
         }
         Systems::RiftboundSql => {
