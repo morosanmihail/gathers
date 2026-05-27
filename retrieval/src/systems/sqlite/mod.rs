@@ -17,7 +17,7 @@ pub struct DownloadProgress {
 }
 
 use ::models::{Card, CardID, CardPrices, CollectorNumber, RetailerPrices, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
-use flate2::read::GzDecoder;
+use bzip2::read::BzDecoder;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use models::SqlCard;
@@ -288,10 +288,11 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {
-        const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite";
-        const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.sha256";
+        const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2";
+        const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
 
         let local_file_path = PathBuf::from_str(&self.db_path)?;
+        let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", local_file_path.display()));
 
         let temp_dir = tempfile::tempdir()?;
         let crc_file_path = temp_dir.path().join("remote_crc.sha");
@@ -299,10 +300,10 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         stream_to_file(CRC_URL, "SHA256 fetched", &crc_file_path, None, "checking").await?;
         let remote_crc = fs::read_to_string(&crc_file_path)?.trim().to_lowercase();
 
-        let local_crc = if local_file_path.exists() {
-            calculate_sha256(&local_file_path)?
+        let local_crc = if sidecar_path.exists() {
+            fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
         } else {
-            String::from("invalid") // Dummy value that won't match
+            String::from("none")
         };
 
         if remote_crc != local_crc {
@@ -313,20 +314,25 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
 
             tokio::spawn(async move {
                 let temp_dir = tempfile::tempdir().expect("Gotta be able to create a temp dir");
-                let download_file_path = temp_dir.path().join("downloaded_file");
+                let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
 
-                println!("Download from {DOWNLOAD_URL:?} to {download_file_path:?}...");
-                stream_to_file(DOWNLOAD_URL, "Download complete", &download_file_path, None, "downloading")
+                println!("Download from {DOWNLOAD_URL:?} to {bz2_path:?}...");
+                let result = stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading")
                     .await
-                    .and_then(|_| calculate_sha256(&download_file_path))
-                    .map(|downloaded_crc| {
+                    .and_then(|_| calculate_sha256(&bz2_path))
+                    .and_then(|downloaded_crc| {
                         if downloaded_crc == remote_crc {
-                            fs::copy(&download_file_path, local_file_path)
-                                .expect("File failed to copy");
+                            decompress_bz2(&bz2_path, &local_file_path)?;
+                            fs::write(&sidecar_path, &downloaded_crc)?;
                             println!("File replaced successfully.");
+                        } else {
+                            println!("Downloaded CRC mismatch: expected {remote_crc}, got {downloaded_crc}");
                         }
-                    })
-                    .map_err(|e| println!("Failed to download due to {e}"))
+                        Ok(())
+                    });
+                if let Err(e) = result {
+                    println!("Failed to download due to {e}");
+                }
             });
 
             Ok(true)
@@ -403,7 +409,7 @@ fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardPrices>> {
 }
 
 pub async fn download_prices(path: &str) -> eyre::Result<()> {
-    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.gz";
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.bz2";
 
     let target = PathBuf::from_str(path)?;
     if let Some(parent) = target.parent()
@@ -414,14 +420,14 @@ pub async fn download_prices(path: &str) -> eyre::Result<()> {
     }
 
     let temp_dir = tempfile::tempdir()?;
-    let gz_path = temp_dir.path().join("AllPricesToday.json.gz");
+    let bz2_path = temp_dir.path().join("AllPricesToday.json.bz2");
 
-    println!("Downloading AllPricesToday.json.gz...");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &gz_path, None, "downloading").await?;
+    println!("Downloading AllPricesToday.json.bz2...");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading").await?;
 
-    println!("Decompressing AllPricesToday.json.gz...");
-    let gz_file = fs::File::open(&gz_path)?;
-    let mut decoder = GzDecoder::new(gz_file);
+    println!("Decompressing AllPricesToday.json.bz2...");
+    let bz2_file = fs::File::open(&bz2_path)?;
+    let mut decoder = BzDecoder::new(bz2_file);
     let mut json_content = String::new();
     decoder.read_to_string(&mut json_content)?;
 
@@ -479,14 +485,23 @@ fn calculate_sha256(path: &Path) -> eyre::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+fn decompress_bz2(src: &Path, dst: &Path) -> eyre::Result<()> {
+    let file = fs::File::open(src)?;
+    let mut decoder = BzDecoder::new(file);
+    let mut out = fs::File::create(dst)?;
+    std::io::copy(&mut decoder, &mut out)?;
+    Ok(())
+}
+
 pub async fn download_mtg_db(
     path: &str,
     progress: Option<Arc<Mutex<DownloadProgress>>>,
 ) -> eyre::Result<()> {
-    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite";
-    const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.sha256";
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2";
+    const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
 
     let target = PathBuf::from_str(path)?;
+    let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", target.display()));
 
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
@@ -497,32 +512,41 @@ pub async fn download_mtg_db(
 
     let temp_dir = tempfile::tempdir()?;
 
-    println!("Fetching remote SHA256 for AllPrintings.db...");
+    println!("Fetching remote SHA256 for AllPrintings.sqlite.bz2...");
     let crc_path = temp_dir.path().join("remote.sha256");
     stream_to_file(CRC_URL, "SHA256 fetched", &crc_path, progress.as_ref(), "checking").await?;
     let remote_crc = fs::read_to_string(&crc_path)?.trim().to_lowercase();
 
-    if target.exists() && calculate_sha256(&target)? == remote_crc {
+    let local_crc = if sidecar_path.exists() {
+        fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
+    } else {
+        String::new()
+    };
+    if target.exists() && local_crc == remote_crc {
         println!("AllPrintings.db is already up to date (CRC: {remote_crc}).");
         return Ok(());
     }
 
-    println!("Downloading AllPrintings.db to {target:?}...");
-    let download_path = temp_dir.path().join("AllPrintings.db.download");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &download_path, progress.as_ref(), "downloading").await?;
+    println!("Downloading AllPrintings.sqlite.bz2 to {target:?}...");
+    let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, progress.as_ref(), "downloading").await?;
 
     if let Some(p) = &progress {
         p.lock().await.phase = "verifying".to_string();
     }
-    let downloaded_crc = calculate_sha256(&download_path)?;
+    let downloaded_crc = calculate_sha256(&bz2_path)?;
     if downloaded_crc != remote_crc {
         eyre::bail!(
-            "AllPrintings.db CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
+            "AllPrintings.sqlite.bz2 CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
         );
     }
 
-    fs::copy(&download_path, &target)?;
-    println!("AllPrintings.db downloaded and verified (CRC: {downloaded_crc}).");
+    if let Some(p) = &progress {
+        p.lock().await.phase = "decompressing".to_string();
+    }
+    decompress_bz2(&bz2_path, &target)?;
+    fs::write(&sidecar_path, &downloaded_crc)?;
+    println!("AllPrintings.db downloaded, verified, and decompressed (CRC: {downloaded_crc}).");
     Ok(())
 }
 
