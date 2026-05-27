@@ -94,8 +94,8 @@ impl Display for CardColour {
     }
 }
 
-impl From<&String> for CardColour {
-    fn from(value: &String) -> Self {
+impl From<&str> for CardColour {
+    fn from(value: &str) -> Self {
         match value.to_lowercase().as_str() {
             "w" | "white" => CardColour::White,
             "u" | "blue" => CardColour::Blue,
@@ -123,7 +123,7 @@ impl std::fmt::Display for Rarity {
 }
 
 impl Rarity {
-    pub fn to_single_string(&self) -> String {
+    pub fn to_single_string(&self) -> &'static str {
         match self {
             Rarity::Common => "common",
             Rarity::Uncommon => "uncommon",
@@ -132,7 +132,6 @@ impl Rarity {
             Rarity::Special => "special",
             Rarity::Bonus => "bonus",
         }
-        .to_string()
     }
 }
 
@@ -143,7 +142,8 @@ impl From<String> for Rarity {
             "Uncommon" | "uncommon" | "u" => Rarity::Uncommon,
             "Rare" | "rare" | "r" => Rarity::Rare,
             "Mythic" | "mythic" | "m" => Rarity::Mythic,
-            "Special" => Rarity::Special,
+            "Special" | "special" => Rarity::Special,
+            "Bonus" | "bonus" | "b" => Rarity::Bonus,
             _ => Rarity::Bonus,
         }
     }
@@ -176,27 +176,27 @@ mod tests {
 
     #[test]
     fn test_card_colour_from_string() {
-        assert_eq!(CardColour::from(&"w".to_string()), CardColour::White);
-        assert_eq!(CardColour::from(&"white".to_string()), CardColour::White);
-        assert_eq!(CardColour::from(&"u".to_string()), CardColour::Blue);
-        assert_eq!(CardColour::from(&"blue".to_string()), CardColour::Blue);
-        assert_eq!(CardColour::from(&"b".to_string()), CardColour::Black);
-        assert_eq!(CardColour::from(&"black".to_string()), CardColour::Black);
-        assert_eq!(CardColour::from(&"r".to_string()), CardColour::Red);
-        assert_eq!(CardColour::from(&"red".to_string()), CardColour::Red);
-        assert_eq!(CardColour::from(&"g".to_string()), CardColour::Green);
-        assert_eq!(CardColour::from(&"green".to_string()), CardColour::Green);
-        assert_eq!(CardColour::from(&"c".to_string()), CardColour::Colourless);
-        assert_eq!(CardColour::from(&"colourless".to_string()), CardColour::Colourless);
-        assert_eq!(CardColour::from(&"m".to_string()), CardColour::Multicoloured);
-        assert_eq!(CardColour::from(&"multicoloured".to_string()), CardColour::Multicoloured);
-        assert_eq!(CardColour::from(&"UNKNOWN".to_string()), CardColour::Colourless);
+        assert_eq!(CardColour::from("w"), CardColour::White);
+        assert_eq!(CardColour::from("white"), CardColour::White);
+        assert_eq!(CardColour::from("u"), CardColour::Blue);
+        assert_eq!(CardColour::from("blue"), CardColour::Blue);
+        assert_eq!(CardColour::from("b"), CardColour::Black);
+        assert_eq!(CardColour::from("black"), CardColour::Black);
+        assert_eq!(CardColour::from("r"), CardColour::Red);
+        assert_eq!(CardColour::from("red"), CardColour::Red);
+        assert_eq!(CardColour::from("g"), CardColour::Green);
+        assert_eq!(CardColour::from("green"), CardColour::Green);
+        assert_eq!(CardColour::from("c"), CardColour::Colourless);
+        assert_eq!(CardColour::from("colourless"), CardColour::Colourless);
+        assert_eq!(CardColour::from("m"), CardColour::Multicoloured);
+        assert_eq!(CardColour::from("multicoloured"), CardColour::Multicoloured);
+        assert_eq!(CardColour::from("UNKNOWN"), CardColour::Colourless);
     }
 
     #[test]
     fn test_card_colour_from_string_case_insensitive() {
-        assert_eq!(CardColour::from(&"WHITE".to_string()), CardColour::White);
-        assert_eq!(CardColour::from(&"RED".to_string()), CardColour::Red);
+        assert_eq!(CardColour::from("WHITE"), CardColour::White);
+        assert_eq!(CardColour::from("RED"), CardColour::Red);
     }
 
     #[test]

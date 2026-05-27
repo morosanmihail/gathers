@@ -116,7 +116,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         }
         if let Some(rarity) = &filters.rarity {
             conditions.push(format!("a.rarity = ?{i}"));
-            params.push(rarity.to_single_string().to_string());
+            params.push(rarity.to_single_string().to_owned());
             i += 1;
         }
         if let Some(collector_number) = &filters.collector_number

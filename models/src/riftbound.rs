@@ -87,7 +87,7 @@ impl std::fmt::Display for RBRarity {
 }
 
 impl RBRarity {
-    pub fn to_single_string(&self) -> String {
+    pub fn to_single_string(&self) -> &'static str {
         match self {
             RBRarity::Common => "common",
             RBRarity::Uncommon => "uncommon",
@@ -95,7 +95,6 @@ impl RBRarity {
             RBRarity::Epic => "epic",
             RBRarity::Showcase => "showcase",
         }
-        .to_string()
     }
 }
 

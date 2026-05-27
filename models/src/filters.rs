@@ -48,22 +48,7 @@ pub struct CardSearchFilters {
 
 impl CardSearchFilters {
     pub fn new() -> Self {
-        Self {
-            name: None,
-            color_identities: None,
-            set_code: None,
-            collector_number: None,
-            artist: None,
-            text: None,
-            rarity: None,
-            subtypes: None,
-            supertypes: None,
-            types: None,
-            domains: None,
-            energy_types: None,
-            sort_by: None,
-            sort_order: None,
-        }
+        Self::default()
     }
 
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
@@ -272,7 +257,8 @@ where
     Ok(match opt.as_deref() {
         Some("") | None => None,
         Some(s) => {
-            Some(serde_json::from_str(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)?)
+            let v = serde_json::Value::String(s.to_owned());
+            Some(serde_json::from_value(v).map_err(serde::de::Error::custom)?)
         }
     })
 }

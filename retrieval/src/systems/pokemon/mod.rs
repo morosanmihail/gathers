@@ -73,7 +73,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         if let Some(rarity) = &filters.rarity {
             conditions.push(format!("rarity = ?{i}"));
-            params.push(rarity.to_single_string());
+            params.push(rarity.to_single_string().to_owned());
             i += 1;
         }
         if let Some(energy_types) = &filters.energy_types {

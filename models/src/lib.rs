@@ -52,8 +52,3 @@ pub struct CollectionCard {
     pub provider: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct Collection {
-    pub id: CollectionID,
-    pub can_remove: bool,
-}

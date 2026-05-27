@@ -150,7 +150,7 @@ async fn main() -> eyre::Result<()> {
     let color_identities: Option<Vec<CardColour>> = if args.color.is_empty() {
         None
     } else {
-        Some(args.color.iter().map(CardColour::from).collect())
+        Some(args.color.iter().map(|s| CardColour::from(s.as_str())).collect())
     };
 
     let domains: Option<Vec<CardDomain>> = if args.domain.is_empty() {
