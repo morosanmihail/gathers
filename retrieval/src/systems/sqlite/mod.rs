@@ -148,6 +148,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             for t in types {
                 conditions.push(format!("a.types LIKE ?{i}"));
                 params.push(format!("%{t}%"));
+                i += 1;
             }
         }
         if !conditions.is_empty() {
@@ -164,9 +165,9 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let sort_dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) { "DESC" } else { "ASC" };
         query.push_str(&format!(" ORDER BY {sort_col} COLLATE NOCASE {sort_dir}"));
         if let Some(limit) = limit {
-            query.push_str(format!(" LIMIT {limit} COLLATE NOCASE").as_str());
+            query.push_str(&format!(" LIMIT {limit}"));
         } else {
-            query.push_str(" LIMIT 1 COLLATE NOCASE");
+            query.push_str(" LIMIT 1");
         }
         if let Some(skip) = skip {
             query.push_str(format!(" OFFSET {skip}").as_str())
@@ -175,13 +176,13 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let user_iter =
             stmt.query_map(rusqlite::params_from_iter(params.iter()), SqlCard::from_row)?;
 
-        Ok(user_iter
-            .filter(|c| c.is_ok())
-            .map(|c| Card::Magic(c.unwrap().into()))
-            .collect())
+        Ok(user_iter.flatten().map(|c| Card::Magic(c.into())).collect())
     }
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
         let conn = self.connection.lock().await;
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!(
@@ -190,10 +191,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
-        Ok(iter
-            .flatten()
-            .map(|c| (c.clone().id, Card::Magic(c.clone().into())))
-            .collect())
+        Ok(iter.flatten().map(|c| (c.id.clone(), Card::Magic(c.into()))).collect())
     }
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
@@ -717,6 +715,13 @@ mod tests {
         }
     }
 
+    fn card_types(c: &::models::Card) -> Vec<String> {
+        match c {
+            ::models::Card::Magic(m) => m.types.clone(),
+            _ => vec![],
+        }
+    }
+
     fn card_rarity(c: &::models::Card) -> String {
         match c {
             ::models::Card::Magic(m) => format!("{:?}", m.rarity).to_lowercase(),
@@ -809,6 +814,57 @@ mod tests {
         let default_names: Vec<_> = default_cards.iter().map(card_name).collect();
         let explicit_names: Vec<_> = explicit_cards.iter().map(card_name).collect();
         assert_eq!(default_names, explicit_names);
+    }
+
+    // ── Multi-type filter tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_search_cards_multiple_types_mutually_exclusive_returns_empty() {
+        // Regression: the types loop was missing `i += 1`, so all conditions
+        // reused the same parameter index and effectively checked only the
+        // first type. With two mutually-exclusive types the old code returned
+        // the same results as a single-type filter; the fix returns zero.
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+        let filters = CardSearchFilters {
+            // No card can be both a Creature and a Sorcery.
+            types: Some(vec!["Creature".to_string(), "Sorcery".to_string()]),
+            ..Default::default()
+        };
+        let cards = system.search_cards(filters, None, Some(200)).await.unwrap();
+        // card_types used here so the helper is not flagged dead_code.
+        assert!(
+            cards.iter().all(|c| {
+                let t = card_types(c);
+                t.iter().any(|x| x.eq_ignore_ascii_case("Creature"))
+                    && t.iter().any(|x| x.eq_ignore_ascii_case("Sorcery"))
+            }),
+            "no card can be both Creature and Sorcery, got {} results",
+            cards.len()
+        );
+        assert!(cards.is_empty(), "expected zero results for impossible type combo");
+    }
+
+    #[tokio::test]
+    async fn test_search_cards_two_type_filter_is_stricter_than_one() {
+        // Regression: before the fix both conditions resolved to the same
+        // parameter, making the two-type filter identical to the one-type
+        // filter. After the fix, AND semantics hold and the result set shrinks.
+        let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+        let single = CardSearchFilters {
+            types: Some(vec!["Creature".to_string()]),
+            ..Default::default()
+        };
+        let dual = CardSearchFilters {
+            // Creatures-only vs Creature-AND-Sorcery (impossible combo → 0 results).
+            types: Some(vec!["Creature".to_string(), "Sorcery".to_string()]),
+            ..Default::default()
+        };
+        let single_count = system.search_cards(single, None, Some(200)).await.unwrap().len();
+        let dual_count = system.search_cards(dual, None, Some(200)).await.unwrap().len();
+        assert!(
+            single_count > dual_count,
+            "one-type filter ({single_count}) should return more results than mutually-exclusive two-type AND ({dual_count})"
+        );
     }
 
     // ── Price tests ───────────────────────────────────────────────────────────

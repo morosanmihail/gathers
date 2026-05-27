@@ -17,7 +17,7 @@ use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, Purch
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
-    LazyLock::new(|| Migrations::from_directory(&MIGRATIONS_DIR).expect("AAAAH!"));
+    LazyLock::new(|| Migrations::from_directory(&MIGRATIONS_DIR).expect("failed to load DB migrations from embedded directory"));
 
 #[derive(Debug, Clone)]
 pub struct SQLitePersistenceSystem {
@@ -37,8 +37,8 @@ impl SQLitePersistenceSystem {
             Connection::open(path)?
         };
         MIGRATIONS.to_latest(&mut conn)?;
-        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
         })
@@ -83,9 +83,10 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         time_added: &str,
         provider: &str,
     ) -> eyre::Result<CollectionCard> {
-        let conn = self.connection.lock().await;
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
         let mut result = cards::add_cards(
-            &conn,
+            &tx,
             collection_id,
             &[CollectionCard {
                 uuid: card_uuid.clone(),
@@ -100,12 +101,13 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
             .pop()
             .ok_or_else(|| eyre::eyre!("No card returned from upsert"))?;
         purchase_history::trim_history_to_collection(
-            &conn,
+            &tx,
             collection_id,
             card_uuid,
             card.quantity,
             card.foil_quantity,
         )?;
+        tx.commit()?;
         Ok(card)
     }
 
@@ -114,17 +116,19 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         collection_id: &CollectionID,
         input_cards: &[CollectionCard],
     ) -> eyre::Result<Vec<CollectionCard>> {
-        let conn = self.connection.lock().await;
-        let result = cards::add_cards(&conn, collection_id, input_cards)?;
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
+        let result = cards::add_cards(&tx, collection_id, input_cards)?;
         for card in &result {
             purchase_history::trim_history_to_collection(
-                &conn,
+                &tx,
                 collection_id,
                 &card.uuid,
                 card.quantity,
                 card.foil_quantity,
             )?;
         }
+        tx.commit()?;
         Ok(result)
     }
 
@@ -133,7 +137,8 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         input_cards: &[CollectionCard],
         to_collection_id: CollectionID,
     ) -> eyre::Result<()> {
-        let conn = self.connection.lock().await;
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
         for c in input_cards {
             if c.quantity == 0 && c.foil_quantity == 0 {
                 continue;
@@ -142,7 +147,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 continue;
             }
             let source_results = cards::add_cards(
-                &conn,
+                &tx,
                 &c.collection,
                 &[CollectionCard {
                     uuid: c.uuid.clone(),
@@ -158,7 +163,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 .map(|sc| (sc.quantity, sc.foil_quantity))
                 .unwrap_or((0, 0));
             purchase_history::transfer_trimmed_history_to_collection(
-                &conn,
+                &tx,
                 &c.collection,
                 &to_collection_id,
                 &c.uuid,
@@ -171,7 +176,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 .map(|sc| sc.provider.clone())
                 .unwrap_or_else(|| c.provider.clone());
             cards::add_cards(
-                &conn,
+                &tx,
                 &to_collection_id,
                 &[CollectionCard {
                     uuid: c.uuid.clone(),
@@ -183,6 +188,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 }],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 

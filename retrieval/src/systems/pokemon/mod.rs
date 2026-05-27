@@ -107,9 +107,9 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         let sort_dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) { "DESC" } else { "ASC" };
         query.push_str(&format!(" ORDER BY {sort_col} COLLATE NOCASE {sort_dir}"));
         if let Some(limit) = limit {
-            query.push_str(format!(" LIMIT {limit} COLLATE NOCASE").as_str());
+            query.push_str(&format!(" LIMIT {limit}"));
         } else {
-            query.push_str(" LIMIT 1 COLLATE NOCASE");
+            query.push_str(" LIMIT 1");
         }
         if let Some(skip) = skip {
             query.push_str(format!(" OFFSET {skip}").as_str());
@@ -120,10 +120,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             rusqlite::params_from_iter(params.iter()),
             SqlPokemonCard::from_row,
         )?;
-        Ok(iter
-            .filter(|c| c.is_ok())
-            .map(|c| Card::Pokemon(c.unwrap().into()))
-            .collect())
+        Ok(iter.flatten().map(|c| Card::Pokemon(c.into())).collect())
     }
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
