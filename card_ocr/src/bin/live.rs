@@ -305,7 +305,6 @@ fn ocr_thread(
             d.last_result = last_result;
         }
 
-        thread::sleep(Duration::from_millis(100));
     }
 }
 
