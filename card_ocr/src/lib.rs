@@ -1,6 +1,13 @@
 mod extraction;
 pub use extraction::{extract_card, extract_card_debug, ExtractionStatus};
 
+pub mod segmentation;
+pub use segmentation::{HoughSegmenter, Segmenter};
+#[cfg(feature = "opencv-seg")]
+pub use segmentation::OpenCvSegmenter;
+#[cfg(feature = "onnx-seg")]
+pub use segmentation::OnnxSegmenter;
+
 use eyre::{Result, WrapErr};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use leptess::LepTess;
@@ -26,7 +33,31 @@ pub async fn identify_card<R: RetrievalSystemTrait>(
 ) -> Result<Option<Card>> {
     let img = image::open(image_path)
         .wrap_err_with(|| format!("Failed to open image: {}", image_path.display()))?;
-    identify_card_image(&img, retrieval).await
+    let segmented = try_segment(&img);
+    identify_card_image(&segmented, retrieval).await
+}
+
+/// Try each available segmenter in order (OpenCV → ONNX).
+/// Returns the first successful extraction, or a clone of the original if all fail.
+fn try_segment(img: &DynamicImage) -> DynamicImage {
+    #[cfg(feature = "opencv-seg")]
+    {
+        if let Some(result) = segmentation::OpenCvSegmenter.extract(img) {
+            tracing::debug!("Segmented with opencv-contour");
+            return result;
+        }
+    }
+    #[cfg(feature = "onnx-seg")]
+    {
+        if let Ok(seg) = segmentation::OnnxSegmenter::from_env() {
+            if let Some(result) = seg.extract(img) {
+                tracing::debug!("Segmented with onnx-yolo");
+                return result;
+            }
+        }
+    }
+    tracing::debug!("No segmenter succeeded, using raw image");
+    img.clone()
 }
 
 /// Identify a Magic card from an already-decoded image.

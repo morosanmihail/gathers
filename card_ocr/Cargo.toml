@@ -11,6 +11,10 @@ path = "src/main.rs"
 name = "card_ocr_live"
 path = "src/bin/live.rs"
 
+[features]
+opencv-seg = ["dep:opencv"]
+onnx-seg = ["dep:ort", "dep:ndarray"]
+
 [dependencies]
 models = { path = "../models" }
 retrieval = { path = "../retrieval" }
@@ -23,3 +27,6 @@ imageproc = "0.26"
 leptess = "0.14"
 bevy = "0.15"
 nokhwa = { version = "0.10", features = ["input-native"] }
+opencv = { version = "0.98", features = ["clang-runtime"], optional = true }
+ort = { version = "2.0.0-rc.12", optional = true }
+ndarray = { version = "0.16", optional = true }

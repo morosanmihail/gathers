@@ -8,6 +8,8 @@ async fn main() -> eyre::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: card_ocr <image_path> [db_path]");
+        #[cfg(feature = "onnx-seg")]
+        eprintln!("  YOLO_MODEL_PATH  path to YOLOv8 ONNX model for card segmentation");
         std::process::exit(1);
     }
 

@@ -1,4 +1,4 @@
-use card_ocr::extract_card;
+use card_ocr::{HoughSegmenter, Segmenter, extract_card};
 use std::path::PathBuf;
 
 fn cards_dir() -> PathBuf {
@@ -30,6 +30,92 @@ fn test_extract_card_shape1() {
 #[test]
 fn test_extract_card_shape2() {
     assert_extracted("shape2.jpeg");
+}
+
+// ── Segmenter comparison ──────────────────────────────────────────────────────
+
+fn run_segmenter(segmenter: &dyn Segmenter, filename: &str) -> Option<image::DynamicImage> {
+    let path = cards_dir().join(format!("shape/{filename}"));
+    if !path.exists() {
+        eprintln!("SKIP: {filename} not found");
+        return None;
+    }
+    let img = image::open(&path).unwrap_or_else(|e| panic!("Failed to open {filename}: {e}"));
+    segmenter.extract(&img)
+}
+
+fn assert_segmenter(segmenter: &dyn Segmenter, filename: &str) {
+    let result = run_segmenter(segmenter, filename);
+    if result.is_none() {
+        eprintln!("  {} → None for {filename}", segmenter.name());
+        return;
+    }
+    let extracted = result.unwrap();
+    assert_eq!(extracted.width(), 672, "{} {filename}: width", segmenter.name());
+    assert_eq!(extracted.height(), 936, "{} {filename}: height", segmenter.name());
+    println!("  {} → ok (672×936) for {filename}", segmenter.name());
+}
+
+#[test]
+fn test_hough_segmenter_shape1() {
+    assert_segmenter(&HoughSegmenter, "shape1.png");
+}
+
+#[test]
+fn test_hough_segmenter_shape2() {
+    assert_segmenter(&HoughSegmenter, "shape2.jpeg");
+}
+
+#[cfg(feature = "opencv-seg")]
+mod opencv_tests {
+    use super::*;
+    use card_ocr::OpenCvSegmenter;
+
+    #[test]
+    fn test_opencv_segmenter_shape1() {
+        assert_segmenter(&OpenCvSegmenter, "shape1.png");
+    }
+
+    #[test]
+    fn test_opencv_segmenter_shape2() {
+        assert_segmenter(&OpenCvSegmenter, "shape2.jpeg");
+    }
+}
+
+#[cfg(feature = "onnx-seg")]
+mod onnx_tests {
+    use super::*;
+    use card_ocr::OnnxSegmenter;
+    use std::path::PathBuf;
+
+    fn model_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("data/yolov8n.onnx")
+    }
+
+    #[test]
+    fn test_onnx_segmenter_shape1() {
+        let path = model_path();
+        if !path.exists() {
+            eprintln!("SKIP: yolov8n.onnx not found at {path:?}");
+            return;
+        }
+        let seg = OnnxSegmenter::new(&path).expect("load model");
+        assert_segmenter(&seg, "shape1.png");
+    }
+
+    #[test]
+    fn test_onnx_segmenter_shape2() {
+        let path = model_path();
+        if !path.exists() {
+            eprintln!("SKIP: yolov8n.onnx not found at {path:?}");
+            return;
+        }
+        let seg = OnnxSegmenter::new(&path).expect("load model");
+        assert_segmenter(&seg, "shape2.jpeg");
+    }
 }
 
 #[test]
