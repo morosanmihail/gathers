@@ -116,7 +116,7 @@ async fn main() -> eyre::Result<()> {
                 }
                 Systems::Scryfall => unreachable!(),
                 Systems::Pokemon => {
-                    let tmp = retrieval::PokemonSQLiteRetrievalSystem::new(Some(path.clone()))?;
+                    let tmp = retrieval::PokemonSQLiteRetrievalSystem::new(Some(path.clone()), None)?;
                     RetrievalSystem::PokemonSQLiteRetrievalSystem(tmp)
                         .update_backend()
                         .await?;
@@ -143,7 +143,7 @@ async fn main() -> eyre::Result<()> {
             retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path)?,
         ),
         Systems::Pokemon => RetrievalSystem::PokemonSQLiteRetrievalSystem(
-            retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path)?,
+            retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path, None)?,
         ),
     };
 
