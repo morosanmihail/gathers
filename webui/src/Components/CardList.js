@@ -192,10 +192,10 @@ export default function CardList() {
           setLoading(false);
           setRefresh(false);
           selectedDispatch({ type: "empty" });
-          const mtgIds = data
-            .filter((c) => !c.provider || c.provider === "MagicSQLite")
-            .map((c) => c.id);
-          fetchPrices(mtgIds);
+          fetchPrices({
+            mtgIds: data.filter((c) => !c.provider || c.provider === "MagicSQLite").map((c) => c.id),
+            pokemonIds: data.filter((c) => c.provider === "PokemonSQLite").map((c) => c.id),
+          });
         });
 
       ops
@@ -215,10 +215,10 @@ export default function CardList() {
           setLoading(false);
           setRefresh(false);
           selectedDispatch({ type: "empty" });
-          const mtgIds = data
-            .filter((c) => !c.provider || c.provider === "MagicSQLite")
-            .map((c) => c.id);
-          fetchPrices(mtgIds);
+          fetchPrices({
+            mtgIds: data.filter((c) => !c.provider || c.provider === "MagicSQLite").map((c) => c.id),
+            pokemonIds: data.filter((c) => c.provider === "PokemonSQLite").map((c) => c.id),
+          });
         });
 
       const countParams = new URLSearchParams();

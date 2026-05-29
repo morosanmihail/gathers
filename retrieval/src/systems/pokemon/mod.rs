@@ -3,14 +3,15 @@
 mod models;
 mod scraper;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ::models::{Card, CardID, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
+use ::models::{Card, CardID, CardPrices, CollectorNumber, RetailerPrices, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
 use models::SqlPokemonCard;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
+use crate::http::stream_to_file;
 
 impl NamedRetrievalSystem for PokemonSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -22,15 +23,26 @@ impl NamedRetrievalSystem for PokemonSQLiteRetrievalSystem {
 pub struct PokemonSQLiteRetrievalSystem {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     _db_path: String,
+    prices_db_path: Option<String>,
+    prices_connection: Arc<Mutex<Option<Connection>>>,
 }
 
 impl PokemonSQLiteRetrievalSystem {
-    pub fn new(db_path: Option<String>) -> eyre::Result<Self> {
+    pub fn new(db_path: Option<String>, prices_db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/pokemon.db".to_string());
         let conn = Connection::open(path.clone())?;
+        let prices_conn = if let Some(ref p) = prices_db_path
+            && PathBuf::from(p).exists()
+        {
+            Arc::new(Mutex::new(Some(Connection::open(p)?)))
+        } else {
+            Arc::new(Mutex::new(None))
+        };
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             _db_path: path,
+            prices_db_path,
+            prices_connection: prices_conn,
         })
     }
 }
@@ -183,6 +195,106 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             .collect())
     }
 
+    async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {
+        let prices_path = match &self.prices_db_path {
+            Some(p) => p.clone(),
+            None => return Ok(None),
+        };
+        if !PathBuf::from(&prices_path).exists() {
+            return Ok(None);
+        }
+        let mut conn_guard = self.prices_connection.lock().await;
+        if conn_guard.is_none() {
+            *conn_guard = Some(Connection::open(&prices_path)?);
+        }
+        let conn = conn_guard.as_ref().unwrap();
+        // Use correlated subqueries to get the most recent non-zero value per field
+        // independently. The latest row often has all zeros when a card stops being
+        // tracked, but older rows retain the last known price.
+        let result = conn.query_row(
+            "SELECT \
+               (SELECT rawPrice        FROM prices WHERE cardId = ?1 AND rawPrice        > 0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceTen  FROM prices WHERE cardId = ?1 AND gradedPriceTen  > 0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceNine FROM prices WHERE cardId = ?1 AND gradedPriceNine > 0 ORDER BY date DESC LIMIT 1) \
+             WHERE EXISTS (SELECT 1 FROM prices WHERE cardId = ?1)",
+            rusqlite::params![uuid],
+            |row| Ok((
+                row.get::<_, Option<f64>>(0)?.unwrap_or(0.0),
+                row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+            )),
+        );
+        match result {
+            Ok((raw, psa10, psa9)) => {
+                let prices = row_to_card_prices(uuid, raw, psa10, psa9);
+                if prices.paper.is_empty() { Ok(None) } else { Ok(Some(prices)) }
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn get_bulk_card_prices(
+        &self,
+        uuids: Vec<String>,
+    ) -> eyre::Result<HashMap<String, CardPrices>> {
+        if uuids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let prices_path = match &self.prices_db_path {
+            Some(p) => p.clone(),
+            None => return Ok(HashMap::new()),
+        };
+        if !PathBuf::from(&prices_path).exists() {
+            return Ok(HashMap::new());
+        }
+        let mut conn_guard = self.prices_connection.lock().await;
+        if conn_guard.is_none() {
+            *conn_guard = Some(Connection::open(&prices_path)?);
+        }
+        let conn = conn_guard.as_ref().unwrap();
+        let placeholders = uuids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        // Correlated subqueries find the most recent non-zero value per field per card,
+        // avoiding rows where recent updates zeroed out previously-known prices.
+        let query = format!(
+            "SELECT \
+               id_list.cardId, \
+               (SELECT rawPrice        FROM prices WHERE cardId = id_list.cardId AND rawPrice        > 0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceTen  FROM prices WHERE cardId = id_list.cardId AND gradedPriceTen  > 0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceNine FROM prices WHERE cardId = id_list.cardId AND gradedPriceNine > 0 ORDER BY date DESC LIMIT 1) \
+             FROM (SELECT DISTINCT cardId FROM prices WHERE cardId IN ({})) id_list",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&query)?;
+        let iter = stmt.query_map(rusqlite::params_from_iter(uuids.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                row.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+            ))
+        })?;
+        let mut result = HashMap::new();
+        for row in iter.flatten() {
+            let (card_id, raw, psa10, psa9) = row;
+            let prices = row_to_card_prices(&card_id, raw, psa10, psa9);
+            if !prices.paper.is_empty() {
+                result.insert(card_id, prices);
+            }
+        }
+        Ok(result)
+    }
+
+    async fn update_prices(&self) -> eyre::Result<bool> {
+        let prices_path = match &self.prices_db_path {
+            Some(p) => p.clone(),
+            None => return Ok(false),
+        };
+        download_pokemon_prices(&prices_path).await?;
+        *self.prices_connection.lock().await = None;
+        Ok(true)
+    }
+
     async fn update_backend(&self) -> eyre::Result<bool> {
         scraper::run(scraper::Options {
             db_path: self._db_path.clone(),
@@ -194,6 +306,43 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     }
 }
 
+fn row_to_card_prices(uuid: &str, raw: f64, psa10: f64, psa9: f64) -> CardPrices {
+    let mut paper = HashMap::new();
+    if raw > 0.0 {
+        paper.insert("raw".to_string(), RetailerPrices { normal: Some(raw), foil: None });
+    }
+    if psa10 > 0.0 {
+        paper.insert("graded_psa10".to_string(), RetailerPrices { normal: Some(psa10), foil: None });
+    }
+    if psa9 > 0.0 {
+        paper.insert("graded_psa9".to_string(), RetailerPrices { normal: Some(psa9), foil: None });
+    }
+    CardPrices { uuid: uuid.to_string(), paper }
+}
+
+pub async fn download_pokemon_prices(path: &str) -> eyre::Result<()> {
+    const DOWNLOAD_URL: &str =
+        "https://github.com/poketrax/pokedata/raw/refs/heads/main/databases/prices.sqlite";
+
+    let target = PathBuf::from(path);
+    if let Some(parent) = target.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let temp_dir = tempfile::tempdir()?;
+    let temp_path = temp_dir.path().join("prices.sqlite");
+
+    println!("Downloading Pokemon prices from {DOWNLOAD_URL}...");
+    stream_to_file(DOWNLOAD_URL, "Download complete", &temp_path, None, "downloading").await?;
+
+    std::fs::copy(&temp_path, &target)?;
+    println!("Pokemon prices saved to {target:?}.");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,14 +350,14 @@ mod tests {
     use tempfile::TempDir;
 
     async fn setup_test_db() -> PokemonSQLiteRetrievalSystem {
-        PokemonSQLiteRetrievalSystem::new(None).unwrap()
+        PokemonSQLiteRetrievalSystem::new(None, None).unwrap()
     }
 
     #[tokio::test]
     async fn test_new_with_custom_path() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        let system = PokemonSQLiteRetrievalSystem::new(Some(db_path.to_string_lossy().to_string()));
+        let system = PokemonSQLiteRetrievalSystem::new(Some(db_path.to_string_lossy().to_string()), None);
         assert!(system.is_ok());
         let system = system.unwrap();
         assert_eq!(system._db_path, db_path.to_string_lossy().to_string());
@@ -473,5 +622,154 @@ mod tests {
         } else {
             panic!("expected Pokemon card");
         }
+    }
+
+    // ── Price tests ───────────────────────────────────────────────────────────
+
+    fn make_prices_db(dir: &TempDir) -> String {
+        let path = dir.path().join("prices.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);
+             INSERT INTO prices VALUES ('2024-01-01', 'card-alpha', '', 1.50, 10.0, 8.0);
+             INSERT INTO prices VALUES ('2024-01-10', 'card-alpha', '', 2.00, 12.0, 9.0);
+             INSERT INTO prices VALUES ('2024-01-01', 'card-beta',  '', 0.25, 0.0,  0.0);
+             INSERT INTO prices VALUES ('2024-01-01', 'card-zero',  '', 0.0,  0.0,  0.0);",
+        ).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let result = system.get_card_prices("card-alpha").await.unwrap();
+        assert!(result.is_some());
+        let prices = result.unwrap();
+        assert_eq!(prices.uuid, "card-alpha");
+        let raw = prices.paper.get("raw").unwrap();
+        assert_eq!(raw.normal, Some(2.00));
+        assert_eq!(raw.foil, None);
+        let psa10 = prices.paper.get("graded_psa10").unwrap();
+        assert_eq!(psa10.normal, Some(12.0));
+        let psa9 = prices.paper.get("graded_psa9").unwrap();
+        assert_eq!(psa9.normal, Some(9.0));
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_latest_row_used() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        // card-alpha has two rows; latest (2024-01-10) must win
+        let prices = system.get_card_prices("card-alpha").await.unwrap().unwrap();
+        assert_eq!(prices.paper.get("raw").unwrap().normal, Some(2.00));
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_not_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let result = system.get_card_prices("card-nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_all_zero_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        // card-zero has all prices = 0.0 → paper map is empty → None
+        let result = system.get_card_prices("card-zero").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_no_prices_path() {
+        let system = PokemonSQLiteRetrievalSystem::new(None, None).unwrap();
+        let result = system.get_card_prices("card-alpha").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_card_prices_file_missing() {
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some("/tmp/does_not_exist_pokemon_prices.sqlite".to_string())).unwrap();
+        let result = system.get_card_prices("card-alpha").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_all_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let result = system
+            .get_bulk_card_prices(vec!["card-alpha".to_string(), "card-beta".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key("card-alpha"));
+        assert!(result.contains_key("card-beta"));
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_partial_found() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let result = system
+            .get_bulk_card_prices(vec!["card-alpha".to_string(), "card-missing".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key("card-alpha"));
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_empty_input() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let result = system.get_bulk_card_prices(vec![]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_bulk_card_prices_no_prices_path() {
+        let system = PokemonSQLiteRetrievalSystem::new(None, None).unwrap();
+        let result = system
+            .get_bulk_card_prices(vec!["card-alpha".to_string()])
+            .await
+            .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_update_prices_no_path_returns_false() {
+        let system = PokemonSQLiteRetrievalSystem::new(None, None).unwrap();
+        let result = system.update_prices().await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_prices_beta_raw_only() {
+        let dir = TempDir::new().unwrap();
+        let prices_path = make_prices_db(&dir);
+        let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+        let prices = system.get_card_prices("card-beta").await.unwrap().unwrap();
+        assert_eq!(prices.paper.len(), 1);
+        assert_eq!(prices.paper.get("raw").unwrap().normal, Some(0.25));
+        assert!(!prices.paper.contains_key("graded_psa10"));
+        assert!(!prices.paper.contains_key("graded_psa9"));
     }
 }

@@ -29,11 +29,13 @@ function PricesTable({ prices }) {
   );
 }
 
-function CardDetailContent({ fetchUrl, cardId, renderImage, renderRows }) {
+function CardDetailContent({ fetchUrl, pricesUrl, cardId, renderImage, renderRows }) {
   const [card, setCard] = useState(null);
   const [prices, setPrices] = useState(null);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+
+  const resolvedPricesUrl = pricesUrl ?? `/api/mtg/prices?ids=${encodeURIComponent(cardId)}`;
 
   useEffect(() => {
     fetch(fetchUrl)
@@ -45,11 +47,12 @@ function CardDetailContent({ fetchUrl, cardId, renderImage, renderRows }) {
       })
       .catch(() => setError("Failed to load card."));
 
-    fetch(`/api/mtg/prices?ids=${encodeURIComponent(cardId)}`)
+    fetch(resolvedPricesUrl)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data?.[cardId]) setPrices(data[cardId]); })
       .catch(() => {});
-  }, [fetchUrl, cardId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchUrl, resolvedPricesUrl, cardId]);
 
   if (error) return <p className="p-3 text-danger">{error}</p>;
   if (!card) return <p className="p-3">Loading...</p>;
@@ -73,11 +76,12 @@ function CardDetailContent({ fetchUrl, cardId, renderImage, renderRows }) {
   );
 }
 
-export default function CardDetailLayout({ fetchUrl, cardId, renderImage, renderRows }) {
+export default function CardDetailLayout({ fetchUrl, pricesUrl, cardId, renderImage, renderRows }) {
   return (
     <ViewProviders>
       <CardDetailContent
         fetchUrl={fetchUrl}
+        pricesUrl={pricesUrl}
         cardId={cardId}
         renderImage={renderImage}
         renderRows={renderRows}

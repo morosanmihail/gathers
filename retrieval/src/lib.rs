@@ -1,13 +1,15 @@
+mod http;
 mod systems;
 
 use std::collections::HashMap;
 
 use enum_dispatch::enum_dispatch;
 use models::{CardID, CardPrices, CollectorNumber, SetCode};
-pub use systems::pokemon::PokemonSQLiteRetrievalSystem;
+pub use http::DownloadProgress;
+pub use systems::pokemon::{PokemonSQLiteRetrievalSystem, download_pokemon_prices};
 pub use systems::riftsqlite::RiftboundSQLiteRetrievalSystem;
 pub use systems::scryfall::ScryfallRetrievalSystem;
-pub use systems::sqlite::{DownloadProgress, MagicSQLiteRetrievalSystem, download_mtg_db, download_prices};
+pub use systems::sqlite::{MagicSQLiteRetrievalSystem, download_mtg_db, download_prices};
 
 #[enum_dispatch]
 #[derive(Debug, Clone)]

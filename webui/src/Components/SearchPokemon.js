@@ -4,6 +4,7 @@ import { useOperations } from "../OperationsContext";
 import useCardSearch from "./useCardSearch";
 import SearchPagination from "./SearchPagination";
 import SortControls from "./SortControls";
+import { useFetchPrices } from "./CardListContexts/PricesContext";
 
 const PAGE_SIZE = 24;
 
@@ -21,6 +22,7 @@ const SORT_FIELDS = [
 
 function SearchPokemon({ startSearch = false, dedicatedPage = false, sidePanel = false }) {
   const ops = useOperations();
+  const fetchPrices = useFetchPrices();
 
   const {
     cards, setCards,
@@ -54,6 +56,7 @@ function SearchPokemon({ startSearch = false, dedicatedPage = false, sidePanel =
         setCards(data);
         setLoading(false);
         setShouldSearch(false);
+        fetchPrices({ pokemonIds: data.map((c) => c.id).filter(Boolean) });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageNumber, shouldSearch]);

@@ -72,6 +72,7 @@ pub struct RetrievalState {
     mtg_prices_path: Option<String>,
     riftbound_db_path: Option<String>,
     pokemon_db_path: Option<String>,
+    pokemon_prices_path: Option<String>,
     /// Path to the server config file, for settings API.
     pub config_path: std::path::PathBuf,
     /// Progress trackers for in-progress downloads, keyed by system name.
@@ -93,6 +94,7 @@ impl RetrievalState {
         mtg_prices_path: Option<String>,
         riftbound_db_path: Option<String>,
         pokemon_db_path: Option<String>,
+        pokemon_prices_path: Option<String>,
         config_path: std::path::PathBuf,
         pricing_enabled: bool,
         collections_enabled: bool,
@@ -106,6 +108,7 @@ impl RetrievalState {
             mtg_prices_path: mtg_prices_path.clone(),
             riftbound_db_path: riftbound_db_path.clone(),
             pokemon_db_path: pokemon_db_path.clone(),
+            pokemon_prices_path: pokemon_prices_path.clone(),
             config_path,
             downloading: HashMap::new(),
             pricing_enabled,
@@ -127,6 +130,7 @@ impl RetrievalState {
                     }
             let prices_path = match system {
                 Systems::Scryfall | Systems::Sql => mtg_prices_path.clone(),
+                Systems::PokemonSql => pokemon_prices_path.clone(),
                 _ => None,
             };
             let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
@@ -159,7 +163,7 @@ impl RetrievalState {
                 retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path.clone())?,
             ),
             Systems::PokemonSql => RetrievalSystem::PokemonSQLiteRetrievalSystem(
-                retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path.clone())?,
+                retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path.clone(), prices_db_path)?,
             ),
         })
     }
@@ -262,6 +266,7 @@ impl RetrievalState {
         };
         let prices_path = match system {
             Systems::Scryfall | Systems::Sql => self.mtg_prices_path.clone(),
+            Systems::PokemonSql => self.pokemon_prices_path.clone(),
             _ => None,
         };
         let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
@@ -293,7 +298,7 @@ impl RetrievalState {
             self.pokemon = Some(Self::new_retrieval(
                 Systems::PokemonSql,
                 self.pokemon_db_path.clone(),
-                None,
+                self.pokemon_prices_path.clone(),
             )?);
         }
         Ok(())
@@ -350,6 +355,8 @@ pub struct ServerConfig {
     riftbound_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pokemon_db_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pokemon_prices_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     storage_db_path: Option<String>,
 }
@@ -418,6 +425,7 @@ async fn main() -> eyre::Result<()> {
             ),
             riftbound_db_path: Some(db_dir.join("riftbound.db").to_string_lossy().into_owned()),
             pokemon_db_path: Some(db_dir.join("pokemon.db").to_string_lossy().into_owned()),
+            pokemon_prices_path: Some(db_dir.join("pokemon_prices.sqlite").to_string_lossy().into_owned()),
             storage_db_path: Some(db_dir.join("storage.db").to_string_lossy().into_owned()),
         };
         if let Err(e) = std::fs::create_dir_all(&gathers_dir) {
@@ -497,6 +505,19 @@ async fn main() -> eyre::Result<()> {
     let pokemon_db_path = std::env::var("POKEMON_DB_PATH")
         .ok()
         .or(config.pokemon_db_path);
+    let pokemon_prices_path = std::env::var("POKEMON_PRICES_PATH")
+        .ok()
+        .or(config.pokemon_prices_path)
+        .or_else(|| {
+            pokemon_db_path.as_ref().map(|p| {
+                std::path::Path::new(p)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("pokemon_prices.sqlite")
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        });
     let storage_db_path = std::env::var("STORAGE_DB_PATH")
         .ok()
         .or(config.storage_db_path);
@@ -509,6 +530,7 @@ async fn main() -> eyre::Result<()> {
         mtg_prices_path.clone(),
         riftbound_db_path.clone(),
         pokemon_db_path.clone(),
+        pokemon_prices_path.clone(),
         config_path.clone(),
         config.pricing_enabled,
         config.collections_enabled,

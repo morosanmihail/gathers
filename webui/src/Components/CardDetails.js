@@ -32,6 +32,7 @@ function PriceInput({ value, onChange }) {
 function preferredPrices(cardPrices) {
   if (!cardPrices?.paper) return null;
   const rp = Object.entries(cardPrices.paper).find(([k]) => k.toLowerCase() === "cardmarket")?.[1]
+    ?? cardPrices.paper["raw"]
     ?? Object.values(cardPrices.paper)[0];
   if (!rp || (rp.normal == null && rp.foil == null)) return null;
   return { normal: rp.normal ?? null, foil: rp.foil ?? null };

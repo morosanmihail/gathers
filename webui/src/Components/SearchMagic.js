@@ -26,6 +26,7 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
   const fetchPrices = useFetchPrices();
 
   const [searchCollection, setSearchCollection] = React.useState("");
+  const [collectionWrapped, setCollectionWrapped] = React.useState(false);
   const [setCodeFocused, setSetCodeFocused] = React.useState(false);
 
   const {
@@ -51,13 +52,15 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
     setLoading(true);
 
     let url;
-    if (!collectionsEnabled) {
+    let wrapped = false;
+    if (!collectionsEnabled || searchCollection === "") {
       url = `/api/mtg/cards/search?limit=${PAGE_SIZE}&skip=${(pageNumber - 1) * PAGE_SIZE}`;
-    } else if (searchCollection !== "" && searchCollection !== "skipNotOwned") {
+    } else if (searchCollection !== "skipNotOwned") {
       url = `/api/collection/cards/${searchCollection}/search?pageSize=${PAGE_SIZE}&offset=${(pageNumber - 1) * PAGE_SIZE}`;
+      wrapped = true;
     } else {
-      url = `/api/collection/search?pageSize=${PAGE_SIZE}&offset=${(pageNumber - 1) * PAGE_SIZE}`;
-      if (searchCollection === "skipNotOwned") url += "&skipNotOwned=true";
+      url = `/api/collection/search?pageSize=${PAGE_SIZE}&offset=${(pageNumber - 1) * PAGE_SIZE}&skipNotOwned=true`;
+      wrapped = true;
     }
 
     ops
@@ -68,12 +71,13 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
       })
       .then((data) => {
         setCards(data);
+        setCollectionWrapped(wrapped);
         setLoading(false);
         setShouldSearch(false);
-        const ids = collectionsEnabled
+        const mtgIds = wrapped
           ? data.map((c) => c.mtGCard?.id).filter(Boolean)
           : data.map((c) => c.id).filter(Boolean);
-        fetchPrices(ids);
+        fetchPrices({ mtgIds });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageNumber, shouldSearch]);
@@ -166,7 +170,7 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
             <p>Loading...</p>
           ) : (
             <div className="card-grid list">
-              {collectionsEnabled
+              {collectionWrapped
                 ? cards.map((card) => (
                     <Card
                       key={card.mtGCard.id + "-" + (card.mtGCard.details != null ? card.mtGCard.details.collectionId : "")}
@@ -177,7 +181,7 @@ function SearchMagic({ startSearch = false, dedicatedPage = false, sidePanel = f
                     />
                   ))
                 : cards.map((card) => (
-                    <Card key={card.id} id={card.id} card={card} details={null} />
+                    <Card key={card.id} id={card.id} card={card} details={null} showCollectionSelect={dedicatedPage} />
                   ))}
             </div>
           )}

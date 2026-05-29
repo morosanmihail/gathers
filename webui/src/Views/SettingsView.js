@@ -22,16 +22,18 @@ const SYSTEM_ACTIONS = {
     { label: "Update DB", endpoint: "/api/riftbound/update" },
   ],
   PokemonSql: [
-    { label: "Update DB", endpoint: "/api/pokemon/update" },
+    { label: "Update DB",     endpoint: "/api/pokemon/update" },
+    { label: "Update Prices", endpoint: "/api/pokemon/prices/update" },
   ],
 };
 
 const PATH_FIELDS = [
-  { key: "mtg_db_path",       label: "MTG Database path" },
-  { key: "mtg_prices_path",   label: "MTG Prices path" },
-  { key: "riftbound_db_path", label: "Riftbound Database path" },
-  { key: "pokemon_db_path",   label: "Pokémon Database path" },
-  { key: "storage_db_path",   label: "Storage Database path" },
+  { key: "mtg_db_path",          label: "MTG Database path" },
+  { key: "mtg_prices_path",      label: "MTG Prices path" },
+  { key: "riftbound_db_path",    label: "Riftbound Database path" },
+  { key: "pokemon_db_path",      label: "Pokémon Database path" },
+  { key: "pokemon_prices_path",  label: "Pokémon Prices path" },
+  { key: "storage_db_path",      label: "Storage Database path" },
 ];
 
 function UpdateButton({ label, endpoint }) {
