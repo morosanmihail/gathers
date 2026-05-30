@@ -15,31 +15,31 @@ pub struct RunOptions {
 }
 
 pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Result<()> {
-    println!("Loading TCGPlayer set index…");
+    info!("Loading TCGPlayer set index");
     let tcgp_sets = tcgp::get_tcgp_sets(client).await.unwrap_or_else(|e| {
         warn!("Failed to load TCGP sets: {e}");
         vec![]
     });
 
-    println!("Loading TCGPlayer set codes…");
+    info!("Loading TCGPlayer set codes");
     let tcgp_codes = tcgp::get_tcgp_codes(client).await.unwrap_or_else(|e| {
         warn!("Failed to load TCGP codes: {e}");
         vec![]
     });
 
-    println!("\n=== Fetching Normal Sets ===");
+    info!("Fetching normal sets");
     let normal_sets = serebii::scrape_normal_sets(client, opts.recent)
         .await
         .unwrap_or_default();
 
-    println!("=== Fetching Promo Sets ===");
+    info!("Fetching promo sets");
     let promo_sets = serebii::scrape_promo_sets(client, opts.recent)
         .await
         .unwrap_or_default();
 
     let all_sets: Vec<_> = normal_sets.into_iter().chain(promo_sets).collect();
 
-    println!("\n=== Updating Cards ===");
+    info!(count = all_sets.len(), "Updating cards");
     let pb = ProgressBar::new(all_sets.len() as u64);
     pb.set_style(
         ProgressStyle::with_template("[{pos}/{len}] {wide_msg}")

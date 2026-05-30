@@ -10,6 +10,8 @@ use models::SqlPokemonCard;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
+use tracing::info;
+
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
 use crate::http::stream_to_file;
 
@@ -335,11 +337,11 @@ pub async fn download_pokemon_prices(path: &str) -> eyre::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let temp_path = temp_dir.path().join("prices.sqlite");
 
-    println!("Downloading Pokemon prices from {DOWNLOAD_URL}...");
+    info!(url = DOWNLOAD_URL, "Downloading Pokemon prices");
     stream_to_file(DOWNLOAD_URL, "Download complete", &temp_path, None, "downloading").await?;
 
     std::fs::copy(&temp_path, &target)?;
-    println!("Pokemon prices saved to {target:?}.");
+    info!(dest = ?target, "Pokemon prices saved");
     Ok(())
 }
 

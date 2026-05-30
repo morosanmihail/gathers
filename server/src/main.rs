@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::debug;
+use tracing::{error, info, warn};
 
 use crate::collections::collection_routes;
 use crate::mtg_api::mtg_routes;
@@ -387,6 +387,16 @@ async fn serve_api(Extension(api): Extension<OpenApi>) -> impl axum::response::I
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::SystemTime)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    info!(version = env!("CARGO_PKG_VERSION"), "GatheRs server starting");
+
     let args = Args::parse();
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -394,11 +404,15 @@ async fn main() -> eyre::Result<()> {
     let db_dir = gathers_dir.join("DB");
     let config_path = gathers_dir.join("server.toml");
 
+    info!(config = %config_path.display(), "Loading config");
+
     // Load or create config file
     let mut config = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
-        toml::from_str::<ServerConfig>(&content)
-            .map_err(|e| eyre::eyre!("Failed to parse {}: {e}", config_path.display()))?
+        let cfg = toml::from_str::<ServerConfig>(&content)
+            .map_err(|e| eyre::eyre!("Failed to parse {}: {e}", config_path.display()))?;
+        info!(config = %config_path.display(), "Config loaded");
+        cfg
     } else {
         let systems = if args.system.is_empty() {
             vec![Systems::RiftboundSql]
@@ -419,7 +433,7 @@ async fn main() -> eyre::Result<()> {
             ),
             mtg_prices_path: Some(
                 db_dir
-                    .join("AllPricesToday.json")
+                    .join("AllPricesToday.sqlite")
                     .to_string_lossy()
                     .into_owned(),
             ),
@@ -444,7 +458,7 @@ async fn main() -> eyre::Result<()> {
             );
             std::process::exit(1);
         }
-        println!("Created config file at {}", config_path.display());
+        info!(config = %config_path.display(), "Config created");
         cfg
     };
 
@@ -456,6 +470,7 @@ async fn main() -> eyre::Result<()> {
         );
         std::process::exit(1);
     }
+    info!(db_dir = %db_dir.display(), "Database directory ready");
 
     // CLI args override config for this session
     if !args.system.is_empty() {
@@ -494,7 +509,7 @@ async fn main() -> eyre::Result<()> {
                 std::path::Path::new(p)
                     .parent()
                     .unwrap_or(std::path::Path::new("."))
-                    .join("AllPricesToday.json")
+                    .join("AllPricesToday.sqlite")
                     .to_string_lossy()
                     .into_owned()
             })
@@ -524,6 +539,13 @@ async fn main() -> eyre::Result<()> {
 
     let port = config.port;
 
+    info!(systems = ?config.system, port, "Configuring systems");
+    if let Some(ref p) = mtg_db_path { info!(path = %p, "MTG DB path"); }
+    if let Some(ref p) = mtg_prices_path { info!(path = %p, "MTG prices path"); }
+    if let Some(ref p) = riftbound_db_path { info!(path = %p, "Riftbound DB path"); }
+    if let Some(ref p) = pokemon_db_path { info!(path = %p, "Pokemon DB path"); }
+    if let Some(ref p) = storage_db_path { info!(path = %p, "Storage DB path"); }
+
     let retrieval = Arc::new(Mutex::new(RetrievalState::new(
         config.system.clone(),
         mtg_db_path.clone(),
@@ -547,19 +569,19 @@ async fn main() -> eyre::Result<()> {
                         let retrieval = retrieval.clone();
                         let progress = Arc::new(Mutex::new(DownloadProgress::default()));
                         retrieval.lock().await.downloading.insert("Sql".to_string(), progress.clone());
+                        info!(path = %path, "MTG DB missing — downloading in background");
                         tokio::spawn(async move {
-                            println!("Downloading MTG DB in background...");
                             match retrieval::download_mtg_db(&path, Some(progress)).await {
                                 Ok(_) => {
                                     let mut state = retrieval.lock().await;
                                     if let Err(e) = state.add_system(Systems::Sql) {
-                                        eprintln!("Failed to init MTG system after download: {e}");
+                                        error!(error = %e, "Failed to init MTG system after download");
                                     } else {
-                                        println!("MTG DB ready.");
+                                        info!("MTG DB ready");
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to download MTG DB: {e}");
+                                    error!(error = %e, "Failed to download MTG DB");
                                     retrieval.lock().await.downloading.remove("Sql");
                                 }
                             }
@@ -573,25 +595,25 @@ async fn main() -> eyre::Result<()> {
                         let retrieval = retrieval.clone();
                         let riftbound_db_path = riftbound_db_path.clone();
                         retrieval.lock().await.downloading.insert("RiftboundSql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
+                        info!(path = %path, "Riftbound DB missing — downloading in background");
                         tokio::spawn(async move {
-                            println!("Downloading Riftbound DB in background...");
                             match RetrievalState::new_retrieval(Systems::RiftboundSql, riftbound_db_path, None) {
                                 Ok(temp) => match temp.update_backend().await {
                                     Ok(_) => {
                                         let mut state = retrieval.lock().await;
                                         if let Err(e) = state.add_system(Systems::RiftboundSql) {
-                                            eprintln!("Failed to init Riftbound system after download: {e}");
+                                            error!(error = %e, "Failed to init Riftbound system after download");
                                         } else {
-                                            println!("Riftbound DB ready.");
+                                            info!("Riftbound DB ready");
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to download Riftbound DB: {e}");
+                                        error!(error = %e, "Failed to download Riftbound DB");
                                         retrieval.lock().await.downloading.remove("RiftboundSql");
                                     }
                                 },
                                 Err(e) => {
-                                    eprintln!("Failed to create Riftbound retrieval for download: {e}");
+                                    error!(error = %e, "Failed to create Riftbound retrieval for download");
                                     retrieval.lock().await.downloading.remove("RiftboundSql");
                                 }
                             }
@@ -605,26 +627,26 @@ async fn main() -> eyre::Result<()> {
                         let path = path.clone();
                         let retrieval = retrieval.clone();
                         retrieval.lock().await.downloading.insert("PokemonSql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
+                        info!(path = %path, "Pokemon DB missing — running scraper in background");
                         tokio::spawn(async move {
-                            println!("Running pokedata scraper in background...");
                             match RetrievalState::new_retrieval(Systems::PokemonSql, Some(path.clone()), None) {
                                 Ok(temp) => match temp.update_backend().await {
                                     Ok(_) => {
                                         let mut state = retrieval.lock().await;
                                         if let Err(e) = state.add_system(Systems::PokemonSql) {
-                                            eprintln!("Failed to init Pokemon system after scrape: {e}");
+                                            error!(error = %e, "Failed to init Pokemon system after scrape");
                                         } else {
-                                            println!("Pokemon DB ready.");
+                                            info!("Pokemon DB ready");
                                         }
                                         state.downloading.remove("PokemonSql");
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to run pokedata scraper: {e}");
+                                        error!(error = %e, "Failed to run pokedata scraper");
                                         retrieval.lock().await.downloading.remove("PokemonSql");
                                     }
                                 },
                                 Err(e) => {
-                                    eprintln!("Failed to create Pokemon retrieval for scrape: {e}");
+                                    error!(error = %e, "Failed to create Pokemon retrieval for scrape");
                                     retrieval.lock().await.downloading.remove("PokemonSql");
                                 }
                             }
@@ -632,12 +654,13 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
                 _ => {
-                    println!("Downloading updates not implemented for {system:?}");
+                    warn!(system = ?system, "Auto-update not implemented for this system");
                 }
             }
         }
     }
-    let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path)?));
+    let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path.clone())?));
+    info!(path = storage_db_path.as_deref().unwrap_or("(default)"), "Storage DB ready");
 
     let mut api = OpenApi {
         info: Info {
@@ -680,8 +703,7 @@ async fn main() -> eyre::Result<()> {
         .with_state((retrieval, storage));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-
-    debug!(port = ?port, "Started server" );
+    info!(port, "Listening on 0.0.0.0:{port}");
 
     axum::serve(listener, app).await?;
 

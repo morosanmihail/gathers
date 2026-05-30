@@ -40,7 +40,7 @@ Environment variables override the paths set in the config file:
 | Variable | Default | Description |
 |---|---|---|
 | `MTG_DB_PATH` | `~/.local/share/gathers/DB/AllPrintings.db` | MTG SQLite database (`sql` system) |
-| `MTG_PRICES_PATH` | `~/.local/share/gathers/DB/AllPricesToday.json` | MTG price data (`sql` system) |
+| `MTG_PRICES_PATH` | `~/.local/share/gathers/DB/AllPricesToday.sqlite` | MTG price data (`sql` system) |
 | `RIFTBOUND_DB_PATH` | `~/.local/share/gathers/DB/riftbound.db` | Riftbound SQLite database (`riftbound-sql` system) |
 | `POKEMON_DB_PATH` | `~/.local/share/gathers/DB/pokemon.db` | Pokémon SQLite database (`pokemon-sql` system) |
 | `STORAGE_DB_PATH` | `~/.local/share/gathers/DB/storage.db` | User collection database |
@@ -53,7 +53,7 @@ The `server.toml` config supports these keys beyond `system` and `port`:
 |---|---|---|
 | `pricing_enabled` | `true` | Show market prices, purchase price inputs, and purchase history in the UI |
 | `mtg_db_path` | see env var default | Path to `AllPrintings.db` |
-| `mtg_prices_path` | see env var default | Path to `AllPricesToday.json` |
+| `mtg_prices_path` | see env var default | Path to `AllPricesToday.sqlite` |
 | `riftbound_db_path` | see env var default | Path to `riftbound.db` |
 | `pokemon_db_path` | see env var default | Path to `pokemon.db` |
 | `storage_db_path` | see env var default | Path to `storage.db` |

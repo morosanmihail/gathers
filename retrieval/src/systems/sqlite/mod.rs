@@ -3,7 +3,6 @@ mod models;
 use std::{
     collections::HashMap,
     fs,
-    io::Read,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -13,10 +12,10 @@ use ::models::{Card, CardID, CardPrices, CollectorNumber, RetailerPrices, Set, S
 use bzip2::read::BzDecoder;
 use models::SqlCard;
 use rusqlite::Connection;
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::io::Write;
 use tokio::sync::Mutex;
+
+use tracing::{info, warn};
 
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
 use crate::http::{DownloadProgress, stream_to_file};
@@ -299,16 +298,13 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         };
 
         if remote_crc != local_crc {
-            println!(
-                "CRC mismatch! Local: {}, Remote: {}. Downloading replacement...",
-                local_crc, remote_crc
-            );
+            info!(local = %local_crc, remote = %remote_crc, "CRC mismatch — downloading replacement");
 
             tokio::spawn(async move {
                 let temp_dir = tempfile::tempdir().expect("Gotta be able to create a temp dir");
                 let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
 
-                println!("Download from {DOWNLOAD_URL:?} to {bz2_path:?}...");
+                info!(url = DOWNLOAD_URL, dest = ?bz2_path, "Downloading AllPrintings");
                 let result = stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading")
                     .await
                     .and_then(|_| calculate_sha256(&bz2_path))
@@ -316,20 +312,20 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                         if downloaded_crc == remote_crc {
                             decompress_bz2(&bz2_path, &local_file_path)?;
                             fs::write(&sidecar_path, &downloaded_crc)?;
-                            println!("File replaced successfully.");
+                            info!("AllPrintings replaced successfully");
                         } else {
-                            println!("Downloaded CRC mismatch: expected {remote_crc}, got {downloaded_crc}");
+                            warn!(expected = %remote_crc, got = %downloaded_crc, "Downloaded CRC mismatch");
                         }
                         Ok(())
                     });
                 if let Err(e) = result {
-                    println!("Failed to download due to {e}");
+                    warn!(error = %e, "Failed to download AllPrintings");
                 }
             });
 
             Ok(true)
         } else {
-            println!("CRCs match ({}). No replacement needed.", local_crc);
+            info!(crc = %local_crc, "AllPrintings up to date");
             Ok(false)
         }
     }
@@ -337,71 +333,47 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
 
 // ── Price helpers ────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct PricesFile {
-    data: HashMap<String, CardPriceEntry>,
-}
-
-#[derive(Deserialize)]
-struct CardPriceEntry {
-    #[serde(default)]
-    paper: HashMap<String, PaperRetailer>,
-}
-
-#[derive(Deserialize)]
-struct PaperRetailer {
-    retail: Option<RetailSection>,
-}
-
-#[derive(Deserialize)]
-struct RetailSection {
-    normal: Option<HashMap<String, f64>>,
-    foil: Option<HashMap<String, f64>>,
-}
-
-fn latest_price(prices: &HashMap<String, f64>) -> Option<f64> {
-    prices.iter().max_by_key(|(date, _)| date.as_str()).map(|(_, p)| *p)
-}
-
-fn entry_to_card_prices(uuid: &str, entry: CardPriceEntry) -> CardPrices {
-    let paper = entry
-        .paper
-        .into_iter()
-        .map(|(retailer, data)| {
-            let normal = data
-                .retail
-                .as_ref()
-                .and_then(|r| r.normal.as_ref())
-                .and_then(latest_price);
-            let foil = data
-                .retail
-                .as_ref()
-                .and_then(|r| r.foil.as_ref())
-                .and_then(latest_price);
-            (retailer, RetailerPrices { normal, foil })
-        })
-        .collect();
-    CardPrices { uuid: uuid.to_string(), paper }
-}
-
 fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardPrices>> {
-    println!("Loading prices from {path}...");
-    let json = fs::read_to_string(path)?;
-    let root: PricesFile = serde_json::from_str(&json)?;
-    let map = root
-        .data
+    info!(path, "Loading MTG prices");
+    let conn = Connection::open(path)?;
+    let mut stmt = conn.prepare(
+        "SELECT uuid, provider, finish, price FROM prices WHERE source = 'paper' AND priceType = 'retail'",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, f64>(3)?,
+        ))
+    })?;
+
+    let mut paper_map: HashMap<String, HashMap<String, RetailerPrices>> = HashMap::new();
+    for row in rows.flatten() {
+        let (uuid, retailer, finish, price) = row;
+        let rp = paper_map
+            .entry(uuid)
+            .or_default()
+            .entry(retailer)
+            .or_insert(RetailerPrices { normal: None, foil: None });
+        match finish.as_str() {
+            "normal" => rp.normal = Some(price),
+            "foil" => rp.foil = Some(price),
+            _ => {}
+        }
+    }
+
+    let map = paper_map
         .into_iter()
-        .map(|(uuid, entry)| {
-            let prices = entry_to_card_prices(&uuid, entry);
-            (uuid, prices)
-        })
+        .map(|(uuid, paper)| (uuid.clone(), CardPrices { uuid, paper }))
         .collect();
-    println!("Prices loaded.");
+    info!("MTG prices loaded");
     Ok(map)
 }
 
 pub async fn download_prices(path: &str) -> eyre::Result<()> {
-    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.json.bz2";
+    const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.sqlite.bz2";
+    const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPricesToday.sqlite.bz2.sha256";
 
     let target = PathBuf::from_str(path)?;
     if let Some(parent) = target.parent()
@@ -411,24 +383,58 @@ pub async fn download_prices(path: &str) -> eyre::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let temp_dir = tempfile::tempdir()?;
-    let bz2_path = temp_dir.path().join("AllPricesToday.json.bz2");
-
-    println!("Downloading AllPricesToday.json.bz2...");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading").await?;
-
-    println!("Decompressing AllPricesToday.json.bz2...");
-    let bz2_file = fs::File::open(&bz2_path)?;
-    let mut decoder = BzDecoder::new(bz2_file);
-    let mut json_content = String::new();
-    decoder.read_to_string(&mut json_content)?;
-
-    fs::write(&target, json_content.as_bytes())?;
-    println!("Prices saved to {target:?} ({} bytes).", json_content.len());
-    Ok(())
+    download_bz2_verified(DOWNLOAD_URL, CRC_URL, "AllPricesToday.sqlite.bz2", &target, None).await
 }
 
 // ── File helpers ──────────────────────────────────────────────────────────────
+
+async fn download_bz2_verified(
+    download_url: &str,
+    crc_url: &str,
+    bz2_filename: &str,
+    target: &Path,
+    progress: Option<&Arc<Mutex<DownloadProgress>>>,
+) -> eyre::Result<()> {
+    let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", target.display()));
+    let temp_dir = tempfile::tempdir()?;
+
+    let crc_path = temp_dir.path().join("remote.sha256");
+    stream_to_file(crc_url, "SHA256 fetched", &crc_path, progress, "checking").await?;
+    let remote_crc = fs::read_to_string(&crc_path)?.trim().to_lowercase();
+
+    let local_crc = if sidecar_path.exists() {
+        fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
+    } else {
+        String::new()
+    };
+
+    if target.exists() && local_crc == remote_crc {
+        info!(file = bz2_filename, crc = %remote_crc, "Already up to date");
+        return Ok(());
+    }
+
+    info!(file = bz2_filename, dest = ?target, "Downloading");
+    let bz2_path = temp_dir.path().join(bz2_filename);
+    stream_to_file(download_url, "Download complete", &bz2_path, progress, "downloading").await?;
+
+    if let Some(p) = progress {
+        p.lock().await.phase = "verifying".to_string();
+    }
+    let downloaded_crc = calculate_sha256(&bz2_path)?;
+    if downloaded_crc != remote_crc {
+        eyre::bail!(
+            "{bz2_filename} CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
+        );
+    }
+
+    if let Some(p) = progress {
+        p.lock().await.phase = "decompressing".to_string();
+    }
+    decompress_bz2(&bz2_path, target)?;
+    fs::write(&sidecar_path, &downloaded_crc)?;
+    info!(file = bz2_filename, crc = %downloaded_crc, "Downloaded, verified, and decompressed");
+    Ok(())
+}
 
 fn calculate_sha256(path: &Path) -> eyre::Result<String> {
     let data = fs::read(path)?;
@@ -453,8 +459,6 @@ pub async fn download_mtg_db(
     const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
 
     let target = PathBuf::from_str(path)?;
-    let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", target.display()));
-
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
         && !parent.exists()
@@ -462,44 +466,7 @@ pub async fn download_mtg_db(
         fs::create_dir_all(parent)?;
     }
 
-    let temp_dir = tempfile::tempdir()?;
-
-    println!("Fetching remote SHA256 for AllPrintings.sqlite.bz2...");
-    let crc_path = temp_dir.path().join("remote.sha256");
-    stream_to_file(CRC_URL, "SHA256 fetched", &crc_path, progress.as_ref(), "checking").await?;
-    let remote_crc = fs::read_to_string(&crc_path)?.trim().to_lowercase();
-
-    let local_crc = if sidecar_path.exists() {
-        fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
-    } else {
-        String::new()
-    };
-    if target.exists() && local_crc == remote_crc {
-        println!("AllPrintings.db is already up to date (CRC: {remote_crc}).");
-        return Ok(());
-    }
-
-    println!("Downloading AllPrintings.sqlite.bz2 to {target:?}...");
-    let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
-    stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, progress.as_ref(), "downloading").await?;
-
-    if let Some(p) = &progress {
-        p.lock().await.phase = "verifying".to_string();
-    }
-    let downloaded_crc = calculate_sha256(&bz2_path)?;
-    if downloaded_crc != remote_crc {
-        eyre::bail!(
-            "AllPrintings.sqlite.bz2 CRC mismatch after download: expected {remote_crc}, got {downloaded_crc}"
-        );
-    }
-
-    if let Some(p) = &progress {
-        p.lock().await.phase = "decompressing".to_string();
-    }
-    decompress_bz2(&bz2_path, &target)?;
-    fs::write(&sidecar_path, &downloaded_crc)?;
-    println!("AllPrintings.db downloaded, verified, and decompressed (CRC: {downloaded_crc}).");
-    Ok(())
+    download_bz2_verified(DOWNLOAD_URL, CRC_URL, "AllPrintings.sqlite.bz2", &target, progress.as_ref()).await
 }
 
 #[cfg(test)]
@@ -845,51 +812,65 @@ mod tests {
 
     // ── Price tests ───────────────────────────────────────────────────────────
 
-    // Snapshot of three real UUIDs from AllPricesToday.json (2026-05-22).
-    // uuid-00010d56: foil-only retail entries (no normal for most retailers)
-    // uuid-0001e0d0: normal-only retail entries (no foil anywhere)
-    // uuid-0003caab: both normal and foil; also has an "mtgo" section (should be ignored)
-    // All entries contain "buylist" and "currency" fields that must be silently ignored.
-    const REAL_PRICES_SNAPSHOT: &str = r#"{"data":{"00010d56-fe38-5e35-8aed-518019aa36a5":{"paper":{"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":3.07},"foil":{"2026-05-22":4.44}},"currency":"EUR"},"manapool":{"buylist":{},"retail":{"foil":{"2026-05-22":11.23}},"currency":"USD"},"cardkingdom":{"buylist":{"foil":{"2026-05-22":5.0}},"retail":{"foil":{"2026-05-22":11.99}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"foil":{"2026-05-22":12.63}},"currency":"USD"}}},"0001e0d0-2dcd-5640-aadc-a84765cf5fc9":{"paper":{"cardkingdom":{"buylist":{"normal":{"2026-05-22":4.2}},"retail":{"normal":{"2026-05-22":7.49}},"currency":"USD"},"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":4.78}},"currency":"EUR"},"manapool":{"buylist":{},"retail":{"normal":{"2026-05-22":4.12}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"normal":{"2026-05-22":5.89}},"currency":"USD"}}},"0003caab-9ff5-5d1a-bc06-976dd0457f19":{"paper":{"manapool":{"buylist":{},"retail":{"normal":{"2026-05-22":0.15},"foil":{"2026-05-22":0.48}},"currency":"USD"},"tcgplayer":{"buylist":{},"retail":{"foil":{"2026-05-22":2.04},"normal":{"2026-05-22":0.16}},"currency":"USD"},"cardkingdom":{"buylist":{"foil":{"2026-05-22":0.75}},"retail":{"foil":{"2026-05-22":2.49},"normal":{"2026-05-22":0.35}},"currency":"USD"},"cardmarket":{"buylist":{},"retail":{"normal":{"2026-05-22":0.19},"foil":{"2026-05-22":1.02}},"currency":"EUR"}},"mtgo":{"cardhoarder":{"buylist":{},"retail":{"normal":{"2026-05-22":0.03}},"currency":"USD"}}}}}"#;
-
-    // uuid-alpha/beta used for simple structural tests that don't need real prices.
-    const DUMMY_PRICES_JSON: &str = r#"{
-        "data": {
-            "uuid-alpha": {
-                "paper": {
-                    "cardkingdom": {
-                        "retail": {
-                            "normal": {"2024-01-01": 1.50},
-                            "foil":   {"2024-01-01": 3.00}
-                        }
-                    },
-                    "tcgplayer": {
-                        "retail": {
-                            "normal": {"2024-01-01": 1.25}
-                        }
-                    }
-                }
-            },
-            "uuid-beta": {
-                "paper": {
-                    "cardkingdom": {
-                        "retail": {
-                            "normal": {"2024-01-01": 0.25}
-                        }
-                    }
-                }
-            }
+    // entries: (uuid, source, provider, priceType, finish, price)
+    fn create_prices_db(dir: &TempDir, entries: &[(&str, &str, &str, &str, &str, f64)]) -> String {
+        let path = dir.path().join("prices.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE prices (uuid TEXT, date TEXT, source TEXT, provider TEXT, priceType TEXT, finish TEXT, price REAL, currency TEXT)",
+        ).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "INSERT INTO prices (uuid, date, source, provider, priceType, finish, price, currency) VALUES (?1, '2026-05-22', ?2, ?3, ?4, ?5, ?6, 'USD')",
+            )
+            .unwrap();
+        for (uuid, source, provider, price_type, finish, price) in entries {
+            stmt.execute(rusqlite::params![uuid, source, provider, price_type, finish, price])
+                .unwrap();
         }
-    }"#;
-
-    fn write_prices(dir: &TempDir, json: &str) -> String {
-        let path = dir.path().join("prices.json");
-        std::fs::write(&path, json).unwrap();
         path.to_string_lossy().into_owned()
     }
 
     fn write_dummy_prices(dir: &TempDir) -> String {
-        write_prices(dir, DUMMY_PRICES_JSON)
+        create_prices_db(dir, &[
+            ("uuid-alpha", "paper", "cardkingdom", "retail", "normal", 1.50),
+            ("uuid-alpha", "paper", "cardkingdom", "retail", "foil",   3.00),
+            ("uuid-alpha", "paper", "tcgplayer",   "retail", "normal", 1.25),
+            ("uuid-beta",  "paper", "cardkingdom", "retail", "normal", 0.25),
+        ])
+    }
+
+    // Snapshot of three real UUIDs from AllPricesToday (2026-05-22).
+    // uuid-00010d56: foil-only for most retailers, cardmarket has both
+    // uuid-0001e0d0: normal-only retail entries
+    // uuid-0003caab: both normal and foil; also has mtgo and buylist rows (must be ignored)
+    fn write_real_prices(dir: &TempDir) -> String {
+        create_prices_db(dir, &[
+            // 00010d56
+            ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardmarket",  "retail",  "normal", 3.07),
+            ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardmarket",  "retail",  "foil",   4.44),
+            ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "manapool",    "retail",  "foil",   11.23),
+            ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardkingdom", "retail",  "foil",   11.99),
+            ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "tcgplayer",   "retail",  "foil",   12.63),
+            // 0001e0d0
+            ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "cardkingdom", "retail",  "normal", 7.49),
+            ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "cardmarket",  "retail",  "normal", 4.78),
+            ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "manapool",    "retail",  "normal", 4.12),
+            ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "tcgplayer",   "retail",  "normal", 5.89),
+            // 0003caab — paper retail
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "manapool",    "retail",  "normal", 0.15),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "manapool",    "retail",  "foil",   0.48),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "tcgplayer",   "retail",  "foil",   2.04),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "tcgplayer",   "retail",  "normal", 0.16),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "retail",  "foil",   2.49),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "retail",  "normal", 0.35),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardmarket",  "retail",  "normal", 0.19),
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardmarket",  "retail",  "foil",   1.02),
+            // 0003caab — buylist (must be ignored)
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "buylist", "foil",   0.75),
+            // 0003caab — mtgo (must be ignored)
+            ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "mtgo",  "cardhoarder", "retail",  "normal", 0.03),
+        ])
     }
 
     fn system_with_prices(prices_path: Option<String>) -> MagicSQLiteRetrievalSystem {
@@ -934,7 +915,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_card_prices_file_missing() {
-        let system = system_with_prices(Some("/tmp/does_not_exist_prices.json".to_string()));
+        let system = system_with_prices(Some("/tmp/does_not_exist_prices.sqlite".to_string()));
         let result = system.get_card_prices("uuid-alpha").await.unwrap();
         assert!(result.is_none());
     }
@@ -1008,7 +989,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_bulk_card_prices_file_missing() {
-        let system = system_with_prices(Some("/tmp/does_not_exist_prices.json".to_string()));
+        let system = system_with_prices(Some("/tmp/does_not_exist_prices.sqlite".to_string()));
         let result = system
             .get_bulk_card_prices(vec!["uuid-alpha".to_string()])
             .await
@@ -1057,10 +1038,6 @@ mod tests {
     }
 
     // ── Real-snapshot tests ───────────────────────────────────────────────────
-
-    fn write_real_prices(dir: &TempDir) -> String {
-        write_prices(dir, REAL_PRICES_SNAPSHOT)
-    }
 
     #[tokio::test]
     async fn test_real_snapshot_all_retailers_present() {
@@ -1140,7 +1117,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let system = system_with_prices(Some(write_real_prices(&dir)));
 
-        // uuid-0003caab has an "mtgo" section; it must NOT appear in paper.
+        // uuid-0003caab has an "mtgo" row; it must NOT appear in paper.
         let prices = system
             .get_card_prices("0003caab-9ff5-5d1a-bc06-976dd0457f19")
             .await

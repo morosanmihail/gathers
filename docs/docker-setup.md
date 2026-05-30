@@ -69,7 +69,7 @@ The Docker container supports the following environment variables (all set by de
 |---|---|---|
 | `GATHERS_SYSTEMS` | `riftbound-sql,scryfall` | Comma-separated list of systems to enable. Valid values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql` |
 | `MTG_DB_PATH` | `/home/app/.local/share/gathers/DB/AllPrintings.db` | MTG SQLite database |
-| `MTG_PRICES_PATH` | `/home/app/.local/share/gathers/DB/AllPricesToday.json` | MTG price data |
+| `MTG_PRICES_PATH` | `/home/app/.local/share/gathers/DB/AllPricesToday.sqlite` | MTG price data |
 | `RIFTBOUND_DB_PATH` | `/home/app/.local/share/gathers/DB/riftbound.db` | Riftbound SQLite database |
 | `POKEMON_DB_PATH` | `/home/app/.local/share/gathers/DB/pokemon.db` | Pokémon SQLite database |
 | `STORAGE_DB_PATH` | `/home/app/.local/share/gathers/DB/storage.db` | User collection database |
@@ -90,7 +90,7 @@ port = 5234
 pricing_enabled = true
 
 mtg_db_path = "/home/app/.local/share/gathers/DB/AllPrintings.db"
-mtg_prices_path = "/home/app/.local/share/gathers/DB/AllPricesToday.json"
+mtg_prices_path = "/home/app/.local/share/gathers/DB/AllPricesToday.sqlite"
 riftbound_db_path = "/home/app/.local/share/gathers/DB/riftbound.db"
 pokemon_db_path = "/home/app/.local/share/gathers/DB/pokemon.db"
 storage_db_path = "/home/app/.local/share/gathers/DB/storage.db"

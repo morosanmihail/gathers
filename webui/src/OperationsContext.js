@@ -23,22 +23,14 @@ export function OperationsProvider({ children }) {
     const removeOp = () => setOperations((prev) => { const copy = { ...prev }; delete copy[opId]; return copy; });
     try {
       const response = await fetch(...args);
+      removeOp();
       if (response.ok) {
-        const result = await response.json();
-        removeOp();
-        return result;
-      } else {
-        let errorMessage = `Request failed (${response.status})`;
-        try {
-          const body = await response.json();
-          if (body?.error) errorMessage = body.error;
-        } catch (_) {}
-        removeOp();
-        throw new Error(errorMessage);
+        return await response.json();
       }
+      return defaultValue;
     } catch (e) {
       removeOp();
-      throw e;
+      return defaultValue;
     }
   }, []);
 
