@@ -210,6 +210,36 @@ fn trim_by_type(
     Ok(())
 }
 
+pub(super) fn delete_entry(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    entry_id: i64,
+) -> eyre::Result<bool> {
+    let rows = conn.execute(
+        "DELETE FROM purchase_history WHERE id = ?1 AND collection_id = ?2",
+        params![entry_id, collection_id],
+    )?;
+    Ok(rows > 0)
+}
+
+pub(super) fn update_entry(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    entry_id: i64,
+    quantity: i32,
+    foil_quantity: i32,
+    normal_price_per_unit: Option<f64>,
+    foil_price_per_unit: Option<f64>,
+) -> eyre::Result<bool> {
+    let rows = conn.execute(
+        "UPDATE purchase_history \
+         SET quantity = ?1, foil_quantity = ?2, normal_price_per_unit = ?3, foil_price_per_unit = ?4 \
+         WHERE id = ?5 AND collection_id = ?6",
+        params![quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, entry_id, collection_id],
+    )?;
+    Ok(rows > 0)
+}
+
 pub(super) fn get_collection_totals(
     conn: &Connection,
     collection_id: &CollectionID,

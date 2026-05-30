@@ -9,13 +9,65 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function EditRow({ entry, onSave, onCancel }) {
+  const [qty, setQty] = useState(String(entry.quantity));
+  const [foilQty, setFoilQty] = useState(String(entry.foil_quantity));
+  const [normalPrice, setNormalPrice] = useState(entry.normal_price_per_unit != null ? String(entry.normal_price_per_unit) : "");
+  const [foilPrice, setFoilPrice] = useState(entry.foil_price_per_unit != null ? String(entry.foil_price_per_unit) : "");
+
+  const handleSave = () => {
+    onSave({
+      quantity: parseInt(qty) || 0,
+      foil_quantity: parseInt(foilQty) || 0,
+      normal_price_per_unit: normalPrice !== "" ? parseFloat(normalPrice) : null,
+      foil_price_per_unit: foilPrice !== "" ? parseFloat(foilPrice) : null,
+    });
+  };
+
+  const inputStyle = { width: 70, fontSize: "0.8rem" };
+
+  return (
+    <tr className="table-warning">
+      <td className="text-muted" style={{ whiteSpace: "nowrap" }}>{formatDate(entry.recorded_at)}</td>
+      <td className="fw-semibold">{entry.card_name ?? <span className="text-muted fst-italic">Unknown</span>}</td>
+      <td className="text-muted small">{entry.set_code ?? "—"}</td>
+      <td className="text-end">
+        <input type="number" min="0" className="form-control form-control-sm d-inline" style={inputStyle}
+          value={qty} onChange={(e) => setQty(e.target.value)} />
+      </td>
+      <td className="text-end">
+        <input type="number" min="0" className="form-control form-control-sm d-inline" style={inputStyle}
+          value={foilQty} onChange={(e) => setFoilQty(e.target.value)} />
+      </td>
+      <td className="text-end">
+        <input type="number" min="0" step="0.01" placeholder="—" className="form-control form-control-sm d-inline" style={inputStyle}
+          value={normalPrice} onChange={(e) => setNormalPrice(e.target.value)} />
+      </td>
+      <td className="text-end">
+        <input type="number" min="0" step="0.01" placeholder="—" className="form-control form-control-sm d-inline" style={inputStyle}
+          value={foilPrice} onChange={(e) => setFoilPrice(e.target.value)} />
+      </td>
+      <td className="text-end" />
+      <td className="text-muted small">{entry.provider || "—"}</td>
+      <td>
+        <div className="d-flex gap-1">
+          <button className="btn btn-sm btn-success" style={{ padding: "1px 6px" }} onClick={handleSave}>✓</button>
+          <button className="btn btn-sm btn-outline-secondary" style={{ padding: "1px 6px" }} onClick={onCancel}>✕</button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function PurchaseHistoryContent() {
   const { collection } = useParams();
   const pricingEnabled = usePricingEnabled();
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
-  useEffect(() => {
+  const load = () => {
     if (!collection || !pricingEnabled) return;
     fetch(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history`)
       .then((r) => {
@@ -24,7 +76,31 @@ function PurchaseHistoryContent() {
       })
       .then((data) => setEntries(data.entries))
       .catch((e) => setError(e.message));
-  }, [collection]);
+  };
+
+  useEffect(load, [collection, pricingEnabled]);
+
+  const handleDelete = (entryId) => {
+    fetch(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`, {
+      method: "DELETE",
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+      setPendingDelete(null);
+      load();
+    }).catch((e) => setError(e.message));
+  };
+
+  const handleUpdate = (entryId, body) => {
+    fetch(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+      setEditingId(null);
+      load();
+    }).catch((e) => setError(e.message));
+  };
 
   const totalSpent = entries
     ? entries.reduce((sum, e) => {
@@ -73,6 +149,14 @@ function PurchaseHistoryContent() {
         </div>
       )}
 
+      {pendingDelete != null && (
+        <div className="alert alert-danger d-flex align-items-center gap-3">
+          <span>Delete this purchase record?</span>
+          <button className="btn btn-sm btn-danger" onClick={() => handleDelete(pendingDelete)}>Delete</button>
+          <button className="btn btn-sm btn-outline-secondary" onClick={() => setPendingDelete(null)}>Cancel</button>
+        </div>
+      )}
+
       {entries && entries.length > 0 && (
         <div className="table-responsive">
           <table className="table table-sm table-striped table-hover align-middle">
@@ -87,10 +171,21 @@ function PurchaseHistoryContent() {
                 <th className="text-end">Foil price</th>
                 <th className="text-end">Line total</th>
                 <th>Provider</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {entries.map((e) => {
+                if (editingId === e.id) {
+                  return (
+                    <EditRow
+                      key={e.id}
+                      entry={e}
+                      onSave={(body) => handleUpdate(e.id, body)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  );
+                }
                 const lineTotal =
                   (e.normal_price_per_unit ?? 0) * e.quantity +
                   (e.foil_price_per_unit ?? 0) * e.foil_quantity;
@@ -141,6 +236,20 @@ function PurchaseHistoryContent() {
                       )}
                     </td>
                     <td className="text-muted small">{e.provider || "—"}</td>
+                    <td>
+                      <div className="d-flex gap-1">
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          style={{ padding: "1px 6px", fontSize: "0.75rem" }}
+                          onClick={() => { setEditingId(e.id); setPendingDelete(null); }}
+                        >✎</button>
+                        <button
+                          className="btn btn-sm btn-outline-danger"
+                          style={{ padding: "1px 6px", fontSize: "0.75rem" }}
+                          onClick={() => { setPendingDelete(e.id); setEditingId(null); }}
+                        >✕</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -149,7 +258,7 @@ function PurchaseHistoryContent() {
               <tr>
                 <td colSpan={7} className="text-end text-muted small">Total spent</td>
                 <td className="text-end fw-bold text-success">${totalSpent.toFixed(2)}</td>
-                <td />
+                <td /><td />
               </tr>
             </tfoot>
           </table>

@@ -250,4 +250,26 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let conn = self.connection.lock().await;
         purchase_history::get_collection_totals(&conn, collection_id)
     }
+
+    async fn delete_purchase_entry(
+        &mut self,
+        collection_id: &CollectionID,
+        entry_id: i64,
+    ) -> eyre::Result<bool> {
+        let conn = self.connection.lock().await;
+        purchase_history::delete_entry(&conn, collection_id, entry_id)
+    }
+
+    async fn update_purchase_entry(
+        &mut self,
+        collection_id: &CollectionID,
+        entry_id: i64,
+        quantity: i32,
+        foil_quantity: i32,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
+    ) -> eyre::Result<bool> {
+        let conn = self.connection.lock().await;
+        purchase_history::update_entry(&conn, collection_id, entry_id, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit)
+    }
 }

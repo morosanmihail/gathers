@@ -1127,3 +1127,193 @@ async fn test_move_cards_foil_history_transferred() {
     let foil_b: i32 = hist_b.iter().map(|e| e.foil_quantity).sum();
     assert_eq!(foil_b, 2);
 }
+
+// ── delete_purchase_entry ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_delete_purchase_entry_removes_entry() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist.len(), 1);
+    let id = hist[0].id;
+
+    let deleted = p.delete_purchase_entry(&col, id).await.unwrap();
+    assert!(deleted);
+    assert!(p.get_all_purchase_history(&col).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_delete_purchase_entry_returns_false_when_not_found() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let deleted = p.delete_purchase_entry(&col, 9999).await.unwrap();
+    assert!(!deleted);
+}
+
+#[tokio::test]
+async fn test_delete_purchase_entry_isolated_by_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("A".to_string()).await.unwrap();
+    let col_b = p.add_collection("B".to_string()).await.unwrap();
+    record_purchase(&mut p, &col_a, "card1", 1, 0, Some(5.0)).await;
+
+    let hist = p.get_all_purchase_history(&col_a).await.unwrap();
+    let id = hist[0].id;
+
+    // attempt to delete col_a's entry using col_b's collection_id
+    let deleted = p.delete_purchase_entry(&col_b, id).await.unwrap();
+    assert!(!deleted);
+    // entry still exists in col_a
+    assert_eq!(p.get_all_purchase_history(&col_a).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_delete_purchase_entry_leaves_other_entries_intact() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(1.0)).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(2.0)).await;
+    record_purchase(&mut p, &col, "card2", 3, 0, Some(5.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id_to_delete = hist.iter().find(|e| e.normal_price_per_unit == Some(1.0)).unwrap().id;
+
+    p.delete_purchase_entry(&col, id_to_delete).await.unwrap();
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist.len(), 2);
+    assert!(!hist.iter().any(|e| e.normal_price_per_unit == Some(1.0)));
+    assert!(hist.iter().any(|e| e.normal_price_per_unit == Some(2.0)));
+    assert!(hist.iter().any(|e| e.card_uuid == "card2"));
+}
+
+#[tokio::test]
+async fn test_delete_purchase_entry_updates_totals() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(4.0)).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(8.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id = hist.iter().find(|e| e.normal_price_per_unit == Some(4.0)).unwrap().id;
+    p.delete_purchase_entry(&col, id).await.unwrap();
+
+    let totals = p.get_collection_purchase_totals(&col).await.unwrap();
+    let s = totals.get("card1").unwrap();
+    assert_eq!(s.quantity, 1);
+    assert!((s.total_normal_paid - 8.0).abs() < 1e-9);
+}
+
+// ── update_purchase_entry ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_update_purchase_entry_changes_quantity() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id = hist[0].id;
+
+    let updated = p.update_purchase_entry(&col, id, 5, 0, Some(5.0), None).await.unwrap();
+    assert!(updated);
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].quantity, 5);
+    assert_eq!(hist[0].normal_price_per_unit, Some(5.0));
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_changes_price() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 3, 0, Some(2.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id = hist[0].id;
+
+    p.update_purchase_entry(&col, id, 3, 0, Some(9.99), None).await.unwrap();
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert!((hist[0].normal_price_per_unit.unwrap() - 9.99).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_clears_price_to_null() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(4.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id = hist[0].id;
+
+    p.update_purchase_entry(&col, id, 2, 0, None, None).await.unwrap();
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].normal_price_per_unit, None);
+    // null-price entry excluded from totals
+    assert!(p.get_collection_purchase_totals(&col).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_returns_false_when_not_found() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let updated = p.update_purchase_entry(&col, 9999, 1, 0, None, None).await.unwrap();
+    assert!(!updated);
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_isolated_by_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("A".to_string()).await.unwrap();
+    let col_b = p.add_collection("B".to_string()).await.unwrap();
+    record_purchase(&mut p, &col_a, "card1", 2, 0, Some(3.0)).await;
+
+    let hist = p.get_all_purchase_history(&col_a).await.unwrap();
+    let id = hist[0].id;
+
+    // attempt to update col_a's entry via col_b
+    let updated = p.update_purchase_entry(&col_b, id, 99, 0, Some(999.0), None).await.unwrap();
+    assert!(!updated);
+
+    // original entry unchanged
+    let hist = p.get_all_purchase_history(&col_a).await.unwrap();
+    assert_eq!(hist[0].quantity, 2);
+    assert_eq!(hist[0].normal_price_per_unit, Some(3.0));
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_foil_fields() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 0, 2, Some(6.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id = hist[0].id;
+
+    p.update_purchase_entry(&col, id, 0, 3, None, Some(7.50)).await.unwrap();
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].foil_quantity, 3);
+    assert_eq!(hist[0].foil_price_per_unit, Some(7.50));
+    assert_eq!(hist[0].normal_price_per_unit, None);
+}
+
+#[tokio::test]
+async fn test_update_purchase_entry_reflects_in_totals() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    p.update_purchase_entry(&col, hist[0].id, 4, 0, Some(5.0), None).await.unwrap();
+
+    let totals = p.get_collection_purchase_totals(&col).await.unwrap();
+    let s = totals.get("card1").unwrap();
+    assert_eq!(s.quantity, 4);
+    assert!((s.total_normal_paid - 20.0).abs() < 1e-9);
+}

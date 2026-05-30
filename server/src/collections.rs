@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aide::axum::{
     ApiRouter,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use axum::extract::Multipart;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -1033,6 +1033,58 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         }))
     }
 
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct UpdatePurchaseEntryBody {
+        quantity: i32,
+        foil_quantity: i32,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
+    }
+
+    async fn delete_purchase_entry(
+        State(state): State<GathersState>,
+        Path((collection_id, entry_id)): Path<(String, i64)>,
+    ) -> Result<StatusCode, ApiError> {
+        let found = state
+            .1
+            .lock()
+            .await
+            .storage
+            .delete_purchase_entry(&collection_id, entry_id)
+            .await
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload { error: format!("Failed to delete entry. {e}") }),
+            ))?;
+        if found { Ok(StatusCode::NO_CONTENT) } else { Ok(StatusCode::NOT_FOUND) }
+    }
+
+    async fn update_purchase_entry(
+        State(state): State<GathersState>,
+        Path((collection_id, entry_id)): Path<(String, i64)>,
+        Json(body): Json<UpdatePurchaseEntryBody>,
+    ) -> Result<StatusCode, ApiError> {
+        let found = state
+            .1
+            .lock()
+            .await
+            .storage
+            .update_purchase_entry(
+                &collection_id,
+                entry_id,
+                body.quantity,
+                body.foil_quantity,
+                body.normal_price_per_unit,
+                body.foil_price_per_unit,
+            )
+            .await
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload { error: format!("Failed to update entry. {e}") }),
+            ))?;
+        if found { Ok(StatusCode::NO_CONTENT) } else { Ok(StatusCode::NOT_FOUND) }
+    }
+
     async fn all_purchase_history(
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
@@ -1108,6 +1160,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/delete", post(cards_remove))
         .api_route("/cards/{id}/purchase_history/{card_uuid}", get(purchase_history))
         .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
+        .api_route("/cards/{id}/purchase_history_entry/{entry_id}", delete(delete_purchase_entry).patch(update_purchase_entry))
         .api_route("/cards/{id}/value_breakdown", get(collection_value_breakdown))
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export))

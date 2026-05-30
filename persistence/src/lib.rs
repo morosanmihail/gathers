@@ -134,6 +134,22 @@ pub trait PersistenceSystemTrait {
         &self,
         collection_id: &CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<CardID, PurchaseSummary>>>;
+
+    fn delete_purchase_entry(
+        &mut self,
+        collection_id: &CollectionID,
+        entry_id: i64,
+    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
+
+    fn update_purchase_entry(
+        &mut self,
+        collection_id: &CollectionID,
+        entry_id: i64,
+        quantity: i32,
+        foil_quantity: i32,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
+    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
 }
 
 #[derive(Debug, Clone)]
