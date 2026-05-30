@@ -34,10 +34,9 @@ use crate::collections::collections_models::Collection;
 fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
     let rp = prices
         .paper
-        .iter()
-        .find(|(k, _)| k.to_lowercase() == "cardmarket")
-        .or_else(|| prices.paper.iter().next())
-        .map(|(_, v)| v);
+        .get("raw")
+        .or_else(|| prices.paper.iter().find(|(k, _)| k.to_lowercase() == "cardmarket").map(|(_, v)| v))
+        .or_else(|| prices.paper.values().next());
     let Some(rp) = rp else { return (0.0, 0.0) };
     let normal = rp.normal.or(rp.foil).unwrap_or(0.0);
     let foil = rp.foil.or(rp.normal).unwrap_or(0.0);

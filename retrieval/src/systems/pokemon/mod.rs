@@ -29,6 +29,14 @@ pub struct PokemonSQLiteRetrievalSystem {
     prices_connection: Arc<Mutex<Option<Connection>>>,
 }
 
+fn open_prices_connection(path: &str) -> eyre::Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_prices_cardid_date ON prices(cardId, date DESC);"
+    )?;
+    Ok(conn)
+}
+
 impl PokemonSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/pokemon.db".to_string());
@@ -36,7 +44,7 @@ impl PokemonSQLiteRetrievalSystem {
         let prices_conn = if let Some(ref p) = prices_db_path
             && PathBuf::from(p).exists()
         {
-            Arc::new(Mutex::new(Some(Connection::open(p)?)))
+            Arc::new(Mutex::new(Some(open_prices_connection(p)?)))
         } else {
             Arc::new(Mutex::new(None))
         };
@@ -74,7 +82,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         if let Some(set_code) = &filters.set_code
             && !set_code.is_empty()
         {
-            conditions.push(format!("expName LIKE ?{i}"));
+            conditions.push(format!("(expName LIKE ?{i} OR expIdTCGP LIKE ?{i} OR expCodeTCGP LIKE ?{i})"));
             params.push(format!("%{set_code}%"));
             i += 1;
         }
@@ -207,7 +215,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         let mut conn_guard = self.prices_connection.lock().await;
         if conn_guard.is_none() {
-            *conn_guard = Some(Connection::open(&prices_path)?);
+            *conn_guard = Some(open_prices_connection(&prices_path)?);
         }
         let conn = conn_guard.as_ref().unwrap();
         // Use correlated subqueries to get the most recent non-zero value per field
@@ -215,9 +223,9 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         // tracked, but older rows retain the last known price.
         let result = conn.query_row(
             "SELECT \
-               (SELECT rawPrice        FROM prices WHERE cardId = ?1 AND rawPrice        > 0 ORDER BY date DESC LIMIT 1), \
-               (SELECT gradedPriceTen  FROM prices WHERE cardId = ?1 AND gradedPriceTen  > 0 ORDER BY date DESC LIMIT 1), \
-               (SELECT gradedPriceNine FROM prices WHERE cardId = ?1 AND gradedPriceNine > 0 ORDER BY date DESC LIMIT 1) \
+               (SELECT rawPrice        FROM prices WHERE cardId = ?1 AND rawPrice        > 0 AND rawPrice        != 20.0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceTen  FROM prices WHERE cardId = ?1 AND gradedPriceTen  > 0 AND gradedPriceTen  != 20.0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceNine FROM prices WHERE cardId = ?1 AND gradedPriceNine > 0 AND gradedPriceNine != 20.0 ORDER BY date DESC LIMIT 1) \
              WHERE EXISTS (SELECT 1 FROM prices WHERE cardId = ?1)",
             rusqlite::params![uuid],
             |row| Ok((
@@ -252,7 +260,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         let mut conn_guard = self.prices_connection.lock().await;
         if conn_guard.is_none() {
-            *conn_guard = Some(Connection::open(&prices_path)?);
+            *conn_guard = Some(open_prices_connection(&prices_path)?);
         }
         let conn = conn_guard.as_ref().unwrap();
         let placeholders = uuids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -261,9 +269,9 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         let query = format!(
             "SELECT \
                id_list.cardId, \
-               (SELECT rawPrice        FROM prices WHERE cardId = id_list.cardId AND rawPrice        > 0 ORDER BY date DESC LIMIT 1), \
-               (SELECT gradedPriceTen  FROM prices WHERE cardId = id_list.cardId AND gradedPriceTen  > 0 ORDER BY date DESC LIMIT 1), \
-               (SELECT gradedPriceNine FROM prices WHERE cardId = id_list.cardId AND gradedPriceNine > 0 ORDER BY date DESC LIMIT 1) \
+               (SELECT rawPrice        FROM prices WHERE cardId = id_list.cardId AND rawPrice        > 0 AND rawPrice        != 20.0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceTen  FROM prices WHERE cardId = id_list.cardId AND gradedPriceTen  > 0 AND gradedPriceTen  != 20.0 ORDER BY date DESC LIMIT 1), \
+               (SELECT gradedPriceNine FROM prices WHERE cardId = id_list.cardId AND gradedPriceNine > 0 AND gradedPriceNine != 20.0 ORDER BY date DESC LIMIT 1) \
              FROM (SELECT DISTINCT cardId FROM prices WHERE cardId IN ({})) id_list",
             placeholders
         );
