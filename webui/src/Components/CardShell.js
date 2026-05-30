@@ -230,7 +230,8 @@ function QtyActionCell({ id, details, foil }) {
   const cardPrices = prices[id];
   useEffect(() => {
     if (!cardPrices?.paper) return;
-    const rp = Object.entries(cardPrices.paper).find(([k]) => k.toLowerCase() === "cardmarket")?.[1]
+    const rp = cardPrices.paper["raw"]
+      ?? Object.entries(cardPrices.paper).find(([k]) => k.toLowerCase() === "cardmarket")?.[1]
       ?? Object.values(cardPrices.paper)[0];
     const p = foil ? (rp?.foil ?? rp?.normal) : (rp?.normal ?? rp?.foil);
     if (p != null && priceInput === "") setPriceInput(p.toFixed(2));
