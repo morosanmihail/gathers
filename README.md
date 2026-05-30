@@ -10,8 +10,6 @@ I spend a lot of time designing the overall system to scale decently, but there 
 
 ![Example of the UI](https://codeberg.org/morosanmihail/hometg/raw/branch/main/images/ui20230628.jpg)
 
-![Example of the UI, Riftbound](https://codeberg.org/morosanmihail/gathers/raw/branch/main/images/riftbound1.png)
-
 ![Example of the CLI Tool](https://codeberg.org/morosanmihail/gathers/raw/branch/main/images/cli1.png)
 
 ![Prototype Riftbound support](https://codeberg.org/morosanmihail/gathers/raw/branch/riftbound/images/cli2.png)
@@ -39,3 +37,9 @@ GatheRs version is a Rust rewrite.
 
 Riftbound database scraper thanks to [vikkumar2021](https://github.com/vikkumar2021/RiftboundCardDatabase). 
 GatheRs version is a rust rewrite.
+
+# Gallery
+
+![Example of the UI, List View](https://codeberg.org/morosanmihail/gathers/raw/branch/main/images/listview1.png)
+
+![Example of the UI, Riftbound](https://codeberg.org/morosanmihail/gathers/raw/branch/main/images/riftbound1.png)
