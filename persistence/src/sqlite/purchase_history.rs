@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{PurchaseHistoryEntry, PurchaseSummary};
+use crate::{PurchaseHistoryEntry, PurchaseSummary, UpdateEntryResult};
 use models::{CardID, CollectionID};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 pub(super) fn record_purchase(
     conn: &Connection,
@@ -230,14 +230,56 @@ pub(super) fn update_entry(
     foil_quantity: i32,
     normal_price_per_unit: Option<f64>,
     foil_price_per_unit: Option<f64>,
-) -> eyre::Result<bool> {
-    let rows = conn.execute(
+) -> eyre::Result<UpdateEntryResult> {
+    let card_uuid: Option<String> = conn
+        .query_row(
+            "SELECT card_uuid FROM purchase_history WHERE id = ?1 AND collection_id = ?2",
+            params![entry_id, collection_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(card_uuid) = card_uuid else {
+        return Ok(UpdateEntryResult::NotFound);
+    };
+
+    let (col_qty, col_foil_qty): (i32, i32) = conn
+        .query_row(
+            "SELECT COALESCE(quantity, 0), COALESCE(foilquantity, 0) \
+             FROM cards WHERE collection = ?1 AND uuid = ?2",
+            params![collection_id, &card_uuid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+
+    let (other_qty, other_foil_qty): (i32, i32) = conn.query_row(
+        "SELECT COALESCE(SUM(quantity), 0), COALESCE(SUM(foil_quantity), 0) \
+         FROM purchase_history WHERE card_uuid = ?1 AND collection_id = ?2 AND id != ?3",
+        params![&card_uuid, collection_id, entry_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    let new_total = other_qty + quantity;
+    let new_foil_total = other_foil_qty + foil_quantity;
+
+    if new_total > col_qty {
+        return Ok(UpdateEntryResult::ValidationError(format!(
+            "Cannot record {new_total} copies — collection only has {col_qty}"
+        )));
+    }
+    if new_foil_total > col_foil_qty {
+        return Ok(UpdateEntryResult::ValidationError(format!(
+            "Cannot record {new_foil_total} foil copies — collection only has {col_foil_qty}"
+        )));
+    }
+
+    conn.execute(
         "UPDATE purchase_history \
          SET quantity = ?1, foil_quantity = ?2, normal_price_per_unit = ?3, foil_price_per_unit = ?4 \
          WHERE id = ?5 AND collection_id = ?6",
         params![quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, entry_id, collection_id],
     )?;
-    Ok(rows > 0)
+    Ok(UpdateEntryResult::Updated)
 }
 
 pub(super) fn get_collection_totals(

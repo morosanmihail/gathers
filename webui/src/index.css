@@ -289,7 +289,7 @@ code {
 }
 
 .card-list-history {
-    width: 110px;
+    width: 200px;
     flex-shrink: 0;
     font-size: 0.82em;
 }

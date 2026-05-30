@@ -9,7 +9,7 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-function EditRow({ entry, onSave, onCancel }) {
+function EditRow({ entry, onSave, onCancel, saveError }) {
   const [qty, setQty] = useState(String(entry.quantity));
   const [foilQty, setFoilQty] = useState(String(entry.foil_quantity));
   const [normalPrice, setNormalPrice] = useState(entry.normal_price_per_unit != null ? String(entry.normal_price_per_unit) : "");
@@ -29,8 +29,11 @@ function EditRow({ entry, onSave, onCancel }) {
   return (
     <tr className="table-warning">
       <td className="text-muted" style={{ whiteSpace: "nowrap" }}>{formatDate(entry.recorded_at)}</td>
-      <td className="fw-semibold">{entry.card_name ?? <span className="text-muted fst-italic">Unknown</span>}</td>
-      <td className="text-muted small">{entry.set_code ?? "—"}</td>
+      <td className="fw-semibold" colSpan={saveError ? 2 : 1}>
+        {entry.card_name ?? <span className="text-muted fst-italic">Unknown</span>}
+        {saveError && <div className="text-danger small mt-1">{saveError}</div>}
+      </td>
+      {!saveError && <td className="text-muted small">{entry.set_code ?? "—"}</td>}
       <td className="text-end">
         <input type="number" min="0" className="form-control form-control-sm d-inline" style={inputStyle}
           value={qty} onChange={(e) => setQty(e.target.value)} />
@@ -65,6 +68,7 @@ function PurchaseHistoryContent() {
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [editError, setEditError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
 
   const load = () => {
@@ -95,9 +99,15 @@ function PurchaseHistoryContent() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then((r) => {
+    }).then(async (r) => {
+      if (r.status === 400) {
+        const data = await r.json().catch(() => ({}));
+        setEditError(data.error ?? "Invalid update.");
+        return;
+      }
       if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
       setEditingId(null);
+      setEditError(null);
       load();
     }).catch((e) => setError(e.message));
   };
@@ -182,7 +192,8 @@ function PurchaseHistoryContent() {
                       key={e.id}
                       entry={e}
                       onSave={(body) => handleUpdate(e.id, body)}
-                      onCancel={() => setEditingId(null)}
+                      onCancel={() => { setEditingId(null); setEditError(null); }}
+                      saveError={editError}
                     />
                   );
                 }
@@ -241,7 +252,7 @@ function PurchaseHistoryContent() {
                         <button
                           className="btn btn-sm btn-outline-primary"
                           style={{ padding: "1px 6px", fontSize: "0.75rem" }}
-                          onClick={() => { setEditingId(e.id); setPendingDelete(null); }}
+                          onClick={() => { setEditingId(e.id); setEditError(null); setPendingDelete(null); }}
                         >✎</button>
                         <button
                           className="btn btn-sm btn-outline-danger"

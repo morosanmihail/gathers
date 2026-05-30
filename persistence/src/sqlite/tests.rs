@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CollectionCard, CollectionCardsParams, CollectionSortField, PersistenceSystemTrait};
+use crate::{CollectionCard, CollectionCardsParams, CollectionSortField, PersistenceSystemTrait, UpdateEntryResult};
 use models::filters::SortOrder;
 use models::{CardID, CollectionID};
 use rusqlite::params;
@@ -1213,13 +1213,14 @@ async fn test_delete_purchase_entry_updates_totals() {
 async fn test_update_purchase_entry_changes_quantity() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 5, 0).await;
     record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     let id = hist[0].id;
 
-    let updated = p.update_purchase_entry(&col, id, 5, 0, Some(5.0), None).await.unwrap();
-    assert!(updated);
+    let result = p.update_purchase_entry(&col, id, 5, 0, Some(5.0), None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::Updated);
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     assert_eq!(hist[0].quantity, 5);
@@ -1230,6 +1231,7 @@ async fn test_update_purchase_entry_changes_quantity() {
 async fn test_update_purchase_entry_changes_price() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
     record_purchase(&mut p, &col, "card1", 3, 0, Some(2.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -1245,6 +1247,7 @@ async fn test_update_purchase_entry_changes_price() {
 async fn test_update_purchase_entry_clears_price_to_null() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 2, 0).await;
     record_purchase(&mut p, &col, "card1", 2, 0, Some(4.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -1262,8 +1265,8 @@ async fn test_update_purchase_entry_clears_price_to_null() {
 async fn test_update_purchase_entry_returns_false_when_not_found() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
-    let updated = p.update_purchase_entry(&col, 9999, 1, 0, None, None).await.unwrap();
-    assert!(!updated);
+    let result = p.update_purchase_entry(&col, 9999, 1, 0, None, None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::NotFound);
 }
 
 #[tokio::test]
@@ -1271,14 +1274,15 @@ async fn test_update_purchase_entry_isolated_by_collection() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col_a = p.add_collection("A".to_string()).await.unwrap();
     let col_b = p.add_collection("B".to_string()).await.unwrap();
+    add_card(&mut p, &col_a, &"card1".to_string(), 2, 0).await;
     record_purchase(&mut p, &col_a, "card1", 2, 0, Some(3.0)).await;
 
     let hist = p.get_all_purchase_history(&col_a).await.unwrap();
     let id = hist[0].id;
 
-    // attempt to update col_a's entry via col_b
-    let updated = p.update_purchase_entry(&col_b, id, 99, 0, Some(999.0), None).await.unwrap();
-    assert!(!updated);
+    // col_b doesn't own this entry → NotFound (no collection quantity leak)
+    let result = p.update_purchase_entry(&col_b, id, 2, 0, Some(999.0), None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::NotFound);
 
     // original entry unchanged
     let hist = p.get_all_purchase_history(&col_a).await.unwrap();
@@ -1290,6 +1294,7 @@ async fn test_update_purchase_entry_isolated_by_collection() {
 async fn test_update_purchase_entry_foil_fields() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 0, 3).await;
     record_purchase(&mut p, &col, "card1", 0, 2, Some(6.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -1307,13 +1312,101 @@ async fn test_update_purchase_entry_foil_fields() {
 async fn test_update_purchase_entry_reflects_in_totals() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 4, 0).await;
     record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    p.update_purchase_entry(&col, hist[0].id, 4, 0, Some(5.0), None).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 4, 0, Some(5.0), None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::Updated);
 
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
     let s = totals.get("card1").unwrap();
     assert_eq!(s.quantity, 4);
     assert!((s.total_normal_paid - 20.0).abs() < 1e-9);
+}
+
+// ── update_purchase_entry validation ──────────────────────────────────────
+
+#[tokio::test]
+async fn test_update_entry_rejects_qty_exceeding_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(1.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 5, 0, Some(1.0), None).await.unwrap();
+    assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
+
+    // entry unchanged
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].quantity, 2);
+}
+
+#[tokio::test]
+async fn test_update_entry_rejects_foil_qty_exceeding_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 0, 2).await;
+    record_purchase(&mut p, &col, "card1", 0, 1, Some(3.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 0, 10, None, Some(3.0)).await.unwrap();
+    assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].foil_quantity, 1);
+}
+
+#[tokio::test]
+async fn test_update_entry_qty_equal_to_collection_is_allowed() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(2.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 3, 0, Some(2.0), None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::Updated);
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].quantity, 3);
+}
+
+#[tokio::test]
+async fn test_update_entry_validation_counts_other_entries() {
+    // two entries for same card: updating one must not push combined total over collection qty
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 4, 0).await;
+    record_purchase(&mut p, &col, "card1", 2, 0, Some(1.0)).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(2.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let id_of_first = hist.iter().find(|e| e.normal_price_per_unit == Some(1.0)).unwrap().id;
+
+    // other entry has qty=1; trying to set this entry to qty=4 → total=5 > col_qty=4
+    let result = p.update_purchase_entry(&col, id_of_first, 4, 0, Some(1.0), None).await.unwrap();
+    assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
+
+    // setting to qty=3 → total=4 = col_qty → allowed
+    let result = p.update_purchase_entry(&col, id_of_first, 3, 0, Some(1.0), None).await.unwrap();
+    assert_eq!(result, UpdateEntryResult::Updated);
+}
+
+#[tokio::test]
+async fn test_update_entry_error_message_mentions_counts() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 2, 0).await;
+    record_purchase(&mut p, &col, "card1", 1, 0, Some(5.0)).await;
+
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 99, 0, Some(5.0), None).await.unwrap();
+    if let UpdateEntryResult::ValidationError(msg) = result {
+        assert!(msg.contains("99"), "message should mention requested qty: {msg}");
+        assert!(msg.contains("2"), "message should mention collection qty: {msg}");
+    } else {
+        panic!("expected ValidationError");
+    }
 }

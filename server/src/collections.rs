@@ -13,7 +13,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use models::Card;
-use persistence::{CollectionCardsParams, PersistenceSystem, PersistenceSystemTrait};
+use persistence::{CollectionCardsParams, PersistenceSystem, PersistenceSystemTrait, UpdateEntryResult};
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait};
 
 use crate::{
@@ -1064,7 +1064,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path((collection_id, entry_id)): Path<(String, i64)>,
         Json(body): Json<UpdatePurchaseEntryBody>,
     ) -> Result<StatusCode, ApiError> {
-        let found = state
+        let result = state
             .1
             .lock()
             .await
@@ -1082,7 +1082,14 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorPayload { error: format!("Failed to update entry. {e}") }),
             ))?;
-        if found { Ok(StatusCode::NO_CONTENT) } else { Ok(StatusCode::NOT_FOUND) }
+        match result {
+            UpdateEntryResult::Updated => Ok(StatusCode::NO_CONTENT),
+            UpdateEntryResult::NotFound => Ok(StatusCode::NOT_FOUND),
+            UpdateEntryResult::ValidationError(msg) => Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorPayload { error: msg }),
+            )),
+        }
     }
 
     async fn all_purchase_history(

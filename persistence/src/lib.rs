@@ -149,7 +149,14 @@ pub trait PersistenceSystemTrait {
         foil_quantity: i32,
         normal_price_per_unit: Option<f64>,
         foil_price_per_unit: Option<f64>,
-    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
+    ) -> impl std::future::Future<Output = eyre::Result<UpdateEntryResult>>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateEntryResult {
+    Updated,
+    NotFound,
+    ValidationError(String),
 }
 
 #[derive(Debug, Clone)]

@@ -163,6 +163,7 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
   const [tooltipPos, setTooltipPos] = useState(null);
   const badgeRef = useRef(null);
   const hideTimer = useRef(null);
+  const prices = usePrices();
 
   useEffect(() => {
     if (!pricingEnabled || !collectionId || !cardUuid) return;
@@ -194,6 +195,35 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
   const latest = entries[0];
   const latestPrice = latest.normal_price_per_unit ?? latest.foil_price_per_unit;
   const latestIsFoil = latest.normal_price_per_unit == null && latest.foil_price_per_unit != null;
+
+  const rp = preferredRetailerPrices(prices[cardUuid]);
+  let profitBadge = null;
+  if (rp) {
+    const unitNormal = rp.normal ?? 0;
+    const unitFoil = rp.foil ?? 0;
+    let totalCost = 0, currentValue = 0;
+    for (const e of entries) {
+      if (e.normal_price_per_unit != null) {
+        totalCost += e.normal_price_per_unit * e.quantity;
+        currentValue += unitNormal * e.quantity;
+      }
+      if (e.foil_price_per_unit != null) {
+        totalCost += e.foil_price_per_unit * e.foil_quantity;
+        currentValue += unitFoil * e.foil_quantity;
+      }
+    }
+    if (totalCost > 0) {
+      const diff = currentValue - totalCost;
+      const sign = diff >= 0 ? "▲" : "▼";
+      const color = diff >= 0 ? "rgba(22,163,74,0.85)" : "rgba(220,38,38,0.85)";
+      profitBadge = (
+        <span className="badge ms-1" style={{ fontSize: "0.65rem", background: color }}>
+          {sign} ${Math.abs(diff).toFixed(2)}
+        </span>
+      );
+    }
+  }
+
   return (
     <span style={{ display: "inline-flex", alignItems: "center" }}>
       <span
@@ -207,6 +237,7 @@ function PurchaseHistoryBadge({ collectionId, cardUuid }) {
           ? `$${latestPrice.toFixed(2)}${latestIsFoil ? " ✦" : ""} paid`
           : "no price"}
       </span>
+      {profitBadge}
       {tooltipPos && entries.length > 0 && (
         <PurchaseHistoryTooltip
           pos={tooltipPos}

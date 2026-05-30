@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary};
+use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -268,7 +268,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         foil_quantity: i32,
         normal_price_per_unit: Option<f64>,
         foil_price_per_unit: Option<f64>,
-    ) -> eyre::Result<bool> {
+    ) -> eyre::Result<UpdateEntryResult> {
         let conn = self.connection.lock().await;
         purchase_history::update_entry(&conn, collection_id, entry_id, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit)
     }
