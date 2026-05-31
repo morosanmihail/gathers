@@ -35,7 +35,8 @@ pub struct PokemonSQLiteRetrievalSystem {
 fn open_prices_connection(path: &str) -> eyre::Result<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_prices_cardid_date ON prices(cardId, date DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_prices_cardid_date ON prices(cardId, date DESC);
+         CREATE INDEX IF NOT EXISTS idx_prices_covering ON prices(cardId, date DESC, rawPrice, gradedPriceTen, gradedPriceNine);"
     )?;
     Ok(conn)
 }
