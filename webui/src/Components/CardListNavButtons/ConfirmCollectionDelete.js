@@ -47,7 +47,7 @@ const ConfirmCollectionDelete = ({
           </Modal.Body>
         ) : null}
         <Modal.Footer>
-          <Button className="button-l" onClick={handleOnClick()}>
+          <Button className="button-l" onClick={handleOnClick}>
             Yes
           </Button>
           <Button onClick={cancel}>Cancel</Button>
