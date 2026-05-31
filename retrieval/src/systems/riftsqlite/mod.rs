@@ -3,7 +3,7 @@ mod update;
 
 use std::{collections::HashMap, sync::Arc};
 
-use ::models::{Card, CardID, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField, SortOrder}};
+use ::models::{Card, CardID, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField}};
 use models::SqlCard;
 use rusqlite::{Connection, params};
 use tokio::sync::Mutex;
@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use crate::{
     NamedRetrievalSystem, RetrievalSystemTrait, systems::riftsqlite::update::RiftboundCardFetcher,
 };
+use crate::systems::sql_helpers::{sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir};
 
 impl NamedRetrievalSystem for RiftboundSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -114,16 +115,11 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             Some(SortField::Artist) => "artists",
             _ => "name",
         };
-        let sort_dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) { "DESC" } else { "ASC" };
-        query.push_str(&format!(" ORDER BY {sort_col} COLLATE NOCASE {sort_dir}"));
-        if let Some(limit) = limit {
-            query.push_str(&format!(" LIMIT {limit}"));
-        } else {
-            query.push_str(" LIMIT 1");
-        }
-        if let Some(skip) = skip {
-            query.push_str(format!(" OFFSET {skip}").as_str())
-        }
+        query.push_str(&format!(
+            " ORDER BY {sort_col} COLLATE NOCASE {}{}",
+            sql_sort_dir(&filters.sort_order),
+            sql_limit_offset(limit, skip),
+        ));
 
         let mut stmt = conn.prepare(&query)?;
         let user_iter =
@@ -137,10 +133,9 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             return Ok(HashMap::new());
         }
         let conn = self.connection.lock().await;
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!(
             "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code FROM cards WHERE id IN ({})",
-            placeholders
+            sql_placeholders(ids.len())
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
@@ -168,7 +163,6 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             return Ok(vec![]);
         }
         let conn = self.connection.lock().await;
-        let placeholders = cards.iter().map(|_| "(?,?)").collect::<Vec<_>>().join(",");
         let mut params = vec![];
         cards.iter().for_each(|c| {
             params.push(c.0.clone());
@@ -176,7 +170,7 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         });
         let query = format!(
             "SELECT id, set_id, code FROM cards WHERE (set_id, code) IN (VALUES {});",
-            placeholders
+            sql_pair_placeholders(cards.len())
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(params), |row| {
