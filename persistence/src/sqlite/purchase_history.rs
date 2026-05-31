@@ -4,7 +4,7 @@ use crate::{PurchaseHistoryEntry, PurchaseSummary, UpdateEntryResult};
 use models::{CardID, CollectionID};
 use rusqlite::{Connection, OptionalExtension, params};
 
-pub(super) fn record_purchase(
+fn insert_purchase_row(
     conn: &Connection,
     collection_id: &CollectionID,
     card_uuid: &CardID,
@@ -19,18 +19,25 @@ pub(super) fn record_purchase(
         "INSERT INTO purchase_history \
          (collection_id, card_uuid, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, provider, recorded_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![
-            collection_id,
-            card_uuid,
-            quantity,
-            foil_quantity,
-            normal_price_per_unit,
-            foil_price_per_unit,
-            provider,
-            recorded_at
-        ],
+        params![collection_id, card_uuid, quantity, foil_quantity,
+                normal_price_per_unit, foil_price_per_unit, provider, recorded_at],
     )?;
     Ok(())
+}
+
+pub(super) fn record_purchase(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    card_uuid: &CardID,
+    quantity: i32,
+    foil_quantity: i32,
+    normal_price_per_unit: Option<f64>,
+    foil_price_per_unit: Option<f64>,
+    provider: &str,
+    recorded_at: &str,
+) -> eyre::Result<()> {
+    insert_purchase_row(conn, collection_id, card_uuid, quantity, foil_quantity,
+        normal_price_per_unit, foil_price_per_unit, provider, recorded_at)
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<PurchaseHistoryEntry> {
@@ -187,22 +194,8 @@ fn trim_by_type(
             } else {
                 (remove, 0i32, entry.normal_price, None::<f64>)
             };
-            conn.execute(
-                "INSERT INTO purchase_history \
-                 (collection_id, card_uuid, quantity, foil_quantity, \
-                  normal_price_per_unit, foil_price_per_unit, provider, recorded_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    dst,
-                    card_uuid,
-                    new_qty,
-                    new_foil_qty,
-                    new_normal_price,
-                    new_foil_price,
-                    entry.provider,
-                    entry.recorded_at,
-                ],
-            )?;
+            insert_purchase_row(conn, dst, card_uuid, new_qty, new_foil_qty,
+                new_normal_price, new_foil_price, &entry.provider, &entry.recorded_at)?;
         }
         excess -= remove;
     }

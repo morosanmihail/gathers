@@ -6,7 +6,7 @@ use std::{hint::black_box, time::Instant};
 fn bench_csv_import(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let retrieval = RetrievalSystem::PokemonSQLiteRetrievalSystem(
-        PokemonSQLiteRetrievalSystem::new(Some("../data/pokemon.db".to_string())).unwrap(),
+        PokemonSQLiteRetrievalSystem::new(Some("../data/pokemon.db".to_string()), None).unwrap(),
     );
 
     let mut group = c.benchmark_group("csv_import");
@@ -20,7 +20,8 @@ fn bench_csv_import(c: &mut Criterion) {
             let result = persistence
                 .import_csv(
                     black_box("../data/pokemon_test.csv".to_string()),
-                    &retrieval,
+                    "Pokemon Import".to_string(),
+                    &[retrieval.clone()],
                     None,
                 )
                 .await;
