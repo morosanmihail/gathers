@@ -286,6 +286,64 @@ async fn test_search_cards_default_sort_is_name_asc() {
     assert_eq!(default_names, explicit_names);
 }
 
+// ── Substring / FTS trigram tests ────────────────────────────────────────
+
+#[tokio::test]
+async fn test_search_cards_name_substring_infix() {
+    // "oblin" is a mid-word infix of "Goblin"; trigram must find it.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        name: Some("oblin".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, None).await.unwrap();
+    assert!(!cards.is_empty(), "expected results for infix 'oblin'");
+    assert!(
+        cards.iter().all(|c| card_name(c).contains("oblin")),
+        "all results must contain 'oblin' in name"
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_name_substring_crosses_word_boundary() {
+    // "in Ki" crosses the word boundary in "Goblin King".
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        name: Some("in Ki".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, None).await.unwrap();
+    assert!(!cards.is_empty(), "expected results for cross-word substring 'in Ki'");
+    assert!(
+        cards.iter().all(|c| card_name(c).contains("in ki")),
+        "all results must contain 'in ki' in name"
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_artist_substring() {
+    // "son Ch" is an infix of "Jason Chan" crossing the space.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        artist: Some("son Ch".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, None).await.unwrap();
+    assert!(!cards.is_empty(), "expected results for artist substring 'son Ch'");
+}
+
+#[tokio::test]
+async fn test_search_cards_text_substring() {
+    // "stroy target" is a mid-string infix of "destroy target enchantment".
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        text: Some("stroy target".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, None).await.unwrap();
+    assert!(!cards.is_empty(), "expected results for text substring 'stroy target'");
+}
+
 // ── Multi-type filter tests ───────────────────────────────────────────────
 
 #[tokio::test]

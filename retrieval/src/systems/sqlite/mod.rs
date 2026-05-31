@@ -36,6 +36,48 @@ pub struct MagicSQLiteRetrievalSystem {
     prices_cache: Arc<Mutex<Option<HashMap<String, CardPrices>>>>,
 }
 
+fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
+    let conn = Connection::open(path)?;
+
+    // Blank DBs (e.g. tests) won't have a cards table; nothing to index.
+    let cards_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cards')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !cards_exists {
+        return Ok(conn);
+    }
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards (name COLLATE NOCASE);
+         CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards (setCode, number);"
+    )?;
+
+    // user_version tracks FTS schema version:
+    //   0 = fresh/re-downloaded DB, no FTS built yet
+    //   1 = FTS built with default tokenizer (legacy, needs upgrade)
+    //   2 = FTS built with trigram tokenizer (substring matching)
+    // Drop and recreate whenever version < 2 so re-downloads and schema upgrades both work.
+    let fts_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if fts_version < 2 {
+        info!("Building MTG full-text search index...");
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS cards_fts;
+             CREATE VIRTUAL TABLE cards_fts USING fts5(
+                 name, text, artist,
+                 content='cards', content_rowid='rowid',
+                 tokenize='trigram'
+             );
+             INSERT INTO cards_fts(cards_fts) VALUES('rebuild');"
+        )?;
+        conn.pragma_update(None, "user_version", 2i64)?;
+        info!("MTG full-text search index ready");
+    }
+
+    Ok(conn)
+}
+
 impl MagicSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/testPrintings.db".to_string());
@@ -49,7 +91,7 @@ impl MagicSQLiteRetrievalSystem {
             Arc::new(Mutex::new(None))
         };
         Ok(Self {
-            connection: Arc::new(Mutex::new(Connection::open(path.clone())?)),
+            connection: Arc::new(Mutex::new(open_mtg_connection(&path)?)),
             db_path: path,
             prices_path,
             prices_cache,
@@ -65,40 +107,45 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         limit: Option<usize>,
     ) -> eyre::Result<Vec<Card>> {
         let conn = self.connection.lock().await;
-        let mut query =
-            "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, b.scryfallId, a.number, a.subtypes, a.supertypes, a.types FROM cards as a JOIN cardIdentifiers as b ON a.uuid = b.uuid"
-                .to_string();
-        let mut conditions = Vec::new();
-        let mut params = Vec::new();
 
+        // Build FTS MATCH expression for name/text/artist (whole-word tokenised search).
+        // Wrap each term in double-quotes so multi-word phrases match exactly; escape any
+        // literal double-quotes in user input.
+        let mut fts_parts: Vec<String> = Vec::new();
+        if let Some(name) = &filters.name && !name.is_empty() {
+            fts_parts.push(format!("name:\"{}\"", name.replace('"', "\"\"")));
+        }
+        if let Some(artist) = &filters.artist && !artist.is_empty() {
+            fts_parts.push(format!("artist:\"{}\"", artist.replace('"', "\"\"")));
+        }
+        if let Some(text) = &filters.text && !text.is_empty() {
+            fts_parts.push(format!("text:\"{}\"", text.replace('"', "\"\"")));
+        }
+        let use_fts = !fts_parts.is_empty();
+
+        let base = "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, b.scryfallId, a.number, a.subtypes, a.supertypes, a.types FROM cards as a JOIN cardIdentifiers as b ON a.uuid = b.uuid";
+        let mut query = if use_fts {
+            format!("{base} JOIN cards_fts ON cards_fts.rowid = a.rowid")
+        } else {
+            base.to_string()
+        };
+
+        let mut conditions = Vec::new();
+        let mut params: Vec<String> = Vec::new();
         let mut i = 1;
-        if let Some(name) = &filters.name
-            && !name.is_empty()
-        {
-            conditions.push(format!("a.name LIKE ?{i}"));
-            params.push(format!("%{name}%"));
+
+        if use_fts {
+            conditions.push(format!("cards_fts MATCH ?{i}"));
+            params.push(fts_parts.join(" "));
             i += 1;
         }
+
         if let Some(colours) = &filters.color_identities {
             for colour in colours {
                 conditions.push(format!("a.colorIdentity LIKE ?{i}"));
                 params.push(format!("%{colour}%"));
                 i += 1;
             }
-        }
-        if let Some(artist) = &filters.artist
-            && !artist.is_empty()
-        {
-            conditions.push(format!("a.artist LIKE ?{i}"));
-            params.push(format!("%{artist}%"));
-            i += 1;
-        }
-        if let Some(text) = &filters.text
-            && !text.is_empty()
-        {
-            conditions.push(format!("a.text LIKE ?{i}"));
-            params.push(format!("%{text}%"));
-            i += 1;
         }
         if let Some(set_code) = &filters.set_code
             && !set_code.is_empty()
