@@ -5,8 +5,13 @@ use std::{hint::black_box, time::Instant};
 
 fn bench_csv_import(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let pokemon_db = std::env::var("POKEMON_DB_PATH")
+        .unwrap_or_else(|_| "../data/pokemon.db".to_string());
+    let pokemon_prices = std::env::var("POKEMON_PRICES_PATH").ok();
+    let pokemon_csv = std::env::var("POKEMON_CSV_PATH")
+        .unwrap_or_else(|_| "../data/pokemon_test.csv".to_string());
     let retrieval = RetrievalSystem::PokemonSQLiteRetrievalSystem(
-        PokemonSQLiteRetrievalSystem::new(Some("../data/pokemon.db".to_string()), None).unwrap(),
+        PokemonSQLiteRetrievalSystem::new(Some(pokemon_db), pokemon_prices).unwrap(),
     );
 
     let mut group = c.benchmark_group("csv_import");
@@ -19,7 +24,7 @@ fn bench_csv_import(c: &mut Criterion) {
             let start = Instant::now();
             let result = persistence
                 .import_csv(
-                    black_box("../data/pokemon_test.csv".to_string()),
+                    black_box(pokemon_csv.clone()),
                     "Pokemon Import".to_string(),
                     &[retrieval.clone()],
                     None,

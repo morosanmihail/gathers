@@ -5,7 +5,9 @@ use std::hint::black_box;
 
 fn bench_card_search_benchmark(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let db_path = std::env::var("MTG_DB_PATH").ok();
+    let prices_path = std::env::var("MTG_PRICES_PATH").ok();
+    let system = MagicSQLiteRetrievalSystem::new(db_path, prices_path).unwrap();
 
     let mut group = c.benchmark_group("card_search");
 
