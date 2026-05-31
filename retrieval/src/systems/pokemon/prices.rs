@@ -24,20 +24,24 @@ pub async fn download_pokemon_prices(path: &str) -> eyre::Result<()> {
         "https://github.com/poketrax/pokedata/raw/refs/heads/main/databases/prices.sqlite";
 
     let target = PathBuf::from(path);
-    if let Some(parent) = target.parent()
-        && !parent.as_os_str().is_empty()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent)?;
+    let target_parent = target.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+
+    if !target_parent.exists() {
+        std::fs::create_dir_all(target_parent)?;
     }
 
+    // Download to system temp dir, then stage in target's directory for atomic rename.
     let temp_dir = tempfile::tempdir()?;
     let temp_path = temp_dir.path().join("prices.sqlite");
 
     info!(url = DOWNLOAD_URL, "Downloading Pokemon prices");
     stream_to_file(DOWNLOAD_URL, "Download complete", &temp_path, None, "downloading").await?;
 
-    std::fs::copy(&temp_path, &target)?;
+    let mut staging = tempfile::NamedTempFile::new_in(target_parent)?;
+    std::io::copy(&mut std::fs::File::open(&temp_path)?, &mut staging)?;
+    staging.persist(&target).map_err(|e| e.error)?;
     info!(dest = ?target, "Pokemon prices saved");
     Ok(())
 }

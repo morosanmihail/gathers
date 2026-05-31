@@ -108,9 +108,11 @@ pub(super) fn calculate_sha256(path: &Path) -> eyre::Result<String> {
 }
 
 pub(super) fn decompress_bz2(src: &Path, dst: &Path) -> eyre::Result<()> {
+    let parent = dst.parent().unwrap_or(Path::new("."));
     let file = fs::File::open(src)?;
     let mut decoder = BzDecoder::new(file);
-    let mut out = fs::File::create(dst)?;
-    std::io::copy(&mut decoder, &mut out)?;
+    let mut staging = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::copy(&mut decoder, &mut staging)?;
+    staging.persist(dst).map_err(|e| e.error)?;
     Ok(())
 }
