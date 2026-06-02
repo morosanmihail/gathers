@@ -62,6 +62,8 @@ function EditRow({ entry, onSave, onCancel, saveError }) {
   );
 }
 
+const PAGE_SIZE = 30;
+
 function PurchaseHistoryContent() {
   const { collection } = useParams();
   const pricingEnabled = usePricingEnabled();
@@ -70,6 +72,7 @@ function PurchaseHistoryContent() {
   const [editingId, setEditingId] = useState(null);
   const [editError, setEditError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [page, setPage] = useState(1);
 
   const load = () => {
     if (!collection || !pricingEnabled) return;
@@ -78,7 +81,7 @@ function PurchaseHistoryContent() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data) => setEntries(data.entries))
+      .then((data) => { setEntries(data.entries); setPage(1); })
       .catch((e) => setError(e.message));
   };
 
@@ -167,7 +170,10 @@ function PurchaseHistoryContent() {
         </div>
       )}
 
-      {entries && entries.length > 0 && (
+      {entries && entries.length > 0 && (() => {
+        const totalPages = Math.ceil(entries.length / PAGE_SIZE);
+        const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+        return (
         <div className="table-responsive">
           <table className="table table-sm table-striped table-hover align-middle">
             <thead className="table-light">
@@ -185,7 +191,7 @@ function PurchaseHistoryContent() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((e) => {
+              {pageEntries.map((e) => {
                 if (editingId === e.id) {
                   return (
                     <EditRow
@@ -273,8 +279,24 @@ function PurchaseHistoryContent() {
               </tr>
             </tfoot>
           </table>
+          {totalPages > 1 && (
+            <nav className="d-flex align-items-center justify-content-center gap-2 mt-2">
+              <button
+                className="btn btn-sm btn-outline-secondary"
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+              >‹ Prev</button>
+              <span className="small text-muted">Page {page} of {totalPages}</span>
+              <button
+                className="btn btn-sm btn-outline-secondary"
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+              >Next ›</button>
+            </nav>
+          )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
