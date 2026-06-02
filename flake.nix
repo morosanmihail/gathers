@@ -56,6 +56,19 @@
                 ];
               }
           ) {};
+
+          gathers-webui = pkgs.callPackage (
+            {
+              importNpmLock,
+              buildNpmPackage,
+            }:
+              buildNpmPackage {
+                name = "gathers-webui";
+                src = ./webui;
+                npmDeps = importNpmLock {npmRoot = ./webui;};
+                inherit (importNpmLock) npmConfigHook;
+              }
+          ) {};
         };
 
         apps = rec {
