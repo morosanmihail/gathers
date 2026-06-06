@@ -2,6 +2,7 @@
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
+	import QtyControls from './QtyControls.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -10,7 +11,7 @@
 		price?: string | null;
 		cardPrices?: CardPrices;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (card: CollectionCard, delta: number, foil: boolean) => void;
+		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
@@ -66,28 +67,20 @@
 		<div class="card-row-cell" style="padding:0 8px;">
 			<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
 		</div>
-		<!-- Qty column: normal quantity -->
-		<div class="card-row-cell" style="padding: 2px 4px;" onclick={(e) => e.stopPropagation()}>
+		<!-- Qty + foil columns span both cells when editing price -->
+		<div class="card-row-cell" style="padding: 2px 4px; grid-column: span 2;" onclick={(e) => e.stopPropagation()}>
 			{#if onAdjust}
-				<div class="qty-row">
-					<button class="qty-btn" disabled={col.quantity <= 0} onclick={() => onAdjust(col, -1, false)}>−</button>
-					<span class="qty-val">{col.quantity ?? 0}</span>
-					<button class="qty-btn add" onclick={() => onAdjust(col, 1, false)}>+</button>
-				</div>
+				<QtyControls
+					quantity={col.quantity ?? 0}
+					foilQuantity={col.foilQuantity ?? 0}
+					{price}
+					onAdjust={(delta, foil, purchasePrice) => onAdjust(col, delta, foil, purchasePrice)}
+				/>
 			{:else}
-				<span class="card-row-qty">{col.quantity ?? 0}</span>
-			{/if}
-		</div>
-		<!-- Foil column: foil quantity -->
-		<div class="card-row-cell" style="padding: 2px 4px;" onclick={(e) => e.stopPropagation()}>
-			{#if onAdjust}
-				<div class="qty-row">
-					<button class="qty-btn" disabled={col.foilQuantity <= 0} onclick={() => onAdjust(col, -1, true)}>−</button>
-					<span class="qty-val qty-foil">{col.foilQuantity ?? 0}✦</span>
-					<button class="qty-btn add" onclick={() => onAdjust(col, 1, true)}>+</button>
+				<div style="display:flex;gap:8px;">
+					<span class="card-row-qty">{col.quantity ?? 0}</span>
+					<span class="card-row-qty qty-foil">{col.foilQuantity ?? 0}✦</span>
 				</div>
-			{:else}
-				<span class="card-row-qty qty-foil">{col.foilQuantity ?? 0}✦</span>
 			{/if}
 		</div>
 	{:else}

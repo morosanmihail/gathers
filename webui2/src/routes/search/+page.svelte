@@ -19,6 +19,7 @@
 
 	let addTarget = $state<AnyCard | null>(null);
 	let addCollection = $state('');
+	let addPrice = $state('');
 	let toast = $state('');
 
 	// Pick first available system once loaded
@@ -67,13 +68,16 @@
 	function promptAdd(card: AnyCard | CollectionCard) {
 		if (!app.collectionsEnabled) return;
 		addTarget = card as AnyCard;
+		addPrice = '';
 	}
 
 	async function confirmAdd() {
 		if (!addTarget || !addCollection) return;
+		const price = addPrice !== '' ? parseFloat(addPrice) : null;
+		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id)
+				addCardToCollection(addCollection, addTarget!.id, 1, 0, purchasePrice)
 			);
 			toast = `Added "${addTarget.name}" to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);
@@ -167,11 +171,20 @@
 			<h4>Add to collection</h4>
 			<p>Add <strong>{addTarget.name}</strong> to:</p>
 			{#if app.collections.length > 0}
-				<select class="input" bind:value={addCollection} style="margin-bottom: 16px;">
+				<select class="input" bind:value={addCollection} style="margin-bottom: 10px;">
 					{#each app.collections as col}
 						<option value={col.id}>{col.id}</option>
 					{/each}
 				</select>
+				<div style="display:flex; align-items:center; gap:6px; margin-bottom:16px;">
+					<span style="color:var(--text2); font-size:0.85rem;">Purchase price:</span>
+					<span style="color:var(--text2);">$</span>
+					<input
+						type="number" min="0" step="0.01" placeholder="optional"
+						class="input" style="width:110px; height:32px; padding:4px 8px; font-family:'JetBrains Mono',monospace;"
+						bind:value={addPrice}
+					/>
+				</div>
 			{:else}
 				<p style="color: var(--danger); font-size: 0.85rem;">No collections yet. Create one first.</p>
 			{/if}

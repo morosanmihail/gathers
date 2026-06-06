@@ -6,6 +6,12 @@ const cache = new Map<string, string>();
 
 const BLOB_FETCH_HOSTS = new Set(['api.scryfall.com']);
 
+// Synchronous lookup — returns cached value instantly, or '' if not yet fetched.
+// Use as initial $state value in components to skip the placeholder flash.
+export function syncCachedImageUrl(url: string): string {
+	return cache.get(url) ?? '';
+}
+
 export async function cachedImageUrl(url: string): Promise<string> {
 	if (!url) return '';
 	if (cache.has(url)) return cache.get(url)!;

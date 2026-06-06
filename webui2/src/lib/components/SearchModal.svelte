@@ -23,6 +23,7 @@
 	let total = $state(0);
 	let searched = $state(false);
 	let toast = $state('');
+	let addPrice = $state('');
 	let activeSystem = $state('');
 
 	$effect(() => {
@@ -57,9 +58,12 @@
 	}
 
 	async function addCard(card: AnyCard | CollectionCard) {
+		const price = addPrice !== '' ? parseFloat(addPrice) : null;
+		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
+		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id)
+				addCardToCollection(collection, card.id, 1, 0, purchasePrice)
 			);
 			toast = `Added ${card.name}`;
 			setTimeout(() => toast = '', 2000);
@@ -82,6 +86,19 @@
 		<div class="modal-header">
 			<h3>Search & Add to "{collection}"</h3>
 			<button class="btn btn-ghost btn-icon" onclick={onclose} title="Close">✕</button>
+		</div>
+		<!-- Purchase price bar -->
+		<div style="padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; gap:8px;">
+			<span style="font-size:0.82rem; color:var(--text2);">Purchase price for next add:</span>
+			<span style="color:var(--text2);">$</span>
+			<input
+				type="number" min="0" step="0.01" placeholder="optional"
+				class="input" style="width:110px; height:28px; padding:3px 8px; font-family:'JetBrains Mono',monospace; font-size:0.82rem;"
+				bind:value={addPrice}
+			/>
+			{#if addPrice}
+				<button class="btn btn-ghost btn-sm" onclick={() => addPrice = ''}>Clear</button>
+			{/if}
 		</div>
 		<div class="modal-body" style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start;">
 			<SearchPanel

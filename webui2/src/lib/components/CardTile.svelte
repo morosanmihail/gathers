@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
 	import { cardImageUrl } from '$lib/types';
-	import { cachedImageUrl } from '$lib/imageCache';
+	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import QtyControls from './QtyControls.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
@@ -13,7 +13,7 @@
 		cardPrices?: CardPrices;
 		collection?: string;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (card: CollectionCard, delta: number, foil: boolean) => void;
+		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
@@ -26,12 +26,13 @@
 		? col.foilQuantity > 0 ? `${col.quantity} + ${col.foilQuantity}✦` : `${col.quantity}`
 		: null);
 
-	// Cached image URL — resolves async, starts as the raw URL
-	let imgUrl = $state('');
+	// Initialise from sync cache to skip placeholder flash for already-seen images.
+	// Effect then upgrades to blob URL (Scryfall) or confirms the direct URL.
+	let imgUrl = $state(syncCachedImageUrl(cardImageUrl(card as CollectionCard)));
 	$effect(() => {
 		const raw = rawImgUrl;
 		if (!raw) { imgUrl = ''; return; }
-		cachedImageUrl(raw).then(u => { imgUrl = u; });
+		cachedImageUrl(raw).then(u => { if (imgUrl !== u) imgUrl = u; });
 	});
 
 	function rarityClass(r?: string) {
@@ -109,7 +110,8 @@
 			<QtyControls
 				quantity={col.quantity ?? 0}
 				foilQuantity={col.foilQuantity ?? 0}
-				onAdjust={(delta, foil) => onAdjust(col, delta, foil)}
+				{price}
+				onAdjust={(delta, foil, purchasePrice) => onAdjust(col, delta, foil, purchasePrice)}
 			/>
 		</div>
 	{/if}

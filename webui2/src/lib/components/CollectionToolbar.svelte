@@ -18,9 +18,10 @@
 		onRefresh: () => void;
 		onSearchOpen: () => void;
 		searchOpen: boolean;
+		onHistoryOpen?: () => void;
 	}
 
-	let { collection, cards, onRefresh, onSearchOpen, searchOpen }: Props = $props();
+	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen }: Props = $props();
 
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
 	let moveDest = $state('');
@@ -187,6 +188,18 @@
 		</svg>
 		Delete collection
 	</button>
+
+	<!-- Purchase history — rightmost -->
+	{#if onHistoryOpen && app.pricingEnabled}
+		<div class="toolbar-sep"></div>
+		<button class="btn" onclick={onHistoryOpen}>
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+				<circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+				<path d="M7 4v3.5l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+			</svg>
+			Purchase history
+		</button>
+	{/if}
 </div>
 
 <!-- Confirm dialogs -->

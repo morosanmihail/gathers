@@ -5,6 +5,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import CollectionToolbar from '$lib/components/CollectionToolbar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
+	import PurchaseHistoryModal from '$lib/components/PurchaseHistoryModal.svelte';
 	import {
 		getCollectionCards, getCollectionCount,
 		searchCollectionCards, searchCollectionCount,
@@ -34,6 +35,7 @@
 	let sortBy = $state('');
 	let sortOrder = $state<'Asc' | 'Desc'>('Asc');
 	let searchOpen = $state(false);
+	let historyOpen = $state(false);
 
 	const sortIsCardLevel = $derived(sortBy !== '' && !COLLECTION_SORT_FIELDS.has(sortBy));
 
@@ -62,7 +64,7 @@
 				total = count;
 			}
 
-			// Fetch prices by provider (non-blocking)
+			// Fetch prices + value in parallel (non-blocking, results are cached)
 			if (app.pricingEnabled) {
 				const mtgIds = cards
 					.filter(c => !c.provider || c.provider === 'MagicSQLite' || c.provider === 'Scryfall')
@@ -73,25 +75,18 @@
 				const fetches: Promise<Record<string, CardPrices>>[] = [];
 				if (mtgIds.length) fetches.push(getMtgPrices(mtgIds));
 				if (pokemonIds.length) fetches.push(getPokemonPrices(pokemonIds));
+				const valuePromise = getCollectionValue(collectionId);
 				if (fetches.length) {
 					Promise.all(fetches).then(results => {
 						prices = { ...prices, ...Object.assign({}, ...results) };
 					});
 				}
+				valuePromise.then(v => { collectionValue = v.total_value ?? null; });
 			}
 		} finally {
 			loading = false;
 		}
 	}
-
-	// Load collection value once per collection
-	$effect(() => {
-		const cid = collectionId;
-		collectionValue = null;
-		if (app.pricingEnabled) {
-			getCollectionValue(cid).then(v => { collectionValue = v.total_value ?? null; });
-		}
-	});
 
 	$effect(() => {
 		if (app.ready && !app.collectionsEnabled) {
@@ -110,10 +105,10 @@
 		}
 	}
 
-	async function adjustCardQty(card: CollectionCard, delta: number, foil: boolean) {
+	async function adjustCardQty(card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) {
 		try {
 			if (delta > 0) {
-				await addCardToCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0);
+				await addCardToCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice);
 			} else {
 				await deleteCardFromCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0);
 			}
@@ -179,6 +174,7 @@
 		onRefresh={handleRefresh}
 		onSearchOpen={() => searchOpen = !searchOpen}
 		{searchOpen}
+		onHistoryOpen={() => historyOpen = true}
 	/>
 
 	<div class="page-header" style="padding-bottom: 8px;">
@@ -245,5 +241,12 @@
 		collection={collectionId}
 		onclose={() => searchOpen = false}
 		onAdded={handleRefresh}
+	/>
+{/if}
+
+{#if historyOpen}
+	<PurchaseHistoryModal
+		collection={collectionId}
+		onclose={() => historyOpen = false}
 	/>
 {/if}
