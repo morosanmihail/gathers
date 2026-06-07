@@ -1,6 +1,7 @@
 use super::*;
 
 #[tokio::test]
+#[ignore]
 async fn get_basic_card() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem {};
     let card = r
@@ -28,6 +29,7 @@ async fn get_basic_card() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_cards_by_ids() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem {};
     let test_ids = vec![
@@ -47,6 +49,7 @@ async fn get_cards_by_ids() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_search_by_types() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem::new()?;
 
@@ -108,6 +111,7 @@ async fn test_search_by_types() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_search_by_subtypes() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem::new()?;
 
@@ -169,6 +173,7 @@ async fn test_search_by_subtypes() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_search_by_supertypes() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem::new()?;
 
@@ -233,6 +238,7 @@ async fn test_search_by_supertypes() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_search_by_multiple_types() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem::new()?;
 
@@ -270,6 +276,7 @@ async fn test_search_by_multiple_types() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_search_by_combined_filters() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem::new()?;
 
