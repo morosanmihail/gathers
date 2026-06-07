@@ -1156,6 +1156,9 @@ label.field-label {
 
 .price-tooltip-empty { color: var(--text3); font-style: italic; }
 
+.set-tooltip { min-width: 0; padding: 8px 12px; }
+.set-tooltip-name { color: var(--text); font-size: 0.85rem; }
+
 /* ─── Qty controls ─────────────────────────────────────── */
 .qty-controls {
 	display: flex;

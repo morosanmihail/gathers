@@ -17,6 +17,7 @@
 	onMount(async () => {
 		applyTheme(app.theme);
 		await app.loadSystemInfo();
+		app.loadCardSets();
 		if (app.collectionsEnabled) {
 			await app.loadCollections();
 		} else if (app.ready) {

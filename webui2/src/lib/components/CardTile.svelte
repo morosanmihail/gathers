@@ -5,6 +5,7 @@
 	import { app } from '$lib/state.svelte';
 	import QtyControls from './QtyControls.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
+	import SetTooltip from './SetTooltip.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -91,7 +92,7 @@
 		<div class="card-tile-name" title={card.name}>{card.name}</div>
 		<div class="card-tile-meta">
 			{#if card.setCode}
-				<span>{card.setCode.toUpperCase()}</span>
+				<SetTooltip setCode={card.setCode} />
 			{/if}
 			{#if card.rarity}
 				<span class={rarityClass(card.rarity)}>{card.rarity[0]}</span>

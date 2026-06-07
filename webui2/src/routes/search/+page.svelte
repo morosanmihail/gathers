@@ -90,6 +90,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Search - gatheRs</title>
+</svelte:head>
+
 <div>
 	<div style="display: grid; grid-template-columns: 280px 1fr; gap: 0; align-items: start; min-height: calc(100vh - 94px);">
 		<!-- Left: search form -->

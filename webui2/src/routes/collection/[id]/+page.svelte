@@ -167,6 +167,10 @@
 	];
 </script>
 
+<svelte:head>
+	<title>{collectionId} - gatheRs</title>
+</svelte:head>
+
 <div>
 	<CollectionToolbar
 		collection={collectionId}

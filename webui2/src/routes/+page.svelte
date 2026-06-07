@@ -40,6 +40,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Home - gatheRs</title>
+</svelte:head>
+
 <div>
 	{#if loading}
 		<div class="loading-row"><div class="spinner"></div> Loading…</div>

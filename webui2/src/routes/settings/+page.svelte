@@ -100,6 +100,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Settings - gatheRs</title>
+</svelte:head>
+
 <div>
 	<div class="page-header">
 		<h1 class="page-title">Settings</h1>
