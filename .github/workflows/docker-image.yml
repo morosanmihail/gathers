@@ -38,3 +38,10 @@ jobs:
           build-args: |
             REACT_APP_COLLECTIONS_ENABLED=true
           tags: ghcr.io/morosanmihail/gathers-webui:latest
+
+      - name: Build and push Web UI 2 image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./webui2
+          push: true
+          tags: ghcr.io/morosanmihail/gathers-webui2:latest
