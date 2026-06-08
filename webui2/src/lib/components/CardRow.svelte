@@ -4,6 +4,7 @@
 	import PriceTooltip from './PriceTooltip.svelte';
 	import QtyControls from './QtyControls.svelte';
 	import SetTooltip from './SetTooltip.svelte';
+	import CardImageTooltip from './CardImageTooltip.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -41,7 +42,7 @@
 			<div
 				class="card-tile-select"
 				class:checked={isSelected}
-				style="position:relative;opacity:1;"
+				style="position:relative;top:0;left:0;opacity:1;"
 				role="checkbox"
 				aria-checked={isSelected}
 				tabindex="0"
@@ -57,7 +58,7 @@
 		{/if}
 	</div>
 
-	<div class="card-row-cell card-row-name">{card.name}</div>
+	<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
 	<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
 	<div class="card-row-cell card-row-rarity">
 		{#if card.rarity}<span class={rarityClass(card.rarity)}>{card.rarity}</span>{:else}—{/if}

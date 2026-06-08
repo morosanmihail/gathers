@@ -98,6 +98,15 @@ export async function addCollection(id: string): Promise<void> {
 	invalidateCache('collections');
 }
 
+export async function renameCollection(oldId: string, newId: string): Promise<void> {
+	await fetchJSON(`/api/collection/rename/${encodeURIComponent(oldId)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ new_id: newId })
+	});
+	invalidateCache('collections');
+}
+
 export async function deleteCollection(id: string, keepCardsIn = ''): Promise<void> {
 	await fetchJSON(`/api/collection/remove/${encodeURIComponent(id)}?keepCardsInCollection=${encodeURIComponent(keepCardsIn)}`, {
 		method: 'POST',

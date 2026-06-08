@@ -118,6 +118,11 @@ pub struct CollectionRemoveResponse {
     pub message: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct CollectionRenameRequest {
+    pub new_id: String,
+}
+
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct CardToAdd {
     pub id: String,

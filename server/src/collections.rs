@@ -21,7 +21,7 @@ use crate::{
     collections::collections_models::{
         APICardSearchFilters, CardIdentInner, CardToAdd, CollectionAddResponse, CollectionCard,
         CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
-        CollectionPurchaseHistoryEntry, CollectionValueBreakdown,
+        CollectionPurchaseHistoryEntry, CollectionRenameRequest, CollectionValueBreakdown,
         CollectionsSearchQuery, PurchaseHistoryResponse, ResultCard, ResultCardInner,
     },
 };
@@ -292,6 +292,26 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorPayload {
                     error: format!("Failed to remove collection. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn rename(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<CollectionRenameRequest>,
+    ) -> Result<Json<Collection>, ApiError> {
+        validate_collection_name(&input.new_id)?;
+
+        let storage = &mut state.1.lock().await.storage;
+
+        match storage.rename_collection(&id, &input.new_id).await {
+            Ok(()) => Ok(Json(Collection { id: input.new_id })),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to rename collection. {e}"),
                 }),
             )),
         }
@@ -1157,6 +1177,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/list", get(list))
         .api_route("/add", post(add))
         .api_route("/remove/{id}", post(remove))
+        .api_route("/rename/{id}", post(rename))
         .api_route("/move/{id}", post(move_to))
         .api_route("/cards/{id}/list", get(cards_get))
         .api_route("/cards/{id}/count", get(collection_cards_count))

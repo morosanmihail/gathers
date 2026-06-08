@@ -63,6 +63,12 @@ pub trait PersistenceSystemTrait {
         move_to: Option<CollectionID>,
     ) -> impl std::future::Future<Output = eyre::Result<CollectionID>>;
 
+    fn rename_collection(
+        &mut self,
+        old_name: &CollectionID,
+        new_name: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<()>>;
+
     fn list_collections(
         &self,
         filter: Option<String>,

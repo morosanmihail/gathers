@@ -60,6 +60,15 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         collections::remove_collection(&conn, name, move_to.as_ref())
     }
 
+    async fn rename_collection(
+        &mut self,
+        old_name: &CollectionID,
+        new_name: &CollectionID,
+    ) -> eyre::Result<()> {
+        let conn = self.connection.lock().await;
+        collections::rename_collection(&conn, old_name, new_name)
+    }
+
     async fn list_collections(&self, filter: Option<String>) -> eyre::Result<Vec<CollectionID>> {
         let conn = self.connection.lock().await;
         collections::list_collections(&conn, filter.as_deref())

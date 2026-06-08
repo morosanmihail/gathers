@@ -53,6 +53,26 @@ pub(super) fn list_collections(
     Ok(collections)
 }
 
+pub(super) fn rename_collection(
+    conn: &Connection,
+    old_name: &CollectionID,
+    new_name: &CollectionID,
+) -> eyre::Result<()> {
+    conn.execute(
+        "UPDATE collection SET name = ?1 WHERE name = ?2",
+        params![new_name, old_name],
+    )?;
+    conn.execute(
+        "UPDATE cards SET collection = ?1 WHERE collection = ?2",
+        params![new_name, old_name],
+    )?;
+    conn.execute(
+        "UPDATE purchase_history SET collection_id = ?1 WHERE collection_id = ?2",
+        params![new_name, old_name],
+    )?;
+    Ok(())
+}
+
 pub(super) fn get_cards_count(
     conn: &Connection,
     collection_id: &CollectionID,

@@ -142,12 +142,14 @@
 				{/if}
 			</div>
 
-			<a href="/settings" class="btn btn-ghost btn-icon" title="Settings">
-				<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-					<path d="M8 10a2 2 0 100-4 2 2 0 000 4z"/>
-					<path fill-rule="evenodd" d="M6.5 1.5h3l.5 1.5a5 5 0 011.2.7l1.5-.5 2.1 2.1-.5 1.5c.3.4.5.8.7 1.2l1.5.5v3l-1.5.5a5 5 0 01-.7 1.2l.5 1.5-2.1 2.1-1.5-.5c-.4.3-.8.5-1.2.7L9.5 14.5h-3l-.5-1.5a5 5 0 01-1.2-.7l-1.5.5-2.1-2.1.5-1.5A5 5 0 011 7.5L-.5 7V4l1.5-.5A5 5 0 011.7 2.3L1.2.8 3.3-1.3l1.5.5A5 5 0 016 .5L6.5 1.5z" clip-rule="evenodd"/>
-				</svg>
-			</a>
+			{#if !app.systemInfo?.demo_mode}
+				<a href="/settings" class="btn btn-ghost btn-icon" title="Settings">
+					<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+						<path d="M8 10a2 2 0 100-4 2 2 0 000 4z"/>
+						<path fill-rule="evenodd" d="M6.5 1.5h3l.5 1.5a5 5 0 011.2.7l1.5-.5 2.1 2.1-.5 1.5c.3.4.5.8.7 1.2l1.5.5v3l-1.5.5a5 5 0 01-.7 1.2l.5 1.5-2.1 2.1-1.5-.5c-.4.3-.8.5-1.2.7L9.5 14.5h-3l-.5-1.5a5 5 0 01-1.2-.7l-1.5.5-2.1-2.1.5-1.5A5 5 0 011 7.5L-.5 7V4l1.5-.5A5 5 0 011.7 2.3L1.2.8 3.3-1.3l1.5.5A5 5 0 016 .5L6.5 1.5z" clip-rule="evenodd"/>
+					</svg>
+				</a>
+			{/if}
 		</div>
 
 		<!-- ─── Tab bar ─── -->

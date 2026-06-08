@@ -8,6 +8,7 @@
 		moveCards,
 		importCards,
 		exportCollectionUrl,
+		renameCollection,
 		invalidateCache
 	} from '$lib/api';
 	import type { CollectionCard } from '$lib/types';
@@ -28,6 +29,9 @@
 	let moveError = $state('');
 	let importing = $state(false);
 	let importError = $state('');
+	let renaming = $state(false);
+	let renameValue = $state('');
+	let renameError = $state('');
 
 	const selectedList = $derived(
 		cards.filter(c => app.selectedCards.has(c.id))
@@ -85,6 +89,28 @@
 			onRefresh();
 		} catch (e) {
 			moveError = String(e);
+		}
+	}
+
+	function startRename() {
+		renameValue = collection;
+		renameError = '';
+		renaming = true;
+	}
+
+	async function handleRename(e: Event) {
+		e.preventDefault();
+		const newName = renameValue.trim();
+		if (!newName || newName === collection) { renaming = false; return; }
+		renameError = '';
+		try {
+			await app.withOp('Renaming collection', () => renameCollection(collection, newName));
+			invalidateCache('collections');
+			await app.loadCollections();
+			renaming = false;
+			goto(`/collection/${encodeURIComponent(newName)}`);
+		} catch (e) {
+			renameError = String(e);
 		}
 	}
 
@@ -180,6 +206,29 @@
 	</a>
 
 	<div class="toolbar-sep"></div>
+
+	<!-- Rename collection -->
+	{#if renaming}
+		<form style="display:flex; gap:6px; align-items:center;" onsubmit={handleRename}>
+			<input
+				class="input"
+				style="height:34px; padding:4px 10px; width:160px;"
+				bind:value={renameValue}
+				autofocus
+			/>
+			<button type="submit" class="btn btn-accent">Rename</button>
+			<button type="button" class="btn btn-ghost" onclick={() => renaming = false}>✕</button>
+			{#if renameError}<span style="color:var(--danger);font-size:0.78rem;">{renameError}</span>{/if}
+		</form>
+	{:else}
+		<button class="btn" onclick={startRename} title="Rename collection">
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+				<path d="M2 10.5l1-3L9.5 1.5a1.41 1.41 0 012 2L5 10l-3 .5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+				<path d="M8 3l2 2" stroke="currentColor" stroke-width="1.3"/>
+			</svg>
+			Rename
+		</button>
+	{/if}
 
 	<!-- Delete collection -->
 	<button class="btn btn-danger" onclick={() => confirmDelete = 'collection'}>
