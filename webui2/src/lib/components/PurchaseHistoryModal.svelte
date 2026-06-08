@@ -10,9 +10,15 @@
 
 	let { collection, onclose }: Props = $props();
 
+	const PAGE_SIZE = 25;
+
 	let entries = $state<PurchaseEntry[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+	let currentPage = $state(1);
+
+	const totalPages = $derived(Math.max(1, Math.ceil(entries.length / PAGE_SIZE)));
+	const pagedEntries = $derived(entries.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE));
 
 	// Per-row edit state keyed by entry id
 	interface EditState {
@@ -25,11 +31,13 @@
 	let editing = $state<Map<number, EditState>>(new Map());
 	let confirmDeleteId = $state<number | null>(null);
 
-	async function load() {
+	async function load(resetPage = false) {
 		loading = true;
 		error = '';
 		try {
 			entries = await getAllPurchaseHistory(collection);
+			if (resetPage) currentPage = 1;
+			else currentPage = Math.min(currentPage, Math.max(1, Math.ceil(entries.length / PAGE_SIZE)));
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -131,7 +139,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each entries as entry (entry.id)}
+						{#each pagedEntries as entry (entry.id)}
 							{@const ed = editing.get(entry.id)}
 							<tr style="border-bottom: 1px solid var(--border); transition: background 0.1s;" class:editing={!!ed}>
 								<td style="padding: 8px 14px; color: var(--text); font-weight: 600;">
@@ -189,6 +197,16 @@
 						{/each}
 					</tbody>
 				</table>
+				{#if totalPages > 1}
+					<div style="display:flex; align-items:center; justify-content:center; gap:12px; padding:12px 14px; border-top:1px solid var(--border);">
+						<button class="btn btn-sm btn-ghost" disabled={currentPage === 1} onclick={() => currentPage--}>‹ Prev</button>
+						<span style="font-size:0.82rem; color:var(--text2);">
+							{currentPage} / {totalPages}
+							<span style="margin-left:6px; color:var(--text2);">({entries.length} entries)</span>
+						</span>
+						<button class="btn btn-sm btn-ghost" disabled={currentPage === totalPages} onclick={() => currentPage++}>Next ›</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>

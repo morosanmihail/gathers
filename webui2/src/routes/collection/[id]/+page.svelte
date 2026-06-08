@@ -15,7 +15,7 @@
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
 	import { defaultFilters } from '$lib/types';
-	import type { CollectionCard, CardPrices } from '$lib/types';
+	import type { CollectionCard, CardPrices, ValueBreakdown } from '$lib/types';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
 
@@ -26,6 +26,8 @@
 	let refreshKey = $state(0);
 	let prices = $state<Record<string, CardPrices>>({});
 	let collectionValue = $state<number | null>(null);
+	let valueBreakdown = $state<ValueBreakdown | null>(null);
+	let valueHover = $state(false);
 
 	// Fields the /list endpoint accepts; everything else goes through /search
 	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'FoilQuantity', 'Provider']);
@@ -81,7 +83,7 @@
 						prices = { ...prices, ...Object.assign({}, ...results) };
 					});
 				}
-				valuePromise.then(v => { collectionValue = v.total_value ?? null; });
+				valuePromise.then(v => { collectionValue = v.total_value ?? null; valueBreakdown = v; });
 			}
 		} finally {
 			loading = false;
@@ -101,7 +103,7 @@
 
 	function refreshValue() {
 		if (app.pricingEnabled) {
-			getCollectionValue(collectionId).then(v => { collectionValue = v.total_value ?? null; });
+			getCollectionValue(collectionId).then(v => { collectionValue = v.total_value ?? null; valueBreakdown = v; });
 		}
 	}
 
@@ -187,8 +189,37 @@
 			<span class="page-subtitle">{total.toLocaleString()} card{total !== 1 ? 's' : ''}</span>
 		{/if}
 		{#if collectionValue != null}
-			<span class="page-subtitle" style="color: var(--accent-text); margin-left: auto;">
+			<span
+				class="page-subtitle"
+				style="color: var(--accent-text); margin-left: auto; position: relative; cursor: default;"
+				onmouseenter={() => valueHover = true}
+				onmouseleave={() => valueHover = false}
+			>
 				≈ ${collectionValue.toFixed(2)}
+				{#if valueHover && valueBreakdown}
+					<div class="value-breakdown-tooltip">
+						{#if valueBreakdown.profit != null}
+							<div class="vb-row">
+								<span class="vb-label">Profit</span>
+								<span class="vb-val" style="color: {valueBreakdown.profit >= 0 ? 'var(--success)' : 'var(--danger)'}">
+									{valueBreakdown.profit >= 0 ? '+' : ''}${valueBreakdown.profit.toFixed(2)}
+								</span>
+							</div>
+						{/if}
+						{#if valueBreakdown.untracked_value != null && valueBreakdown.untracked_value > 0}
+							<div class="vb-row">
+								<span class="vb-label">No purchase data</span>
+								<span class="vb-val">≈ ${valueBreakdown.untracked_value.toFixed(2)}</span>
+							</div>
+						{/if}
+						{#if valueBreakdown.priced_count != null && valueBreakdown.total_count != null}
+							<div class="vb-row" style="margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px;">
+								<span class="vb-label">Priced</span>
+								<span class="vb-val">{valueBreakdown.priced_count} / {valueBreakdown.total_count}</span>
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</span>
 		{/if}
 	</div>

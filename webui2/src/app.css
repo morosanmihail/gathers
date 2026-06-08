@@ -980,6 +980,32 @@ label.field-label {
 	font-size: 0.85rem;
 }
 
+.value-breakdown-tooltip {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 10px 14px;
+	min-width: 200px;
+	box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+	z-index: 100;
+	font-size: 0.82rem;
+	white-space: nowrap;
+	color: var(--text);
+}
+
+.vb-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 2px 0;
+}
+
+.vb-label { color: var(--text2); }
+.vb-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
 .empty-state {
 	display: flex;
 	flex-direction: column;
