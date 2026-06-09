@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { app, applyTheme, setViewMode } from '$lib/state.svelte';
 	import { addCollection, invalidateCache } from '$lib/api';
-	import type { Theme } from '$lib/types';
+	import { themes } from '$lib/themes/index';
 
 	let { children } = $props();
 
@@ -32,15 +32,8 @@
 		? decodeURIComponent($page.url.pathname.split('/')[2] ?? '')
 		: '');
 
-	const themes: Array<{ id: Theme; label: string; dot: string }> = [
-		{ id: 'light',      label: 'Light',      dot: '#f0ede6' },
-		{ id: 'dark',       label: 'Dark',        dot: '#0d0d12' },
-		{ id: 'catppuccin', label: 'Catppuccin',  dot: '#cba6f7' },
-		{ id: 'nord',       label: 'Nord',        dot: '#88c0d0' },
-		{ id: 'dracula',    label: 'Dracula',     dot: '#bd93f9' },
-	];
 
-	function selectTheme(t: Theme) {
+	function selectTheme(t: string) {
 		applyTheme(t);
 		themeOpen = false;
 	}
@@ -150,6 +143,9 @@
 					</svg>
 				</a>
 			{/if}
+			<a href="https://gathers.cards" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" style="font-size: 0.8rem;" title="gathers.cards">
+				gathers.cards
+			</a>
 		</div>
 
 		<!-- ─── Tab bar ─── -->

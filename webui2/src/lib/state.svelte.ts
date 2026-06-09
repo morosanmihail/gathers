@@ -1,5 +1,6 @@
 import type { Collection, SystemInfo, Theme, ViewMode, CardSet } from './types';
 import { listCollections, getSystemInfo, getMtgCardSets } from './api';
+import { injectThemeStyles } from './themes/index';
 
 class AppState {
 	collections = $state<Collection[]>([]);
@@ -91,10 +92,16 @@ class AppState {
 
 export const app = new AppState();
 
-// Persist theme to localStorage
+// Inject all theme CSS rules and restore saved theme
+if (typeof document !== 'undefined') {
+	injectThemeStyles();
+}
 if (typeof localStorage !== 'undefined') {
 	const saved = localStorage.getItem('gathers-theme') as Theme | null;
-	if (saved) app.theme = saved;
+	if (saved) {
+		app.theme = saved;
+		document.documentElement.setAttribute('data-theme', saved);
+	}
 }
 
 export function applyTheme(theme: Theme) {

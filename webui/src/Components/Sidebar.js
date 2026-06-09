@@ -129,6 +129,10 @@ export default function Sidebar() {
                 <AddCollectionForm />
                 <hr />
                 <OperationsTracker />
+                <hr />
+                <a href="https://gathers.cards" target="_blank" rel="noopener noreferrer" className="btn btn-outline-secondary w-100">
+                  gathers.cards
+                </a>
               </React.Fragment>
             )}
           </div>

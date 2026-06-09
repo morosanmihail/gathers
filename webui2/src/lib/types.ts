@@ -1,4 +1,4 @@
-export type Theme = 'light' | 'dark' | 'catppuccin' | 'nord' | 'dracula';
+export type Theme = string;
 export type ViewMode = 'grid' | 'list';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
 
