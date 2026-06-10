@@ -15,7 +15,8 @@ use serde::Deserialize;
 use models::CardPrices;
 
 use crate::{
-    ApiError, ErrorPayload, GathersState, collections::collections_models::APICardSearchFilters,
+    ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
+    collections::collections_models::APICardSearchFilters,
     pokemon_api::pokemon_api_models::APIPokemonCard,
 };
 pub mod pokemon_api_models;
@@ -116,6 +117,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     }
 
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let mut ret = state.0.lock().await;
         let result = {
             let pokemon = ret.require_pokemon()?;
@@ -133,6 +135,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     }
 
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let guard = state.0.lock().await;
         let pokemon = guard.require_pokemon()?;
         match pokemon.update_prices().await {

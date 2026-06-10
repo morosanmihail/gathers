@@ -1,20 +1,7 @@
 use aide::axum::{ApiRouter, routing::get};
 use axum::{Json, extract::State, http::StatusCode};
 
-use crate::{ErrorPayload, GathersState, ServerConfig};
-
-fn demo_mode() -> bool {
-    std::env::var("DEMO_MODE").is_ok()
-}
-
-fn demo_err() -> (StatusCode, Json<ErrorPayload>) {
-    (
-        StatusCode::FORBIDDEN,
-        Json(ErrorPayload {
-            error: "Settings are disabled in demo mode".into(),
-        }),
-    )
-}
+use crate::{ErrorPayload, GathersState, ServerConfig, demo_mode, demo_err};
 
 pub fn settings_routes() -> ApiRouter<GathersState> {
     ApiRouter::new().api_route("/", get(get_settings).post(post_settings))

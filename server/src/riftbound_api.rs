@@ -13,7 +13,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    ApiError, ErrorPayload, GathersState, collections::collections_models::APICardSearchFilters,
+    ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
+    collections::collections_models::APICardSearchFilters,
     riftbound_api::riftbound_api_models::APIRiftboundCard,
 };
 pub mod riftbound_api_models;
@@ -114,6 +115,7 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
     }
 
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let mut ret = state.0.lock().await;
         let result = {
             let riftbound = ret.require_riftbound()?;

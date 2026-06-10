@@ -17,7 +17,7 @@ use persistence::{CollectionCardsParams, PersistenceSystem, PersistenceSystemTra
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait};
 
 use crate::{
-    ApiError, ErrorPayload, GathersState,
+    ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
     collections::collections_models::{
         APICardSearchFilters, CardIdentInner, CardToAdd, CollectionAddResponse, CollectionCard,
         CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
@@ -261,6 +261,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Json(input): Json<Collection>,
     ) -> Result<Json<CollectionAddResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         validate_collection_name(&input.id)?;
 
         let storage = &mut state.1.lock().await.storage;
@@ -283,6 +284,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Path(id): Path<String>,
     ) -> Result<Json<CollectionRemoveResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
         let storage = &mut state.1.lock().await.storage;
 
         // TODO: allow setting the "move to collection" instead of None
@@ -302,6 +305,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(id): Path<String>,
         Json(input): Json<CollectionRenameRequest>,
     ) -> Result<Json<Collection>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         validate_collection_name(&input.new_id)?;
 
         let storage = &mut state.1.lock().await.storage;
@@ -323,6 +327,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(to_collection_id): Path<String>,
         Json(input): Json<Vec<CollectionCard>>,
     ) -> Result<Json<()>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let storage = &mut state.1.lock().await.storage;
 
         let cards: Vec<models::CollectionCard> = input.iter().map(|card| card.into()).collect();
@@ -494,6 +499,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<CardToAdd>,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let storage = &mut state.1.lock().await.storage;
 
         if let Err(e) = validate_collection(storage, &collection_id).await {
@@ -693,6 +699,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         mut multipart: Multipart,
     ) -> Result<Json<()>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let mut file_bytes: Option<Vec<u8>> = None;
         let mut collection_name: Option<String> = None;
 
@@ -1065,6 +1072,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Path((collection_id, entry_id)): Path<(String, i64)>,
     ) -> Result<StatusCode, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let found = state
             .1
             .lock()
@@ -1084,6 +1092,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path((collection_id, entry_id)): Path<(String, i64)>,
         Json(body): Json<UpdatePurchaseEntryBody>,
     ) -> Result<StatusCode, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let result = state
             .1
             .lock()

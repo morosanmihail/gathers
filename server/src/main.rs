@@ -35,6 +35,19 @@ pub struct ErrorPayload {
 /// Convenience alias for the standard API error response.
 pub type ApiError = (StatusCode, Json<ErrorPayload>);
 
+pub(crate) fn demo_mode() -> bool {
+    std::env::var("DEMO_MODE").is_ok()
+}
+
+pub(crate) fn demo_err() -> ApiError {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ErrorPayload {
+            error: "Disabled in demo mode".to_string(),
+        }),
+    )
+}
+
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct DownloadProgressInfo {
     pub downloaded: u64,

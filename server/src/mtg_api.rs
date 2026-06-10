@@ -13,7 +13,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    ApiError, ErrorPayload, GathersState, collections::collections_models::APICardSearchFilters,
+    ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
+    collections::collections_models::APICardSearchFilters,
     mtg_api::mtg_api_models::APICard,
 };
 pub mod mtg_api_models;
@@ -114,6 +115,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     }
 
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let mut ret = state.0.lock().await;
         let result = {
             let mtg = ret.require_mtg()?;
@@ -131,6 +133,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     }
 
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
         let guard = state.0.lock().await;
         let mtg = guard.require_mtg()?;
         match mtg.update_prices().await {
