@@ -35,14 +35,18 @@
 
 	function position(el: HTMLElement) {
 		const rect = el.getBoundingClientRect();
-		// Prefer opening to the left; flip if too close to right edge
 		const tooltipW = 260;
+		const tooltipH = 320;
+		const margin = 8;
 		const spaceRight = window.innerWidth - rect.right;
-		if (spaceRight >= tooltipW + 8) {
-			tooltipStyle = `top: ${rect.bottom + 4}px; left: ${rect.left}px;`;
-		} else {
-			tooltipStyle = `top: ${rect.bottom + 4}px; right: ${spaceRight}px;`;
-		}
+		const xStyle = spaceRight >= tooltipW + 8
+			? `left: ${rect.left}px;`
+			: `right: ${window.innerWidth - rect.right}px;`;
+		const fitsBelow = rect.bottom + 4 + tooltipH + margin <= window.innerHeight;
+		const yStyle = fitsBelow
+			? `top: ${rect.bottom + 4}px;`
+			: `bottom: ${window.innerHeight - rect.top + 4}px;`;
+		tooltipStyle = `${yStyle} ${xStyle}`;
 	}
 
 	// Market price rows from all providers

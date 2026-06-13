@@ -1063,6 +1063,8 @@ label.field-label {
 	border-radius: var(--radius);
 	padding: 10px 14px;
 	min-width: 240px;
+	max-height: 320px;
+	overflow-y: auto;
 	box-shadow: var(--shadow);
 	font-size: 0.8rem;
 	pointer-events: none;

@@ -31,12 +31,15 @@
 	function position(el: HTMLElement) {
 		const rect = el.getBoundingClientRect();
 		const tooltipW = 220;
+		const tooltipH = 60;
+		const margin = 8;
 		const spaceRight = window.innerWidth - rect.right;
-		if (spaceRight >= tooltipW + 8) {
-			tooltipStyle = `top: ${rect.bottom + 4}px; left: ${rect.left}px;`;
-		} else {
-			tooltipStyle = `top: ${rect.bottom + 4}px; right: ${spaceRight}px;`;
-		}
+		const xStyle = spaceRight >= tooltipW + 8
+			? `left: ${rect.left}px;`
+			: `right: ${window.innerWidth - rect.right}px;`;
+		const fitsBelow = rect.bottom + 4 + tooltipH + margin <= window.innerHeight;
+		const top = fitsBelow ? rect.bottom + 4 : Math.max(margin, rect.top - tooltipH - 4);
+		tooltipStyle = `top: ${top}px; ${xStyle}`;
 	}
 </script>
 
