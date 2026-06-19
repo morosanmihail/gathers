@@ -13,11 +13,12 @@
 		price?: string | null;
 		cardPrices?: CardPrices;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
+		onAddFoil?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, collection = '', price = null, cardPrices, onAdd, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -58,12 +59,19 @@
 		{/if}
 	</div>
 
-	<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
-	<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
+	{#if collectionMode}
+		<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
+		<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
+	{:else}
+		<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
+		<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
+	{/if}
 	<div class="card-row-cell card-row-rarity">
-		{#if card.rarity}<span class={rarityClass(card.rarity)}>{card.rarity}</span>{:else}—{/if}
+		{#if card.rarity}<span class={rarityClass(card.rarity)}>{collectionMode ? card.rarity : card.rarity[0].toUpperCase()}</span>{:else}—{/if}
 	</div>
+	{#if collectionMode}
 	<div class="card-row-cell card-row-artist">{(card as MtgCard).artist ?? '—'}</div>
+	{/if}
 
 	{#if collectionMode}
 		<div class="card-row-cell" style="padding:0 8px;">
@@ -86,14 +94,23 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="card-row-cell card-row-artist">{(card as MtgCard).text?.slice(0, 60) ?? ''}</div>
-		<div class="card-row-cell"></div>
-		<div class="card-row-cell">
+		<div class="card-row-cell" style="padding:0 8px;">
+			<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
+		</div>
+		<div class="card-row-cell" style="display:flex;gap:6px;" onclick={(e) => e.stopPropagation()}>
 			{#if onAdd}
 				<button
 					class="btn btn-sm btn-accent"
-					onclick={(e) => { e.stopPropagation(); onAdd(card); }}
+					title="Add to collection"
+					onclick={() => onAdd(card)}
 				>+</button>
+			{/if}
+			{#if onAddFoil}
+				<button
+					class="btn btn-sm btn-ghost"
+					title="Add as foil"
+					onclick={() => onAddFoil(card)}
+				>+✦</button>
 			{/if}
 		</div>
 	{/if}

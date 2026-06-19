@@ -14,11 +14,12 @@
 		cardPrices?: CardPrices;
 		collection?: string;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
+		onAddFoil?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, price = null, cardPrices, collection = '', onAdd, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, price = null, cardPrices, collection = '', onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -97,12 +98,12 @@
 			{#if card.rarity}
 				<span class={rarityClass(card.rarity)}>{card.rarity[0]}</span>
 			{/if}
-			{#if price != null || cardPrices}
-				<span style="margin-left: auto;" onclick={(e) => e.stopPropagation()}>
-					<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
-				</span>
-			{/if}
 		</div>
+		{#if price != null || cardPrices}
+			<div class="card-tile-meta" onclick={(e) => e.stopPropagation()}>
+				<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
+			</div>
+		{/if}
 	</div>
 
 	<!-- Qty controls (collection mode) -->
@@ -117,14 +118,23 @@
 		</div>
 	{/if}
 
-	<!-- Add to collection button (search mode) -->
-	{#if !collectionMode && onAdd}
-		<div class="card-tile-add">
-			<button
-				class="btn btn-sm btn-accent"
-				onclick={(e) => { e.stopPropagation(); onAdd(card); }}
-				title="Add to collection"
-			>+</button>
+	<!-- Add to collection buttons (search mode) -->
+	{#if !collectionMode && (onAdd || onAddFoil)}
+		<div class="card-tile-add" style="display:flex;gap:4px;">
+			{#if onAdd}
+				<button
+					class="btn btn-sm btn-accent"
+					onclick={(e) => { e.stopPropagation(); onAdd(card); }}
+					title="Add to collection"
+				>+</button>
+			{/if}
+			{#if onAddFoil}
+				<button
+					class="btn btn-sm btn-ghost"
+					onclick={(e) => { e.stopPropagation(); onAddFoil(card); }}
+					title="Add as foil"
+				>+✦</button>
+			{/if}
 		</div>
 	{/if}
 </div>

@@ -20,9 +20,12 @@
 		onSearchOpen: () => void;
 		searchOpen: boolean;
 		onHistoryOpen?: () => void;
+		onFilterOpen?: () => void;
+		filterOpen?: boolean;
+		filterActive?: boolean;
 	}
 
-	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen }: Props = $props();
+	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
 
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
 	let moveDest = $state('');
@@ -145,6 +148,21 @@
 		</svg>
 		{searchOpen ? 'Close search' : 'Search & add'}
 	</button>
+
+	<!-- Filter toggle -->
+	{#if onFilterOpen}
+		<button
+			class="btn"
+			class:btn-accent={filterOpen || filterActive}
+			onclick={onFilterOpen}
+			title="Filter collection"
+		>
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+				<path d="M1 3h12M3 7h8M5 11h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+			</svg>
+			Filter{filterActive ? ' ●' : ''}
+		</button>
+	{/if}
 
 	<div class="toolbar-sep"></div>
 

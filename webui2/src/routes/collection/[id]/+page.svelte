@@ -4,6 +4,7 @@
 	import CardRow from '$lib/components/CardRow.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import CollectionToolbar from '$lib/components/CollectionToolbar.svelte';
+	import CollectionFilterBar from '$lib/components/CollectionFilterBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import PurchaseHistoryModal from '$lib/components/PurchaseHistoryModal.svelte';
 	import {
@@ -14,7 +15,7 @@
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
-	import { defaultFilters } from '$lib/types';
+	import { defaultFilters, bestPrice } from '$lib/types';
 	import type { CollectionCard, CardPrices, ValueBreakdown } from '$lib/types';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
@@ -32,12 +33,24 @@
 	// Fields the /list endpoint accepts; everything else goes through /search
 	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'FoilQuantity', 'Provider']);
 
-	let filterActive = $state(false);
 	let collectionFilters = $state(defaultFilters());
 	let sortBy = $state('');
 	let sortOrder = $state<'Asc' | 'Desc'>('Asc');
 	let searchOpen = $state(false);
+	let filterOpen = $state(false);
 	let historyOpen = $state(false);
+	let filterDebounce: ReturnType<typeof setTimeout> | null = null;
+
+	const filterActive = $derived(
+		collectionFilters.name !== '' ||
+		collectionFilters.setCode !== '' ||
+		collectionFilters.text !== '' ||
+		collectionFilters.artist !== '' ||
+		collectionFilters.rarity !== '' ||
+		collectionFilters.colorIdentities.length > 0 ||
+		collectionFilters.domains.length > 0 ||
+		collectionFilters.energyTypes.length > 0
+	);
 
 	const sortIsCardLevel = $derived(sortBy !== '' && !COLLECTION_SORT_FIELDS.has(sortBy));
 
@@ -128,6 +141,22 @@
 		}
 	}
 
+	function handleFilterChange(f: typeof collectionFilters) {
+		collectionFilters = f;
+		if (filterDebounce) clearTimeout(filterDebounce);
+		filterDebounce = setTimeout(() => {
+			currentPage = 1;
+			load(1);
+		}, 300);
+	}
+
+	function handleFilterClose() {
+		filterOpen = false;
+		collectionFilters = defaultFilters();
+		currentPage = 1;
+		load(1);
+	}
+
 	function handleRefresh() {
 		refreshKey++;
 		refreshValue();
@@ -148,13 +177,6 @@
 		}
 		currentPage = 1;
 		load(1);
-	}
-
-	function bestPrice(cardPrices: CardPrices): string | null {
-		if (!cardPrices?.paper) return null;
-		const vals = Object.values(cardPrices.paper).flatMap(r => [r.normal, r.foil].filter(v => v != null)) as number[];
-		if (!vals.length) return null;
-		return `$${Math.min(...vals).toFixed(2)}`;
 	}
 
 	const listHeaders = [
@@ -181,7 +203,18 @@
 		onSearchOpen={() => searchOpen = !searchOpen}
 		{searchOpen}
 		onHistoryOpen={() => historyOpen = true}
+		onFilterOpen={() => { filterOpen = !filterOpen; if (!filterOpen) { collectionFilters = defaultFilters(); currentPage = 1; load(1); } }}
+		{filterOpen}
+		{filterActive}
 	/>
+
+	{#if filterOpen}
+		<CollectionFilterBar
+			filters={collectionFilters}
+			onfilters={handleFilterChange}
+			onclose={handleFilterClose}
+		/>
+	{/if}
 
 	<div class="page-header" style="padding-bottom: 8px;">
 		<h1 class="page-title">{collectionId}</h1>

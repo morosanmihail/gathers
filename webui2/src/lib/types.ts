@@ -131,6 +131,13 @@ export interface CardPrices {
 	paper?: Record<string, PriceRetailer>;
 }
 
+export function bestPrice(cardPrices: CardPrices): string | null {
+	if (!cardPrices?.paper) return null;
+	const vals = Object.values(cardPrices.paper).flatMap(r => [r.normal, r.foil].filter(v => v != null)) as number[];
+	if (!vals.length) return null;
+	return `$${Math.min(...vals).toFixed(2)}`;
+}
+
 export interface ValueBreakdown {
 	total_value?: number;
 	profit?: number;

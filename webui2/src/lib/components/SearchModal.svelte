@@ -3,10 +3,10 @@
 	import CardTile from './CardTile.svelte';
 	import CardRow from './CardRow.svelte';
 	import Pagination from './Pagination.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters } from '$lib/types';
-	import type { AnyCard, CollectionCard } from '$lib/types';
+	import { defaultFilters, bestPrice } from '$lib/types';
+	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
 
 	interface Props {
 		collection: string;
@@ -25,6 +25,8 @@
 	let toast = $state('');
 	let addPrice = $state('');
 	let activeSystem = $state('');
+	let viewMode = $state<ViewMode>('grid');
+	let prices = $state<Record<string, CardPrices>>({});
 
 	$effect(() => {
 		if (!activeSystem && app.systems.length > 0) activeSystem = app.systems[0];
@@ -33,6 +35,7 @@
 	function handleSystemChange(sys: string) {
 		activeSystem = sys;
 		results = [];
+		prices = {};
 		searched = false;
 		filters = defaultFilters();
 	}
@@ -52,20 +55,28 @@
 			results = data;
 			if (p === 1) total = data.length >= PAGE_SIZE ? PAGE_SIZE * 10 : data.length;
 			searched = true;
+
+			if (app.pricingEnabled) {
+				const ids = data.map(c => c.id);
+				const fetch = activeSystem === 'PokemonSQLite' ? getPokemonPrices
+					: activeSystem === 'RiftboundSQLite' ? null
+					: getMtgPrices;
+				fetch?.(ids).then(result => { prices = { ...prices, ...result }; });
+			}
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function addCard(card: AnyCard | CollectionCard) {
+	async function addCard(card: AnyCard | CollectionCard, foil = false) {
 		const price = addPrice !== '' ? parseFloat(addPrice) : null;
 		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id, 1, 0, purchasePrice)
+				addCardToCollection(collection, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice)
 			);
-			toast = `Added ${card.name}`;
+			toast = `Added ${card.name}${foil ? ' (foil)' : ''}`;
 			setTimeout(() => toast = '', 2000);
 			onAdded?.();
 		} catch {
@@ -85,6 +96,34 @@
 	<div class="modal">
 		<div class="modal-header">
 			<h3>Search & Add to "{collection}"</h3>
+				<div class="view-toggle" title="Toggle view">
+					<button
+						class="view-toggle-btn"
+						class:active={viewMode === 'grid'}
+						onclick={() => viewMode = 'grid'}
+						title="Grid view"
+					>
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+							<rect x="0" y="0" width="6" height="6" rx="1"/>
+							<rect x="8" y="0" width="6" height="6" rx="1"/>
+							<rect x="0" y="8" width="6" height="6" rx="1"/>
+							<rect x="8" y="8" width="6" height="6" rx="1"/>
+						</svg>
+					</button>
+					<button
+						class="view-toggle-btn"
+						class:active={viewMode === 'list'}
+						onclick={() => viewMode = 'list'}
+						title="List view"
+					>
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+							<rect x="0" y="0" width="14" height="2" rx="1"/>
+							<rect x="0" y="4" width="14" height="2" rx="1"/>
+							<rect x="0" y="8" width="14" height="2" rx="1"/>
+							<rect x="0" y="12" width="14" height="2" rx="1"/>
+						</svg>
+					</button>
+				</div>
 			<button class="btn btn-ghost btn-icon" onclick={onclose} title="Close">✕</button>
 		</div>
 		<!-- Purchase price bar -->
@@ -129,26 +168,24 @@
 						<div class="empty-state-text">No cards found</div>
 					</div>
 				{:else}
-					{#if app.viewMode === 'grid'}
+					{#if viewMode === 'grid'}
 						<div class="card-grid" style="padding: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
 							{#each results as card (card.id)}
-								<CardTile {card} onAdd={addCard} />
+								<CardTile {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} />
 							{/each}
 						</div>
 					{:else}
-						<div class="card-list">
+						<div class="card-list card-list-search">
 							<div class="card-list-header">
 								<div class="card-list-col"></div>
-								<div class="card-list-col">Name</div>
 								<div class="card-list-col">Set</div>
-								<div class="card-list-col">Rarity</div>
-								<div class="card-list-col">Artist</div>
-								<div class="card-list-col"></div>
-								<div class="card-list-col"></div>
+								<div class="card-list-col">Name</div>
+								<div class="card-list-col">R</div>
+								<div class="card-list-col">Price</div>
 								<div class="card-list-col"></div>
 							</div>
 							{#each results as card (card.id)}
-								<CardRow {card} onAdd={addCard} />
+								<CardRow {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} />
 							{/each}
 						</div>
 					{/if}
