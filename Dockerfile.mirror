@@ -24,25 +24,22 @@ COPY ./e2e/examples ./e2e/examples
 COPY ./mirror/src ./mirror/src
 COPY ./persistence/migrations ./persistence/migrations
 
-RUN cargo build --release --bin server
+RUN cargo build --release --bin mirror
 
 FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y ca-certificates libsqlite3-0
+RUN apt-get update && apt-get install -y ca-certificates libsqlite3-0 bzip2
 
 RUN useradd --create-home --shell /bin/bash app
 USER app
 WORKDIR /home/app
 
-RUN mkdir -p /home/app/.local/share/gathers/DB
+RUN mkdir -p /home/app/.local/share/gathers/mirror
 
-COPY --from=builder /app/target/release/server .
+COPY --from=builder /app/target/release/mirror .
 
-EXPOSE 5234
+EXPOSE 5235
 
-ENV STORAGE_DB_PATH=/home/app/.local/share/gathers/DB/storage.db
-ENV MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
-ENV RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
-ENV POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
+ENV MIRROR_DATA_DIR=/home/app/.local/share/gathers/mirror
 
-ENTRYPOINT ["/home/app/server"]
+ENTRYPOINT ["/home/app/mirror"]

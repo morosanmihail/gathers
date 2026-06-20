@@ -1,5 +1,6 @@
 use super::*;
 use ::models::{CardColour, filters::SortOrder};
+use std::str::FromStr;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -234,7 +235,12 @@ async fn test_search_cards_sort_by_name_desc() {
     assert!(!cards.is_empty());
     let names: Vec<_> = cards.iter().map(card_name).collect();
     for w in names.windows(2) {
-        assert!(w[0] >= w[1], "name desc order violated: {:?} < {:?}", w[0], w[1]);
+        assert!(
+            w[0] >= w[1],
+            "name desc order violated: {:?} < {:?}",
+            w[0],
+            w[1]
+        );
     }
 }
 
@@ -250,7 +256,12 @@ async fn test_search_cards_sort_by_rarity_asc() {
     assert!(!cards.is_empty());
     let rarities: Vec<_> = cards.iter().map(card_rarity).collect();
     for w in rarities.windows(2) {
-        assert!(w[0] <= w[1], "rarity order violated: {:?} > {:?}", w[0], w[1]);
+        assert!(
+            w[0] <= w[1],
+            "rarity order violated: {:?} > {:?}",
+            w[0],
+            w[1]
+        );
     }
 }
 
@@ -266,7 +277,12 @@ async fn test_search_cards_sort_by_set_code() {
     assert!(!cards.is_empty());
     let set_codes: Vec<_> = cards.iter().map(card_set_code).collect();
     for w in set_codes.windows(2) {
-        assert!(w[0] <= w[1], "set_code order violated: {:?} > {:?}", w[0], w[1]);
+        assert!(
+            w[0] <= w[1],
+            "set_code order violated: {:?} > {:?}",
+            w[0],
+            w[1]
+        );
     }
 }
 
@@ -279,8 +295,14 @@ async fn test_search_cards_default_sort_is_name_asc() {
         sort_order: Some(SortOrder::Asc),
         ..Default::default()
     };
-    let default_cards = system.search_cards(filters_default, None, Some(10)).await.unwrap();
-    let explicit_cards = system.search_cards(filters_explicit, None, Some(10)).await.unwrap();
+    let default_cards = system
+        .search_cards(filters_default, None, Some(10))
+        .await
+        .unwrap();
+    let explicit_cards = system
+        .search_cards(filters_explicit, None, Some(10))
+        .await
+        .unwrap();
     let default_names: Vec<_> = default_cards.iter().map(card_name).collect();
     let explicit_names: Vec<_> = explicit_cards.iter().map(card_name).collect();
     assert_eq!(default_names, explicit_names);
@@ -313,7 +335,10 @@ async fn test_search_cards_name_substring_crosses_word_boundary() {
         ..Default::default()
     };
     let cards = system.search_cards(filters, None, None).await.unwrap();
-    assert!(!cards.is_empty(), "expected results for cross-word substring 'in Ki'");
+    assert!(
+        !cards.is_empty(),
+        "expected results for cross-word substring 'in Ki'"
+    );
     assert!(
         cards.iter().all(|c| card_name(c).contains("in ki")),
         "all results must contain 'in ki' in name"
@@ -329,7 +354,10 @@ async fn test_search_cards_artist_substring() {
         ..Default::default()
     };
     let cards = system.search_cards(filters, None, None).await.unwrap();
-    assert!(!cards.is_empty(), "expected results for artist substring 'son Ch'");
+    assert!(
+        !cards.is_empty(),
+        "expected results for artist substring 'son Ch'"
+    );
 }
 
 #[tokio::test]
@@ -341,7 +369,10 @@ async fn test_search_cards_text_substring() {
         ..Default::default()
     };
     let cards = system.search_cards(filters, None, None).await.unwrap();
-    assert!(!cards.is_empty(), "expected results for text substring 'stroy target'");
+    assert!(
+        !cards.is_empty(),
+        "expected results for text substring 'stroy target'"
+    );
 }
 
 // ── Multi-type filter tests ───────────────────────────────────────────────
@@ -369,7 +400,10 @@ async fn test_search_cards_multiple_types_mutually_exclusive_returns_empty() {
         "no card can be both Creature and Sorcery, got {} results",
         cards.len()
     );
-    assert!(cards.is_empty(), "expected zero results for impossible type combo");
+    assert!(
+        cards.is_empty(),
+        "expected zero results for impossible type combo"
+    );
 }
 
 #[tokio::test]
@@ -387,8 +421,16 @@ async fn test_search_cards_two_type_filter_is_stricter_than_one() {
         types: Some(vec!["Creature".to_string(), "Sorcery".to_string()]),
         ..Default::default()
     };
-    let single_count = system.search_cards(single, None, Some(200)).await.unwrap().len();
-    let dual_count = system.search_cards(dual, None, Some(200)).await.unwrap().len();
+    let single_count = system
+        .search_cards(single, None, Some(200))
+        .await
+        .unwrap()
+        .len();
+    let dual_count = system
+        .search_cards(dual, None, Some(200))
+        .await
+        .unwrap()
+        .len();
     assert!(
         single_count > dual_count,
         "one-type filter ({single_count}) should return more results than mutually-exclusive two-type AND ({dual_count})"
@@ -410,19 +452,38 @@ fn create_prices_db(dir: &TempDir, entries: &[(&str, &str, &str, &str, &str, f64
         )
         .unwrap();
     for (uuid, source, provider, price_type, finish, price) in entries {
-        stmt.execute(rusqlite::params![uuid, source, provider, price_type, finish, price])
-            .unwrap();
+        stmt.execute(rusqlite::params![
+            uuid, source, provider, price_type, finish, price
+        ])
+        .unwrap();
     }
     path.to_string_lossy().into_owned()
 }
 
 fn write_dummy_prices(dir: &TempDir) -> String {
-    create_prices_db(dir, &[
-        ("uuid-alpha", "paper", "cardkingdom", "retail", "normal", 1.50),
-        ("uuid-alpha", "paper", "cardkingdom", "retail", "foil",   3.00),
-        ("uuid-alpha", "paper", "tcgplayer",   "retail", "normal", 1.25),
-        ("uuid-beta",  "paper", "cardkingdom", "retail", "normal", 0.25),
-    ])
+    create_prices_db(
+        dir,
+        &[
+            (
+                "uuid-alpha",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "normal",
+                1.50,
+            ),
+            ("uuid-alpha", "paper", "cardkingdom", "retail", "foil", 3.00),
+            ("uuid-alpha", "paper", "tcgplayer", "retail", "normal", 1.25),
+            (
+                "uuid-beta",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "normal",
+                0.25,
+            ),
+        ],
+    )
 }
 
 // Snapshot of three real UUIDs from AllPricesToday (2026-05-22).
@@ -430,32 +491,168 @@ fn write_dummy_prices(dir: &TempDir) -> String {
 // uuid-0001e0d0: normal-only retail entries
 // uuid-0003caab: both normal and foil; also has mtgo and buylist rows (must be ignored)
 fn write_real_prices(dir: &TempDir) -> String {
-    create_prices_db(dir, &[
-        // 00010d56
-        ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardmarket",  "retail",  "normal", 3.07),
-        ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardmarket",  "retail",  "foil",   4.44),
-        ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "manapool",    "retail",  "foil",   11.23),
-        ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "cardkingdom", "retail",  "foil",   11.99),
-        ("00010d56-fe38-5e35-8aed-518019aa36a5", "paper", "tcgplayer",   "retail",  "foil",   12.63),
-        // 0001e0d0
-        ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "cardkingdom", "retail",  "normal", 7.49),
-        ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "cardmarket",  "retail",  "normal", 4.78),
-        ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "manapool",    "retail",  "normal", 4.12),
-        ("0001e0d0-2dcd-5640-aadc-a84765cf5fc9", "paper", "tcgplayer",   "retail",  "normal", 5.89),
-        // 0003caab — paper retail
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "manapool",    "retail",  "normal", 0.15),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "manapool",    "retail",  "foil",   0.48),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "tcgplayer",   "retail",  "foil",   2.04),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "tcgplayer",   "retail",  "normal", 0.16),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "retail",  "foil",   2.49),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "retail",  "normal", 0.35),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardmarket",  "retail",  "normal", 0.19),
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardmarket",  "retail",  "foil",   1.02),
-        // 0003caab — buylist (must be ignored)
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "paper", "cardkingdom", "buylist", "foil",   0.75),
-        // 0003caab — mtgo (must be ignored)
-        ("0003caab-9ff5-5d1a-bc06-976dd0457f19", "mtgo",  "cardhoarder", "retail",  "normal", 0.03),
-    ])
+    create_prices_db(
+        dir,
+        &[
+            // 00010d56
+            (
+                "00010d56-fe38-5e35-8aed-518019aa36a5",
+                "paper",
+                "cardmarket",
+                "retail",
+                "normal",
+                3.07,
+            ),
+            (
+                "00010d56-fe38-5e35-8aed-518019aa36a5",
+                "paper",
+                "cardmarket",
+                "retail",
+                "foil",
+                4.44,
+            ),
+            (
+                "00010d56-fe38-5e35-8aed-518019aa36a5",
+                "paper",
+                "manapool",
+                "retail",
+                "foil",
+                11.23,
+            ),
+            (
+                "00010d56-fe38-5e35-8aed-518019aa36a5",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "foil",
+                11.99,
+            ),
+            (
+                "00010d56-fe38-5e35-8aed-518019aa36a5",
+                "paper",
+                "tcgplayer",
+                "retail",
+                "foil",
+                12.63,
+            ),
+            // 0001e0d0
+            (
+                "0001e0d0-2dcd-5640-aadc-a84765cf5fc9",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "normal",
+                7.49,
+            ),
+            (
+                "0001e0d0-2dcd-5640-aadc-a84765cf5fc9",
+                "paper",
+                "cardmarket",
+                "retail",
+                "normal",
+                4.78,
+            ),
+            (
+                "0001e0d0-2dcd-5640-aadc-a84765cf5fc9",
+                "paper",
+                "manapool",
+                "retail",
+                "normal",
+                4.12,
+            ),
+            (
+                "0001e0d0-2dcd-5640-aadc-a84765cf5fc9",
+                "paper",
+                "tcgplayer",
+                "retail",
+                "normal",
+                5.89,
+            ),
+            // 0003caab — paper retail
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "manapool",
+                "retail",
+                "normal",
+                0.15,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "manapool",
+                "retail",
+                "foil",
+                0.48,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "tcgplayer",
+                "retail",
+                "foil",
+                2.04,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "tcgplayer",
+                "retail",
+                "normal",
+                0.16,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "foil",
+                2.49,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "cardkingdom",
+                "retail",
+                "normal",
+                0.35,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "cardmarket",
+                "retail",
+                "normal",
+                0.19,
+            ),
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "cardmarket",
+                "retail",
+                "foil",
+                1.02,
+            ),
+            // 0003caab — buylist (must be ignored)
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "paper",
+                "cardkingdom",
+                "buylist",
+                "foil",
+                0.75,
+            ),
+            // 0003caab — mtgo (must be ignored)
+            (
+                "0003caab-9ff5-5d1a-bc06-976dd0457f19",
+                "mtgo",
+                "cardhoarder",
+                "retail",
+                "normal",
+                0.03,
+            ),
+        ],
+    )
 }
 
 fn system_with_prices(prices_path: Option<String>) -> MagicSQLiteRetrievalSystem {
@@ -708,7 +905,10 @@ async fn test_real_snapshot_mtgo_section_not_in_paper() {
         .await
         .unwrap()
         .unwrap();
-    assert!(!prices.paper.contains_key("cardhoarder"), "mtgo retailer leaked into paper");
+    assert!(
+        !prices.paper.contains_key("cardhoarder"),
+        "mtgo retailer leaked into paper"
+    );
     assert_eq!(prices.paper.len(), 4);
 }
 

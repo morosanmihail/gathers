@@ -39,10 +39,12 @@ impl Db {
                     .wrap_err_with(|| format!("creating directory {}", parent.display()))?;
             }
         }
-        let conn = Connection::open(path)
-            .wrap_err_with(|| format!("opening database at {path}"))?;
+        let conn =
+            Connection::open(path).wrap_err_with(|| format!("opening database at {path}"))?;
         conn.execute_batch(SCHEMA).wrap_err("creating schema")?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn find_card(&self, exp_name: &str, card_number: &str) -> Option<Card> {
@@ -62,10 +64,22 @@ impl Db {
                   pokedex, variants)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
                 params![
-                    card.card_id, card.id_tcgp, card.name,
-                    card.exp_id_tcgp, card.exp_code_tcgp, card.exp_name, card.exp_card_number,
-                    card.rarity, card.img, card.price, card.description, card.release_date,
-                    card.energy_type, card.card_type, card.pokedex, variants_json,
+                    card.card_id,
+                    card.id_tcgp,
+                    card.name,
+                    card.exp_id_tcgp,
+                    card.exp_code_tcgp,
+                    card.exp_name,
+                    card.exp_card_number,
+                    card.rarity,
+                    card.img,
+                    card.price,
+                    card.description,
+                    card.release_date,
+                    card.energy_type,
+                    card.card_type,
+                    card.pokedex,
+                    variants_json,
                 ],
             ) {
                 warn!("Failed to insert card '{}': {e}", card.card_id);
@@ -87,9 +101,16 @@ impl Db {
                          expCodeTCGP=?5, releaseDate=?6, description=?7, variants=?8
                          WHERE expCardNumber=?9 AND expName=?10",
                         params![
-                            card.id_tcgp, card.exp_id_tcgp, card.rarity, card.card_type,
-                            card.exp_code_tcgp, card.release_date, card.description, variants_json,
-                            card.exp_card_number, card.exp_name,
+                            card.id_tcgp,
+                            card.exp_id_tcgp,
+                            card.rarity,
+                            card.card_type,
+                            card.exp_code_tcgp,
+                            card.release_date,
+                            card.description,
+                            variants_json,
+                            card.exp_card_number,
+                            card.exp_name,
                         ],
                     ) {
                         warn!("Failed to update card (tcgp) '{}': {e}", card.card_id);

@@ -5,8 +5,8 @@ mod db;
 mod models;
 mod scrapers;
 
-use eyre::Result;
 use db::Db;
+use eyre::Result;
 use scrapers::{RunOptions, run_all};
 
 pub struct Options {
@@ -28,5 +28,12 @@ pub async fn run(opts: Options) -> Result<()> {
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
-    run_all(&db, &client, &RunOptions { recent: opts.recent }).await
+    run_all(
+        &db,
+        &client,
+        &RunOptions {
+            recent: opts.recent,
+        },
+    )
+    .await
 }

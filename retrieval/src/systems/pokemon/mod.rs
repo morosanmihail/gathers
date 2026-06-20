@@ -6,17 +6,34 @@ mod scraper;
 
 pub use prices::download_pokemon_prices;
 
+/// Runs the live Pokémon card scraper, writing a fresh db to `path`. The
+/// only authoritative source for this data — used both as the live
+/// system's fallback when no mirror is configured, and by the mirror
+/// server itself to build the snapshot it publishes.
+pub(crate) async fn scrape_to_path(path: &str) -> eyre::Result<()> {
+    scraper::run(scraper::Options {
+        db_path: path.to_string(),
+        recent: None,
+        fresh: true,
+    })
+    .await
+}
+
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ::models::{Card, CardID, CardPrices, CollectorNumber, Set, SetCode, filters::CardSearchFilters};
+use ::models::{
+    Card, CardID, CardPrices, CollectorNumber, Set, SetCode, filters::CardSearchFilters,
+};
 use models::SqlPokemonCard;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use tracing::info;
 
+use crate::systems::sql_helpers::{
+    sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
+};
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
-use crate::systems::sql_helpers::{sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir};
 
 impl NamedRetrievalSystem for PokemonSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -86,7 +103,9 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         if let Some(set_code) = &filters.set_code
             && !set_code.is_empty()
         {
-            conditions.push(format!("(expName LIKE ?{i} OR expIdTCGP LIKE ?{i} OR expCodeTCGP LIKE ?{i})"));
+            conditions.push(format!(
+                "(expName LIKE ?{i} OR expIdTCGP LIKE ?{i} OR expCodeTCGP LIKE ?{i})"
+            ));
             params.push(format!("%{set_code}%"));
             i += 1;
         }
@@ -232,7 +251,11 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         match result {
             Ok((raw, psa10, psa9)) => {
                 let prices = prices::row_to_card_prices(uuid, raw, psa10, psa9);
-                if prices.paper.is_empty() { Ok(None) } else { Ok(Some(prices)) }
+                if prices.paper.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(prices))
+                }
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -298,6 +321,10 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {
+        let target = PathBuf::from(&self._db_path);
+        if crate::mirror::try_mirrors("pokemon.sqlite", &target, None).await {
+            return Ok(true);
+        }
         info!("Updating Pokemon backend");
         scraper::run(scraper::Options {
             db_path: self._db_path.clone(),

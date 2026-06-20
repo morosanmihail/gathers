@@ -4,23 +4,21 @@ pub mod update;
 
 pub use update::{download_mtg_db, download_prices};
 
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ::models::{Card, CardID, CardPrices, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField}};
+use ::models::{
+    Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
+    filters::{CardSearchFilters, SortField},
+};
 use models::SqlCard;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
+use crate::systems::sql_helpers::{
+    sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
+};
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
-use crate::http::stream_to_file;
-use crate::systems::sql_helpers::{sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir};
 
 impl NamedRetrievalSystem for MagicSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -51,7 +49,7 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
 
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards (name COLLATE NOCASE);
-         CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards (setCode, number);"
+         CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards (setCode, number);",
     )?;
 
     // user_version tracks FTS schema version:
@@ -69,7 +67,7 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
                  content='cards', content_rowid='rowid',
                  tokenize='trigram'
              );
-             INSERT INTO cards_fts(cards_fts) VALUES('rebuild');"
+             INSERT INTO cards_fts(cards_fts) VALUES('rebuild');",
         )?;
         conn.pragma_update(None, "user_version", 2i64)?;
         info!("MTG full-text search index ready");
@@ -112,13 +110,19 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         // Wrap each term in double-quotes so multi-word phrases match exactly; escape any
         // literal double-quotes in user input.
         let mut fts_parts: Vec<String> = Vec::new();
-        if let Some(name) = &filters.name && !name.is_empty() {
+        if let Some(name) = &filters.name
+            && !name.is_empty()
+        {
             fts_parts.push(format!("name:\"{}\"", name.replace('"', "\"\"")));
         }
-        if let Some(artist) = &filters.artist && !artist.is_empty() {
+        if let Some(artist) = &filters.artist
+            && !artist.is_empty()
+        {
             fts_parts.push(format!("artist:\"{}\"", artist.replace('"', "\"\"")));
         }
-        if let Some(text) = &filters.text && !text.is_empty() {
+        if let Some(text) = &filters.text
+            && !text.is_empty()
+        {
             fts_parts.push(format!("text:\"{}\"", text.replace('"', "\"\"")));
         }
         let use_fts = !fts_parts.is_empty();
@@ -226,7 +230,10 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
-        Ok(iter.flatten().map(|c| (c.id.clone(), Card::Magic(c.into()))).collect())
+        Ok(iter
+            .flatten()
+            .map(|c| (c.id.clone(), Card::Magic(c.into())))
+            .collect())
     }
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
@@ -322,55 +329,8 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {
-        const DOWNLOAD_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2";
-        const CRC_URL: &str = "https://mtgjson.com/api/v5/AllPrintings.sqlite.bz2.sha256";
-
-        let local_file_path = PathBuf::from_str(&self.db_path)?;
-        let sidecar_path = PathBuf::from(format!("{}.bz2.sha256", local_file_path.display()));
-
-        let temp_dir = tempfile::tempdir()?;
-        let crc_file_path = temp_dir.path().join("remote_crc.sha");
-
-        stream_to_file(CRC_URL, "SHA256 fetched", &crc_file_path, None, "checking").await?;
-        let remote_crc = fs::read_to_string(&crc_file_path)?.trim().to_lowercase();
-
-        let local_crc = if sidecar_path.exists() {
-            fs::read_to_string(&sidecar_path)?.trim().to_lowercase()
-        } else {
-            String::from("none")
-        };
-
-        if remote_crc != local_crc {
-            info!(local = %local_crc, remote = %remote_crc, "CRC mismatch — downloading replacement");
-
-            tokio::spawn(async move {
-                let temp_dir = tempfile::tempdir().expect("Gotta be able to create a temp dir");
-                let bz2_path = temp_dir.path().join("AllPrintings.sqlite.bz2");
-
-                info!(url = DOWNLOAD_URL, dest = ?bz2_path, "Downloading AllPrintings");
-                let result = stream_to_file(DOWNLOAD_URL, "Download complete", &bz2_path, None, "downloading")
-                    .await
-                    .and_then(|_| update::calculate_sha256(&bz2_path))
-                    .and_then(|downloaded_crc| {
-                        if downloaded_crc == remote_crc {
-                            update::decompress_bz2(&bz2_path, &local_file_path)?;
-                            fs::write(&sidecar_path, &downloaded_crc)?;
-                            info!("AllPrintings replaced successfully");
-                        } else {
-                            warn!(expected = %remote_crc, got = %downloaded_crc, "Downloaded CRC mismatch");
-                        }
-                        Ok(())
-                    });
-                if let Err(e) = result {
-                    warn!(error = %e, "Failed to download AllPrintings");
-                }
-            });
-
-            Ok(true)
-        } else {
-            info!(crc = %local_crc, "AllPrintings up to date");
-            Ok(false)
-        }
+        update::download_mtg_db(&self.db_path, None).await?;
+        Ok(true)
     }
 }
 

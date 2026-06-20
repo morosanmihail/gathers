@@ -1,4 +1,5 @@
 mod http;
+pub mod mirror;
 mod systems;
 
 use std::collections::HashMap;

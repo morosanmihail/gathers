@@ -1,10 +1,29 @@
+configs:
+  gathers-mirrors:
+    content: |
+      mirrors = ["http://gathers-mirror:5235"]
+
 services:
+  # Mirror is optional
+  gathers-mirror:
+    image: ghcr.io/morosanmihail/gathers-mirror:latest
+    ports:
+      - "5235:5235"
+    volumes:
+      - gathers-mirror-data:/home/app/.local/share/gathers/mirror:rw
+    environment:
+      - MIRROR_INTERVAL_HOURS=24
+    restart: unless-stopped
+
   gathers-api:
     image: ghcr.io/morosanmihail/gathers-api:latest
     ports:
       - "5234:5234"
     volumes:
       - gathers-data:/home/app/.local/share/gathers/:rw
+    configs:
+      - source: gathers-mirrors
+        target: /home/app/.local/share/gathers/mirrors.toml
     environment:
       # Comma-separated list of systems to enable.
       # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
@@ -47,3 +66,4 @@ services:
 
 volumes:
   gathers-data:
+  gathers-mirror-data:

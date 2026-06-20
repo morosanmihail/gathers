@@ -11,7 +11,8 @@ async fn setup_test_db() -> PokemonSQLiteRetrievalSystem {
 async fn test_new_with_custom_path() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let system = PokemonSQLiteRetrievalSystem::new(Some(db_path.to_string_lossy().to_string()), None);
+    let system =
+        PokemonSQLiteRetrievalSystem::new(Some(db_path.to_string_lossy().to_string()), None);
     assert!(system.is_ok());
     let system = system.unwrap();
     assert_eq!(system._db_path, db_path.to_string_lossy().to_string());
@@ -353,7 +354,11 @@ async fn test_get_card_prices_no_prices_path() {
 
 #[tokio::test]
 async fn test_get_card_prices_file_missing() {
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some("/tmp/does_not_exist_pokemon_prices.sqlite".to_string())).unwrap();
+    let system = PokemonSQLiteRetrievalSystem::new(
+        None,
+        Some("/tmp/does_not_exist_pokemon_prices.sqlite".to_string()),
+    )
+    .unwrap();
     let result = system.get_card_prices("card-alpha").await.unwrap();
     assert!(result.is_none());
 }

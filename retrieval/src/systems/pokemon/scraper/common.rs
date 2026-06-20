@@ -30,7 +30,11 @@ pub fn format_id(set: &str, name: &str, number: &str) -> String {
     let set = set.trim().replace(' ', "-").replace('/', "-");
     // Strip parenthesised annotations and inline fractions from name
     let name_re = Regex::new(r"\([a-zA-Z\s0-9]+\)|\d+/\d+").unwrap();
-    let name = name_re.replace_all(name, "").trim().replace(' ', "-").replace('/', "-");
+    let name = name_re
+        .replace_all(name, "")
+        .trim()
+        .replace(' ', "-")
+        .replace('/', "-");
     let num = format_exp_number(number.trim());
     format!("{}-{}-{}", set, name, num)
 }
@@ -63,4 +67,3 @@ pub fn pull_variants(rarity: &str) -> Vec<String> {
         _ => vec!["Holofoil".into()],
     }
 }
-

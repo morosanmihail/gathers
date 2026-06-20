@@ -1,17 +1,22 @@
 mod models;
 mod update;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ::models::{Card, CardID, CollectorNumber, Set, SetCode, filters::{CardSearchFilters, SortField}};
+use ::models::{
+    Card, CardID, CollectorNumber, Set, SetCode,
+    filters::{CardSearchFilters, SortField},
+};
 use models::SqlCard;
 use rusqlite::{Connection, params};
 use tokio::sync::Mutex;
 
+use crate::systems::sql_helpers::{
+    sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
+};
 use crate::{
     NamedRetrievalSystem, RetrievalSystemTrait, systems::riftsqlite::update::RiftboundCardFetcher,
 };
-use crate::systems::sql_helpers::{sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir};
 
 impl NamedRetrievalSystem for RiftboundSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -33,6 +38,76 @@ impl RiftboundSQLiteRetrievalSystem {
             db_path: path,
         })
     }
+}
+
+/// Scrapes the live Riftbound card gallery and writes the `cards` table to
+/// `path`. The only authoritative source for this data — used both as the
+/// live system's fallback when no mirror is configured, and by the mirror
+/// server itself to build the snapshot it publishes.
+pub(crate) async fn build_riftbound_db(path: &str) -> eyre::Result<()> {
+    let db_path = path.to_string();
+    tokio::task::spawn_blocking(move || -> eyre::Result<()> {
+        let mut fetcher = RiftboundCardFetcher::new()?;
+        let cards = fetcher.fetch_all_simplified()?;
+
+        let mut conn = Connection::open(&db_path)?;
+        let tx = conn.transaction()?;
+
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS cards (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            code TEXT,
+            set_id TEXT,
+            type TEXT,
+            rarity TEXT,
+            energy INTEGER,
+            might INTEGER,
+            image_url TEXT,
+            domains TEXT,
+            artists TEXT,
+            text TEXT
+        )",
+        )?;
+
+        for card in &cards {
+            let collector_number: Option<String> = card.collector_number.as_ref().and_then(|v| {
+                if v.is_null() {
+                    None
+                } else if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else {
+                    Some(v.to_string())
+                }
+            });
+
+            let domains = card.domain_ids.as_deref().unwrap_or(&[]).join(",");
+            let artists = card.artists.as_deref().unwrap_or(&[]).join(",");
+
+            tx.execute(
+                "INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    card.id.as_deref(),
+                    card.name.as_deref(),
+                    collector_number.as_deref(),
+                    card.set.as_deref(),
+                    card.card_type.as_deref(),
+                    card.rarity.as_deref(),
+                    card.energy.as_deref(),
+                    card.might.as_deref(),
+                    card.image_url.as_deref(),
+                    domains.as_str(),
+                    artists.as_str(),
+                    card.ability_html.as_deref(),
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| eyre::eyre!("build_riftbound_db task panicked: {e}"))?
 }
 
 impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
@@ -125,7 +200,10 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         let user_iter =
             stmt.query_map(rusqlite::params_from_iter(params.iter()), SqlCard::from_row)?;
 
-        Ok(user_iter.flatten().map(|c| Card::Riftbound(c.into())).collect())
+        Ok(user_iter
+            .flatten()
+            .map(|c| Card::Riftbound(c.into()))
+            .collect())
     }
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
@@ -139,7 +217,10 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         );
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
-        Ok(iter.flatten().map(|c| (c.id.clone(), Card::Riftbound(c.into()))).collect())
+        Ok(iter
+            .flatten()
+            .map(|c| (c.id.clone(), Card::Riftbound(c.into())))
+            .collect())
     }
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
@@ -183,69 +264,11 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {
-        let db_path = self.db_path.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut fetcher = RiftboundCardFetcher::new()?;
-            let cards = fetcher.fetch_all_simplified()?;
-
-            let mut conn = Connection::open(&db_path)?;
-            let tx = conn.transaction()?;
-
-            tx.execute_batch(
-                "CREATE TABLE IF NOT EXISTS cards (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                code TEXT,
-                set_id TEXT,
-                type TEXT,
-                rarity TEXT,
-                energy INTEGER,
-                might INTEGER,
-                image_url TEXT,
-                domains TEXT,
-                artists TEXT,
-                text TEXT
-            )",
-            )?;
-
-            for card in &cards {
-                let collector_number: Option<String> =
-                    card.collector_number.as_ref().and_then(|v| {
-                        if v.is_null() {
-                            None
-                        } else if let Some(s) = v.as_str() {
-                            Some(s.to_string())
-                        } else {
-                            Some(v.to_string())
-                        }
-                    });
-
-                let domains = card.domain_ids.as_deref().unwrap_or(&[]).join(",");
-                let artists = card.artists.as_deref().unwrap_or(&[]).join(",");
-
-                tx.execute(
-                    "INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    params![
-                        card.id.as_deref(),
-                        card.name.as_deref(),
-                        collector_number.as_deref(),
-                        card.set.as_deref(),
-                        card.card_type.as_deref(),
-                        card.rarity.as_deref(),
-                        card.energy.as_deref(),
-                        card.might.as_deref(),
-                        card.image_url.as_deref(),
-                        domains.as_str(),
-                        artists.as_str(),
-                        card.ability_html.as_deref(),
-                    ],
-                )?;
-            }
-
-            tx.commit()?;
-            Ok(true)
-        })
-        .await
-        .map_err(|e| eyre::eyre!("update_backend task panicked: {e}"))?
+        let target = PathBuf::from(&self.db_path);
+        if crate::mirror::try_mirrors("riftbound.sqlite", &target, None).await {
+            return Ok(true);
+        }
+        build_riftbound_db(&self.db_path).await?;
+        Ok(true)
     }
 }

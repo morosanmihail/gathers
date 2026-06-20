@@ -2,7 +2,9 @@ use eyre::{Result, WrapErr};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use crate::systems::pokemon::scraper::common::{format_exp_number, format_id, normalize_set_name, pull_variants};
+use crate::systems::pokemon::scraper::common::{
+    format_exp_number, format_id, normalize_set_name, pull_variants,
+};
 use crate::systems::pokemon::scraper::models::{Card, Expansion, TcgpCode, TcgpSet};
 
 const TCGP_API: &str = "https://mp-search-api.tcgplayer.com/v1/search/request";
@@ -63,7 +65,10 @@ pub async fn get_tcgp_codes(client: &reqwest::Client) -> Result<Vec<TcgpCode>> {
     Ok(resp
         .results
         .into_iter()
-        .map(|e| TcgpCode { name: e.name, code: e.code })
+        .map(|e| TcgpCode {
+            name: e.name,
+            code: e.code,
+        })
         .collect())
 }
 

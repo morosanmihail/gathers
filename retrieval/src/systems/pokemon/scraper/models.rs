@@ -67,4 +67,3 @@ pub struct TcgpCode {
     pub name: String,
     pub code: String,
 }
-

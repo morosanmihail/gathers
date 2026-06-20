@@ -26,7 +26,10 @@ pub(super) fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardP
             .entry(uuid)
             .or_default()
             .entry(retailer)
-            .or_insert(RetailerPrices { normal: None, foil: None });
+            .or_insert(RetailerPrices {
+                normal: None,
+                foil: None,
+            });
         match finish.as_str() {
             "normal" => rp.normal = Some(price),
             "foil" => rp.foil = Some(price),

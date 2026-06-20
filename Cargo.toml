@@ -1,5 +1,5 @@
 [workspace]
-members = ["models", "retrieval", "gathers", "server", "persistence", "benches", "e2e"]
+members = ["models", "retrieval", "gathers", "server", "persistence", "benches", "e2e", "mirror"]
 resolver = "2"
 
 [workspace.package]
@@ -44,6 +44,7 @@ tower-http = { version = "0.6.1", features = [
   "add-extension",
   "trace",
   "cors",
+  "fs",
 ] }
 toml = "0.8"
 tracing = "0.1.44"
