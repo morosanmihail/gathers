@@ -47,7 +47,11 @@ mirrors = ["http://your-mirror-host:5235"]
 
 Configured mirrors are tried first, in order, before falling back to the original source automatically.
 
-A public mirror is already running at [TODO] if you'd rather not host your own.
+A public mirror is already running at https://mirror.gathers.cards if you'd rather not host your own.
+
+```toml
+mirrors = ["http://mirror.gathers.cards"]
+```
 
 # Acknowledgements
 
