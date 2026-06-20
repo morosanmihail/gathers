@@ -2,6 +2,20 @@ use super::*;
 use tempfile::TempDir;
 
 #[test]
+fn test_state_dir_is_sibling_not_nested() {
+    let data_dir = Path::new("/home/app/.local/share/gathers/mirror");
+    let state = state_dir(data_dir);
+    assert_eq!(
+        state,
+        Path::new("/home/app/.local/share/gathers/mirror-state")
+    );
+    assert!(
+        !state.starts_with(data_dir),
+        "state dir must not live under the publicly-served data dir"
+    );
+}
+
+#[test]
 fn test_last_update_for_missing_returns_none() {
     let dir = TempDir::new().unwrap();
     assert!(last_update_for(dir.path(), "AllPrintings.sqlite").is_none());

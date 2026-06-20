@@ -253,6 +253,21 @@ pub fn write_with_sha256(bz2_path: &Path, data_dir: &Path, stem: &str) -> eyre::
     Ok(())
 }
 
+/// Sibling of `data_dir`, holding working state that isn't meant to be
+/// served publicly (currently: the persistent, incrementally-scraped
+/// Pokémon db). Kept outside `data_dir` because `ServeDir` serves
+/// everything under it.
+fn state_dir(data_dir: &Path) -> PathBuf {
+    let name = data_dir
+        .file_name()
+        .map(|n| format!("{}-state", n.to_string_lossy()))
+        .unwrap_or_else(|| "mirror-state".to_string());
+    data_dir
+        .parent()
+        .map(|p| p.join(&name))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
 /// Refreshes all five mirrored components into `data_dir`. Each component
 /// is independent — one failing (e.g. a scraper target changing layout)
 /// doesn't block the others. A component refreshed successfully within
@@ -323,19 +338,38 @@ async fn refresh_pokemon_prices(data_dir: &Path) -> eyre::Result<()> {
     write_with_sha256(&bz2, data_dir, "pokemon_prices.sqlite")
 }
 
+/// Persists its working db at a fixed path across cycles instead of a
+/// fresh tempdir. `build_riftbound_db` fetches the whole card list in one
+/// request and either gets it all or fails outright, so this is lower-risk
+/// than the Pokémon scrape — but the upstream blade index is hardcoded
+/// (`blades[2]`), so a site layout change could silently return a partial
+/// list without erroring. A persistent db means that still only merges in
+/// whatever came back, instead of replacing the full snapshot.
 async fn refresh_riftbound_cards(data_dir: &Path) -> eyre::Result<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let raw = temp_dir.path().join("riftbound.sqlite");
+    let state_dir = state_dir(data_dir);
+    fs::create_dir_all(&state_dir)?;
+    let raw = state_dir.join("riftbound.sqlite");
     crate::systems::riftsqlite::build_riftbound_db(raw.to_str().unwrap()).await?;
+
+    let temp_dir = tempfile::tempdir()?;
     let bz2 = temp_dir.path().join("riftbound.sqlite.bz2");
     compress_bz2(&raw, &bz2)?;
     write_with_sha256(&bz2, data_dir, "riftbound.sqlite")
 }
 
+/// Unlike the other components, this persists its working db at a fixed
+/// path across cycles instead of starting from a fresh tempdir. The
+/// scraper hits many upstream sources and partial failures are routine —
+/// scraping incrementally into a long-lived db means a bad cycle merges
+/// in whatever succeeded and leaves the rest untouched, instead of
+/// publishing a near-empty snapshot. See `pokemon::scrape_to_path`.
 async fn refresh_pokemon_cards(data_dir: &Path) -> eyre::Result<()> {
-    let temp_dir = tempfile::tempdir()?;
-    let raw = temp_dir.path().join("pokemon.sqlite");
+    let state_dir = state_dir(data_dir);
+    fs::create_dir_all(&state_dir)?;
+    let raw = state_dir.join("pokemon.sqlite");
     crate::systems::pokemon::scrape_to_path(raw.to_str().unwrap()).await?;
+
+    let temp_dir = tempfile::tempdir()?;
     let bz2 = temp_dir.path().join("pokemon.sqlite.bz2");
     compress_bz2(&raw, &bz2)?;
     write_with_sha256(&bz2, data_dir, "pokemon.sqlite")

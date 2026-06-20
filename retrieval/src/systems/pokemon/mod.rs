@@ -6,15 +6,22 @@ mod scraper;
 
 pub use prices::download_pokemon_prices;
 
-/// Runs the live Pokémon card scraper, writing a fresh db to `path`. The
-/// only authoritative source for this data — used both as the live
-/// system's fallback when no mirror is configured, and by the mirror
-/// server itself to build the snapshot it publishes.
+/// Runs the live Pokémon card scraper, upserting into the db at `path`
+/// (created if missing). The only authoritative source for this data —
+/// used both as the live system's fallback when no mirror is configured,
+/// and by the mirror server itself to build the snapshot it publishes.
+///
+/// Always incremental (`fresh: false`): the scrape hits many upstream
+/// sources across many requests, and partial failures are routine (a
+/// single set or source erroring just leaves its rows untouched). Wiping
+/// the db first would turn a transient upstream hiccup into data loss —
+/// callers that want a persistent, self-healing db should pass the same
+/// `path` across repeated calls.
 pub(crate) async fn scrape_to_path(path: &str) -> eyre::Result<()> {
     scraper::run(scraper::Options {
         db_path: path.to_string(),
         recent: None,
-        fresh: true,
+        fresh: false,
     })
     .await
 }
