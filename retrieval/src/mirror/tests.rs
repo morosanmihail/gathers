@@ -1,5 +1,128 @@
 use super::*;
+use std::collections::HashMap;
 use tempfile::TempDir;
+
+/// Minimal raw-socket HTTP server for tests: serves a fixed byte response
+/// per exact path, 404 otherwise. Returns the base URL.
+async fn serve_routes(routes: HashMap<String, Vec<u8>>) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = match listener.accept().await {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            let routes = routes.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 1024];
+                let n = match socket.read(&mut buf).await {
+                    Ok(n) => n,
+                    Err(_) => return,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let path = req
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                if let Some(body) = routes.get(&path) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = socket.write_all(header.as_bytes()).await;
+                    let _ = socket.write_all(body).await;
+                } else {
+                    let _ = socket
+                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .await;
+                }
+            });
+        }
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn test_download_bz2_verified_skips_when_local_matches_remote() {
+    let dir = TempDir::new().unwrap();
+    let target = dir.path().join("AllPrintings.sqlite");
+    fs::write(&target, b"OLD DECOMPRESSED CONTENT").unwrap();
+    let sidecar = dir.path().join("AllPrintings.sqlite.bz2.sha256");
+    fs::write(&sidecar, "matching-crc").unwrap();
+
+    // The bz2 route is intentionally left unregistered (404): if the skip
+    // check didn't fire, the download would fail and the test would
+    // catch it via the Err result below.
+    let mut routes = HashMap::new();
+    routes.insert(
+        "/AllPrintings.sqlite.bz2.sha256".to_string(),
+        b"matching-crc".to_vec(),
+    );
+    let base = serve_routes(routes).await;
+
+    let result = download_bz2_verified(
+        &format!("{base}/AllPrintings.sqlite.bz2"),
+        &format!("{base}/AllPrintings.sqlite.bz2.sha256"),
+        "AllPrintings.sqlite.bz2",
+        &target,
+        None,
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "skip path must succeed without hitting the bz2 endpoint"
+    );
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "OLD DECOMPRESSED CONTENT",
+        "target must be untouched when local sidecar matches remote crc"
+    );
+}
+
+#[tokio::test]
+async fn test_download_bz2_verified_downloads_when_crc_differs() {
+    let dir = TempDir::new().unwrap();
+    let target = dir.path().join("AllPrintings.sqlite");
+    fs::write(&target, b"OLD DECOMPRESSED CONTENT").unwrap();
+    let sidecar = dir.path().join("AllPrintings.sqlite.bz2.sha256");
+    fs::write(&sidecar, "stale-crc").unwrap();
+
+    let bz2_path = dir.path().join("new.bz2");
+    let plain_path = dir.path().join("new.txt");
+    fs::write(&plain_path, b"NEW DECOMPRESSED CONTENT").unwrap();
+    compress_bz2(&plain_path, &bz2_path).unwrap();
+    let bz2_bytes = fs::read(&bz2_path).unwrap();
+    let real_crc = calculate_sha256(&bz2_path).unwrap();
+
+    let mut routes = HashMap::new();
+    routes.insert(
+        "/AllPrintings.sqlite.bz2.sha256".to_string(),
+        real_crc.clone().into_bytes(),
+    );
+    routes.insert("/AllPrintings.sqlite.bz2".to_string(), bz2_bytes);
+    let base = serve_routes(routes).await;
+
+    let result = download_bz2_verified(
+        &format!("{base}/AllPrintings.sqlite.bz2"),
+        &format!("{base}/AllPrintings.sqlite.bz2.sha256"),
+        "AllPrintings.sqlite.bz2",
+        &target,
+        None,
+    )
+    .await;
+
+    assert!(result.is_ok());
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "NEW DECOMPRESSED CONTENT"
+    );
+    assert_eq!(fs::read_to_string(&sidecar).unwrap(), real_crc);
+}
 
 #[test]
 fn test_state_dir_is_sibling_not_nested() {

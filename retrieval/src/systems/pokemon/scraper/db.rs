@@ -51,6 +51,20 @@ impl Db {
         find_card_with(&self.conn.lock().unwrap(), exp_name, card_number)
     }
 
+    /// Whether any card for `exp_name` is already saved. Used to skip
+    /// re-scraping a whole set once it has any data, on the assumption
+    /// that a set already in the db (even if stale) doesn't need
+    /// redownloading.
+    pub fn has_set(&self, exp_name: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cards WHERE expName = ?1)",
+            params![exp_name],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+    }
+
     pub fn upsert_card(&self, card: &Card, update_fields: UpdateFields) {
         let variants_json = serde_json::to_string(&card.variants).unwrap_or_default();
 
@@ -176,5 +190,37 @@ impl<T> OptionalExt<T> for rusqlite::Result<T> {
             Err(rusqlite::Error::QueryReturnedNoRows) => None,
             Err(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(card_id: &str, exp_name: &str, exp_card_number: &str) -> Card {
+        Card {
+            card_id: card_id.to_string(),
+            exp_name: exp_name.to_string(),
+            exp_card_number: exp_card_number.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_has_set_false_on_empty_db() {
+        let db = Db::open(":memory:").unwrap();
+        assert!(!db.has_set("Scarlet & Violet"));
+    }
+
+    #[test]
+    fn test_has_set_true_after_upsert() {
+        let db = Db::open(":memory:").unwrap();
+        db.upsert_card(
+            &card("c1", "Scarlet & Violet", "001"),
+            UpdateFields::Serebii,
+        );
+
+        assert!(db.has_set("Scarlet & Violet"));
+        assert!(!db.has_set("Some Other Set"));
     }
 }

@@ -1,7 +1,7 @@
 mod models;
 mod update;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::Arc};
 
 use ::models::{
     Card, CardID, CollectorNumber, Set, SetCode,
@@ -10,12 +10,14 @@ use ::models::{
 use models::SqlCard;
 use rusqlite::{Connection, params};
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::systems::sql_helpers::{
     sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
 };
 use crate::{
-    NamedRetrievalSystem, RetrievalSystemTrait, systems::riftsqlite::update::RiftboundCardFetcher,
+    NamedRetrievalSystem, RetrievalSystemTrait,
+    systems::riftsqlite::update::{RiftboundCardFetcher, SimplifiedCard},
 };
 
 impl NamedRetrievalSystem for RiftboundSQLiteRetrievalSystem {
@@ -40,6 +42,21 @@ impl RiftboundSQLiteRetrievalSystem {
     }
 }
 
+const CREATE_CARDS_TABLE: &str = "CREATE TABLE IF NOT EXISTS cards (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    code TEXT,
+    set_id TEXT,
+    type TEXT,
+    rarity TEXT,
+    energy INTEGER,
+    might INTEGER,
+    image_url TEXT,
+    domains TEXT,
+    artists TEXT,
+    text TEXT
+)";
+
 /// Scrapes the live Riftbound card gallery and writes the `cards` table to
 /// `path`. The only authoritative source for this data — used both as the
 /// live system's fallback when no mirror is configured, and by the mirror
@@ -49,65 +66,81 @@ pub(crate) async fn build_riftbound_db(path: &str) -> eyre::Result<()> {
     tokio::task::spawn_blocking(move || -> eyre::Result<()> {
         let mut fetcher = RiftboundCardFetcher::new()?;
         let cards = fetcher.fetch_all_simplified()?;
-
-        let mut conn = Connection::open(&db_path)?;
-        let tx = conn.transaction()?;
-
-        tx.execute_batch(
-            "CREATE TABLE IF NOT EXISTS cards (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            code TEXT,
-            set_id TEXT,
-            type TEXT,
-            rarity TEXT,
-            energy INTEGER,
-            might INTEGER,
-            image_url TEXT,
-            domains TEXT,
-            artists TEXT,
-            text TEXT
-        )",
-        )?;
-
-        for card in &cards {
-            let collector_number: Option<String> = card.collector_number.as_ref().and_then(|v| {
-                if v.is_null() {
-                    None
-                } else if let Some(s) = v.as_str() {
-                    Some(s.to_string())
-                } else {
-                    Some(v.to_string())
-                }
-            });
-
-            let domains = card.domain_ids.as_deref().unwrap_or(&[]).join(",");
-            let artists = card.artists.as_deref().unwrap_or(&[]).join(",");
-
-            tx.execute(
-                "INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                params![
-                    card.id.as_deref(),
-                    card.name.as_deref(),
-                    collector_number.as_deref(),
-                    card.set.as_deref(),
-                    card.card_type.as_deref(),
-                    card.rarity.as_deref(),
-                    card.energy.as_deref(),
-                    card.might.as_deref(),
-                    card.image_url.as_deref(),
-                    domains.as_str(),
-                    artists.as_str(),
-                    card.ability_html.as_deref(),
-                ],
-            )?;
-        }
-
-        tx.commit()?;
-        Ok(())
+        upsert_riftbound_cards(&db_path, &cards)
     })
     .await
     .map_err(|e| eyre::eyre!("build_riftbound_db task panicked: {e}"))?
+}
+
+/// Inserts `cards` into the db at `db_path`, skipping any card whose set
+/// (`set_id`) already has at least one row — the assumption being that a
+/// set already saved (even if stale) doesn't need redownloading. There's
+/// no per-set fetch for Riftbound (the upstream API returns every card in
+/// one response), so this only saves redundant writes, not requests — but
+/// it does mean a transient upstream issue that silently returns a
+/// partial card list can't clobber sets already known to be complete.
+fn upsert_riftbound_cards(db_path: &str, cards: &[SimplifiedCard]) -> eyre::Result<()> {
+    let mut conn = Connection::open(db_path)?;
+    let tx = conn.transaction()?;
+
+    tx.execute_batch(CREATE_CARDS_TABLE)?;
+
+    let existing_sets: HashSet<String> = {
+        let mut stmt = tx.prepare("SELECT DISTINCT set_id FROM cards WHERE set_id IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.flatten().collect()
+    };
+
+    let mut skipped_sets = HashSet::new();
+    for card in cards {
+        if let Some(set) = &card.set
+            && existing_sets.contains(set)
+        {
+            skipped_sets.insert(set.clone());
+            continue;
+        }
+
+        let collector_number: Option<String> = card.collector_number.as_ref().and_then(|v| {
+            if v.is_null() {
+                None
+            } else if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else {
+                Some(v.to_string())
+            }
+        });
+
+        let domains = card.domain_ids.as_deref().unwrap_or(&[]).join(",");
+        let artists = card.artists.as_deref().unwrap_or(&[]).join(",");
+
+        tx.execute(
+            "INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                card.id.as_deref(),
+                card.name.as_deref(),
+                collector_number.as_deref(),
+                card.set.as_deref(),
+                card.card_type.as_deref(),
+                card.rarity.as_deref(),
+                card.energy.as_deref(),
+                card.might.as_deref(),
+                card.image_url.as_deref(),
+                domains.as_str(),
+                artists.as_str(),
+                card.ability_html.as_deref(),
+            ],
+        )?;
+    }
+
+    if !skipped_sets.is_empty() {
+        info!(
+            count = skipped_sets.len(),
+            "Skipped already-scraped Riftbound sets"
+        );
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
@@ -272,3 +305,6 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod tests;

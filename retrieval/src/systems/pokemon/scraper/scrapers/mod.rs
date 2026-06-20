@@ -46,8 +46,15 @@ pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Re
             .unwrap_or_else(|_| ProgressStyle::default_bar()),
     );
 
+    let mut skipped = 0u64;
     for set in &all_sets {
         pb.set_message(set.name.clone());
+
+        if db.has_set(&set.name) {
+            skipped += 1;
+            pb.inc(1);
+            continue;
+        }
 
         let tcgp_names = tcgp::find_set_from_tcgp(&set.name, &tcgp_sets);
         let tcg_name_json = serde_json::to_string(&tcgp_names).unwrap_or_else(|_| "[]".into());
@@ -63,6 +70,9 @@ pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Re
         pb.inc(1);
     }
     pb.finish_with_message("Done");
+    if skipped > 0 {
+        info!(skipped, "Skipped sets already present in db");
+    }
 
     Ok(())
 }
