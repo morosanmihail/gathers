@@ -30,6 +30,14 @@ jobs:
           push: true
           tags: ghcr.io/morosanmihail/gathers-api:latest
 
+      - name: Build and push Mirror image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.mirror
+          push: true
+          tags: ghcr.io/morosanmihail/gathers-mirror:latest
+
       - name: Build and push Web UI image
         uses: docker/build-push-action@v6
         with:
