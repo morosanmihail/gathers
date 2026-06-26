@@ -166,7 +166,7 @@
 			</div>
 
 			<div class="field">
-				<label class="field-label">Color Identity</label>
+				<span class="field-label">Color Identity</span>
 				<div class="color-chips">
 					{#each colors as c}
 						<button
@@ -200,7 +200,7 @@
 			</div>
 
 			<div class="field">
-				<label class="field-label">Domain</label>
+				<span class="field-label">Domain</span>
 				<div class="checkbox-group">
 					{#each riftboundDomains as d}
 						<label class="chip-checkbox" class:checked={filters.domains.includes(d)}>
@@ -227,7 +227,7 @@
 		<!-- Pokemon: energy types only (rarity filter broken server-side — case mismatch) -->
 		{#if showPoke}
 			<div class="field">
-				<label class="field-label">Energy Type</label>
+				<span class="field-label">Energy Type</span>
 				<div class="checkbox-group">
 					{#each pokemonEnergyTypes as e}
 						<label class="chip-checkbox" class:checked={filters.energyTypes.includes(e)}>

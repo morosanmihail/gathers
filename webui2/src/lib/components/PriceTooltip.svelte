@@ -18,16 +18,18 @@
 	let tooltipStyle = $state('');
 	let hideTimer: ReturnType<typeof setTimeout>;
 
-	async function show(e: MouseEvent) {
+	async function showEl(el: HTMLElement) {
 		clearTimeout(hideTimer);
 		visible = true;
-		position(e.currentTarget as HTMLElement);
+		position(el);
 		if (entries === null && !loading && collection) {
 			loading = true;
 			entries = await getPurchaseHistory(collection, cardId);
 			loading = false;
 		}
 	}
+
+	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
 
 	function hide() {
 		hideTimer = setTimeout(() => { visible = false; }, 120);
@@ -80,12 +82,12 @@
 	}
 </script>
 
-<div class="price-cell" onmouseenter={show} onmouseleave={hide}>
+<div class="price-cell" role="button" tabindex="0" onmouseenter={show} onmouseleave={hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}>
 	{price ?? ''}
 </div>
 
 {#if visible}
-	<div use:portal class="price-tooltip" style={tooltipStyle} onmouseenter={() => clearTimeout(hideTimer)} onmouseleave={hide}>
+	<div use:portal class="price-tooltip" role="tooltip" style={tooltipStyle} onmouseenter={() => clearTimeout(hideTimer)} onmouseleave={hide}>
 		<!-- Market prices -->
 		{#if providerRows.length > 0}
 			<div class="price-tooltip-title">Market prices</div>

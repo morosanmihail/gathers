@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page as appPage } from '$app/state';
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
 	import CardTile from '$lib/components/CardTile.svelte';
 	import CardRow from '$lib/components/CardRow.svelte';
@@ -32,6 +33,29 @@
 	$effect(() => {
 		if (app.collections.length > 0 && !addCollection) {
 			addCollection = app.collections[0].id;
+		}
+	});
+
+	onMount(() => {
+		const params = appPage.url.searchParams;
+		const overrides: Partial<typeof filters> = {};
+		let hasFilter = false;
+
+		const str = (k: string) => params.get(k) ?? '';
+		if (params.has('name'))            { overrides.name = str('name'); hasFilter = true; }
+		if (params.has('set'))             { overrides.setCode = str('set'); hasFilter = true; }
+		if (params.has('artist'))          { overrides.artist = str('artist'); hasFilter = true; }
+		if (params.has('text'))            { overrides.text = str('text'); hasFilter = true; }
+		if (params.has('rarity'))          { overrides.rarity = str('rarity'); hasFilter = true; }
+		if (params.has('collectorNumber')) { overrides.collectorNumber = str('collectorNumber'); hasFilter = true; }
+		if (params.has('colors'))          { overrides.colorIdentities = str('colors').split(',').filter(Boolean); hasFilter = true; }
+		if (params.has('sortBy'))          overrides.sortBy = str('sortBy');
+		if (params.has('sortOrder'))       overrides.sortOrder = str('sortOrder') as 'Asc' | 'Desc';
+		if (params.has('system'))          activeSystem = str('system');
+
+		if (hasFilter) {
+			filters = { ...defaultFilters(), ...overrides };
+			doSearch(1);
 		}
 	});
 

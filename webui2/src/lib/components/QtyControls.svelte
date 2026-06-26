@@ -34,7 +34,7 @@
 	}
 </script>
 
-<div class="qty-controls" onclick={(e) => e.stopPropagation()}>
+<div class="qty-controls" role="presentation" onclick={(e) => e.stopPropagation()}>
 	{#if pending}
 		<!-- Price confirmation row -->
 		<div class="qty-row" style="gap:4px; flex-wrap: nowrap;">
@@ -43,6 +43,7 @@
 			</span>
 			<div style="display:flex; align-items:center; gap:3px;">
 				<span style="color:var(--text2); font-size:0.82rem;">$</span>
+				<!-- svelte-ignore a11y_autofocus -->
 				<input
 					class="input"
 					type="number"

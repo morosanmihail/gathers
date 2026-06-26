@@ -92,7 +92,7 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
-<div class="modal-overlay" onclick={onOverlayClick} role="dialog" aria-modal="true">
+<div class="modal-overlay" onclick={onOverlayClick} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" aria-modal="true" tabindex="-1">
 	<div class="modal">
 		<div class="modal-header">
 			<h3>Search & Add to "{collection}"</h3>

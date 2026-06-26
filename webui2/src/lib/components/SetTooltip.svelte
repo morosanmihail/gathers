@@ -18,11 +18,13 @@
 			: '—'
 	);
 
-	function show(e: MouseEvent) {
+	function showEl(el: HTMLElement) {
 		clearTimeout(hideTimer);
 		visible = true;
-		position(e.currentTarget as HTMLElement);
+		position(el);
 	}
+
+	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
 
 	function hide() {
 		hideTimer = setTimeout(() => { visible = false; }, 120);
@@ -43,7 +45,7 @@
 	}
 </script>
 
-<span class="set-code-trigger" onmouseenter={show} onmouseleave={hide}>
+<span class="set-code-trigger" role="button" tabindex="0" onmouseenter={show} onmouseleave={hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}>
 	{setCode ? setCode.toUpperCase() : '—'}
 </span>
 

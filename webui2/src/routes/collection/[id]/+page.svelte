@@ -224,6 +224,8 @@
 		{#if collectionValue != null}
 			<span
 				class="page-subtitle"
+				role="status"
+				aria-label="Collection value"
 				style="color: var(--accent-text); margin-left: auto; position: relative; cursor: default;"
 				onmouseenter={() => valueHover = true}
 				onmouseleave={() => valueHover = false}
@@ -275,6 +277,7 @@
 			<div class="card-list">
 				<div class="card-list-header">
 					{#each listHeaders as h}
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 						<div
 							class="card-list-col"
 							class:active={h.field !== '' && sortBy === h.field}

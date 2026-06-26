@@ -228,6 +228,7 @@
 	<!-- Rename collection -->
 	{#if renaming}
 		<form style="display:flex; gap:6px; align-items:center;" onsubmit={handleRename}>
+			<!-- svelte-ignore a11y_autofocus -->
 			<input
 				class="input"
 				style="height:34px; padding:4px 10px; width:160px;"

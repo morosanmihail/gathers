@@ -175,6 +175,7 @@
 				<div class="tab-divider"></div>
 				{#if addColOpen}
 					<form class="add-collection-form" onsubmit={handleAddCollection}>
+						<!-- svelte-ignore a11y_autofocus -->
 						<input
 							class="input"
 							style="width: 160px; height: 28px; padding: 3px 8px; font-size: 0.82rem;"

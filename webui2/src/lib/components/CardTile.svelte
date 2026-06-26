@@ -28,12 +28,12 @@
 		? col.foilQuantity > 0 ? `${col.quantity} + ${col.foilQuantity}✦` : `${col.quantity}`
 		: null);
 
-	// Initialise from sync cache to skip placeholder flash for already-seen images.
-	// Effect then upgrades to blob URL (Scryfall) or confirms the direct URL.
-	let imgUrl = $state(syncCachedImageUrl(cardImageUrl(card as CollectionCard)));
+	let imgUrl = $state('');
 	$effect(() => {
 		const raw = rawImgUrl;
 		if (!raw) { imgUrl = ''; return; }
+		const cached = syncCachedImageUrl(raw);
+		if (cached) imgUrl = cached;
 		cachedImageUrl(raw).then(u => { if (imgUrl !== u) imgUrl = u; });
 	});
 
@@ -100,7 +100,7 @@
 			{/if}
 		</div>
 		{#if price != null || cardPrices}
-			<div class="card-tile-meta" onclick={(e) => e.stopPropagation()}>
+			<div class="card-tile-meta" role="presentation" onclick={(e) => e.stopPropagation()}>
 				<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
 			</div>
 		{/if}

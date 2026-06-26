@@ -24,12 +24,14 @@
 		}
 	});
 
-	function show(e: MouseEvent) {
+	function showEl(el: HTMLElement) {
 		clearTimeout(hideTimer);
 		if (!rawUrl) return;
 		visible = true;
-		position(e.currentTarget as HTMLElement);
+		position(el);
 	}
+
+	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
 
 	function hide() {
 		hideTimer = setTimeout(() => { visible = false; }, 80);
@@ -53,8 +55,11 @@
 
 <span
 	class="card-img-trigger"
+	role="button"
+	tabindex="0"
 	onmouseenter={show}
 	onmouseleave={hide}
+	onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}
 >
 	{card.name}
 </span>

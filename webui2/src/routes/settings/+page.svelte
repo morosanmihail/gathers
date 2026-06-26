@@ -171,8 +171,9 @@
 					Server
 				</div>
 				<div style="padding: 16px;">
-					<label class="field-label">Port</label>
+					<label class="field-label" for="settings-port">Port</label>
 					<input
+						id="settings-port"
 						type="number"
 						class="input"
 						style="max-width: 120px;"
@@ -217,8 +218,9 @@
 				<div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
 					{#each PATH_FIELDS as { key, label }}
 						<div>
-							<label class="field-label">{label}</label>
+							<label class="field-label" for="settings-path-{key}">{label}</label>
 							<input
+								id="settings-path-{key}"
 								type="text"
 								class="input mono"
 								value={(config as Record<string, unknown>)[key] as string ?? ''}

@@ -63,8 +63,8 @@
 		<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
 		<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
 	{:else}
-		<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
 		<div class="card-row-cell card-row-name"><CardImageTooltip {card} /></div>
+		<div class="card-row-cell card-row-set mono"><SetTooltip setCode={card.setCode} /></div>
 	{/if}
 	<div class="card-row-cell card-row-rarity">
 		{#if card.rarity}<span class={rarityClass(card.rarity)}>{collectionMode ? card.rarity : card.rarity[0].toUpperCase()}</span>{:else}—{/if}
@@ -78,7 +78,7 @@
 			<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
 		</div>
 		<!-- Qty + foil columns span both cells when editing price -->
-		<div class="card-row-cell" style="padding: 2px 4px; grid-column: span 2;" onclick={(e) => e.stopPropagation()}>
+		<div class="card-row-cell" role="presentation" style="padding: 2px 4px; grid-column: span 2;" onclick={(e) => e.stopPropagation()}>
 			{#if onAdjust}
 				<QtyControls
 					quantity={col.quantity ?? 0}
@@ -97,19 +97,19 @@
 		<div class="card-row-cell" style="padding:0 8px;">
 			<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
 		</div>
-		<div class="card-row-cell" style="display:flex;gap:6px;" onclick={(e) => e.stopPropagation()}>
+		<div class="card-row-cell" style="display:flex;gap:6px;">
 			{#if onAdd}
 				<button
 					class="btn btn-sm btn-accent"
 					title="Add to collection"
-					onclick={() => onAdd(card)}
+					onclick={(e) => { e.stopPropagation(); onAdd(card); }}
 				>+</button>
 			{/if}
 			{#if onAddFoil}
 				<button
 					class="btn btn-sm btn-ghost"
 					title="Add as foil"
-					onclick={() => onAddFoil(card)}
+					onclick={(e) => { e.stopPropagation(); onAddFoil(card); }}
 				>+✦</button>
 			{/if}
 		</div>

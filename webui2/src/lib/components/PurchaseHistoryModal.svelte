@@ -105,7 +105,7 @@
 	}
 </script>
 
-<div class="modal-overlay" onclick={(e) => e.target === e.currentTarget && onclose()} role="dialog" aria-modal="true">
+<div class="modal-overlay" onclick={(e) => e.target === e.currentTarget && onclose()} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" aria-modal="true" tabindex="-1">
 	<div class="modal" style="max-width: 860px;">
 		<div class="modal-header">
 			<h3>Purchase History — {collection}</h3>
