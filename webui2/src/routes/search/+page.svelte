@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page as appPage } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
 	import CardTile from '$lib/components/CardTile.svelte';
 	import CardRow from '$lib/components/CardRow.svelte';
@@ -55,7 +56,8 @@
 
 		if (hasFilter) {
 			filters = { ...defaultFilters(), ...overrides };
-			doSearch(1);
+			const p = params.has('page') ? Math.max(1, parseInt(params.get('page')!) || 1) : 1;
+			doSearch(p);
 		}
 	});
 
@@ -67,7 +69,25 @@
 		filters = defaultFilters();
 	}
 
+	function buildSearchUrl(p: number): string {
+		const params = new URLSearchParams();
+		if (filters.name)                    params.set('name', filters.name);
+		if (filters.setCode)                 params.set('set', filters.setCode);
+		if (filters.artist)                  params.set('artist', filters.artist);
+		if (filters.text)                    params.set('text', filters.text);
+		if (filters.rarity)                  params.set('rarity', filters.rarity);
+		if (filters.collectorNumber)         params.set('collectorNumber', filters.collectorNumber);
+		if (filters.colorIdentities.length)  params.set('colors', filters.colorIdentities.join(','));
+		if (filters.sortBy !== 'Name')       params.set('sortBy', filters.sortBy);
+		if (filters.sortOrder !== 'Asc')     params.set('sortOrder', filters.sortOrder);
+		if (activeSystem)                    params.set('system', activeSystem);
+		if (p > 1)                           params.set('page', String(p));
+		const qs = params.toString();
+		return qs ? `?${qs}` : '/search';
+	}
+
 	async function doSearch(p = 1) {
+		replaceState(buildSearchUrl(p), {});
 		loading = true;
 		page = p;
 		try {
