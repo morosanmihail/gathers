@@ -167,7 +167,7 @@ img { display: block; max-width: 100%; height: auto; }
   gap: 8px;
   flex-shrink: 0;
 }
-.brand-icon { color: var(--gold); font-size: 1.1em; }
+.brand-icon { color: var(--gold); font-size: 1.1em; width: 1.4em; height: 1.4em; object-fit: contain; vertical-align: middle; }
 
 .nav-links {
   display: flex;
@@ -277,6 +277,16 @@ img { display: block; max-width: 100%; height: auto; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.hero-logo {
+  width: 1em;
+  height: 1em;
+  object-fit: contain;
+  flex-shrink: 0;
+  -webkit-text-fill-color: initial;
 }
 .hero-sub {
   max-width: 620px;
