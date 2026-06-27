@@ -65,11 +65,11 @@
     <div class="hero-screenshot-wrap">
       <div class="mock-browser">
         <div class="browser-bar">
-		<span class="browser-url"><a href="https://demo.gathers.cards/">https://demo.gathers.cards/</a></span>
+		<span class="browser-url"><a href="https://demo-new.gathers.cards/">https://demo-new.gathers.cards/</a></span>
           <span class="dot dot-g"></span><span class="dot dot-y"></span><span class="dot dot-r"></span>
         </div>
         <img
-          src="images/webui1.png"
+          src="images/webui2/collection1.png"
           alt="GatheRs Web UI — card search interface"
           class="browser-img"
         />
@@ -148,7 +148,7 @@
   <section class="section section-alt" id="webui">
     <div class="container">
       <div class="section-header">
-        <h2>React Web UI</h2>
+      <h2>Web UI</h2>
         <p>A full-featured browser app that works alongside the local server. No cloud account needed. Unless you self-host and put some login in front of it. Again, I will not stop you. You do you queen / king / royalty!</p>
       </div>
       <div class="showcase-tabs">
@@ -163,7 +163,7 @@
         <div class="tab-panel active" id="tab-search">
           <div class="showcase-row">
             <div class="showcase-img-wrap">
-              <img src="images/mtgsearch1.png" alt="Magic: The Gathering search interface" class="showcase-img" />
+              <img src="images/webui2/search1.png" alt="Magic: The Gathering search interface" class="showcase-img" />
             </div>
           </div>
         </div>
@@ -171,7 +171,7 @@
         <div class="tab-panel" id="tab-collection">
           <div class="showcase-row">
             <div class="showcase-img-wrap">
-              <img src="images/webui1.png" alt="Collection browser interface" class="showcase-img" />
+              <img src="images/webui2/collection1.png" alt="Collection browser interface" class="showcase-img" />
             </div>
           </div>
         </div>
@@ -195,7 +195,7 @@
         <div class="tab-panel" id="tab-listview">
           <div class="showcase-row">
             <div class="showcase-img-wrap">
-              <img src="images/listview1.png" alt="List view interface" class="showcase-img" />
+              <img src="images/webui2/collection2.png" alt="List view interface" class="showcase-img" />
             </div>
           </div>
         </div>
@@ -479,6 +479,13 @@ cd gathers</code>
       - "5234:5234"
     volumes:
       - gathers-data:/home/app/.local/share/gathers/:rw
+    configs:
+      # This will mean gatheRs attempts to download from the gatheRs servers 
+      # first, before attempting to download from other sources and use up 
+      # their bandwidth. Optional.
+      # You can also host your own mirror, see repo docker-compose.yml for info.
+      - source: gathers-mirrors
+        target: /home/app/.local/share/gathers/mirrors.toml
     environment:
       # Comma-separated list of systems to enable.
       # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
@@ -491,19 +498,24 @@ cd gathers</code>
       - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
     restart: unless-stopped
 
-  gathers-webui:
-    image: ghcr.io/morosanmihail/gathers-webui:latest
+  gathers-webui2:
+    image: ghcr.io/morosanmihail/gathers-webui2:latest
     ports:
-      - "3000:3000"
+      - "3000:3001"
     depends_on:
       - gathers-api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+configs:
+  gathers-mirrors:
+    content: |
+      mirrors = ["https://mirror.gathers.cards"]
 
 volumes:
   gathers-data:</code>
