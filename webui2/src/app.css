@@ -505,6 +505,11 @@ label.field-label {
 	grid-template-columns: 32px 70px 1fr 36px 80px 100px;
 }
 
+.card-list-results .card-list-header,
+.card-list-results .card-row {
+	grid-template-columns: 32px 1fr 110px 90px 110px 140px;
+}
+
 .card-row-name { font-weight: 600; }
 .card-row-set { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text2); }
 .card-row-rarity { color: var(--text2); font-size: 0.8rem; }

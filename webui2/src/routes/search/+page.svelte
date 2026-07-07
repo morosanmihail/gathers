@@ -1,23 +1,25 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page as appPage } from '$app/state';
+	import { afterNavigate } from '$app/navigation';
 	import { replaceState } from '$app/navigation';
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
 	import CardTile from '$lib/components/CardTile.svelte';
 	import CardRow from '$lib/components/CardRow.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters } from '$lib/types';
-	import type { AnyCard, CollectionCard } from '$lib/types';
+	import { defaultFilters, bestPrice } from '$lib/types';
+	import type { AnyCard, CollectionCard, CardPrices } from '$lib/types';
 
 	let filters = $state(defaultFilters());
 	let results = $state<AnyCard[]>([]);
+	let prices = $state<Record<string, CardPrices>>({});
 	let loading = $state(false);
 	let page = $state(1);
 	let total = $state(0);
 	let searched = $state(false);
 	let activeSystem = $state('');
+	let appliedQS = $state('');
 
 	let addTarget = $state<AnyCard | null>(null);
 	let addCollection = $state('');
@@ -37,8 +39,8 @@
 		}
 	});
 
-	onMount(() => {
-		const params = appPage.url.searchParams;
+	function applyParamsAndSearch(qs: string) {
+		const params = new URLSearchParams(qs);
 		const overrides: Partial<typeof filters> = {};
 		let hasFilter = false;
 
@@ -59,12 +61,25 @@
 			const p = params.has('page') ? Math.max(1, parseInt(params.get('page')!) || 1) : 1;
 			doSearch(p);
 		}
+	}
+
+	// afterNavigate fires once the router has finished initializing — for the
+	// initial load, and again for any later navigation to /search?... while
+	// already on this route (SvelteKit reuses the component, so onMount alone
+	// would only ever catch the first load; replaceState throws if called
+	// before the router is ready, which rules out a plain $effect/onMount).
+	afterNavigate(() => {
+		const qs = appPage.url.search;
+		if (qs === appliedQS) return;
+		appliedQS = qs;
+		applyParamsAndSearch(qs);
 	});
 
 	function handleSystemChange(sys: string) {
 		activeSystem = sys;
 		// Reset results when switching system
 		results = [];
+		prices = {};
 		searched = false;
 		filters = defaultFilters();
 	}
@@ -87,7 +102,10 @@
 	}
 
 	async function doSearch(p = 1) {
-		replaceState(buildSearchUrl(p), {});
+		const url = buildSearchUrl(p);
+		const qIdx = url.indexOf('?');
+		appliedQS = qIdx >= 0 ? url.slice(qIdx) : '';
+		replaceState(url, {});
 		loading = true;
 		page = p;
 		try {
@@ -102,6 +120,12 @@
 			results = data;
 			if (p === 1) total = data.length >= PAGE_SIZE ? PAGE_SIZE * 99 : data.length;
 			searched = true;
+
+			if (app.pricingEnabled && activeSystem !== 'RiftboundSQLite' && data.length) {
+				const ids = data.map(c => c.id);
+				const fetchPrices = activeSystem === 'PokemonSQLite' ? getPokemonPrices : getMtgPrices;
+				fetchPrices(ids).then(result => { prices = { ...prices, ...result }; });
+			}
 		} catch (e) {
 			console.error(e);
 		} finally {
@@ -182,25 +206,27 @@
 						{#each results as card (card.id)}
 							<CardTile
 								{card}
+								price={bestPrice(prices[card.id])}
+								cardPrices={prices[card.id]}
 								onAdd={app.collectionsEnabled ? promptAdd : undefined}
 							/>
 						{/each}
 					</div>
 				{:else}
-					<div class="card-list">
+					<div class="card-list card-list-results">
 						<div class="card-list-header">
 							<div class="card-list-col"></div>
 							<div class="card-list-col">Name</div>
 							<div class="card-list-col">Set</div>
 							<div class="card-list-col">Rarity</div>
-							<div class="card-list-col">Artist</div>
-							<div class="card-list-col">Text</div>
-							<div class="card-list-col"></div>
+							<div class="card-list-col">Price</div>
 							<div class="card-list-col"></div>
 						</div>
 						{#each results as card (card.id)}
 							<CardRow
 								{card}
+								price={bestPrice(prices[card.id])}
+								cardPrices={prices[card.id]}
 								onAdd={app.collectionsEnabled ? promptAdd : undefined}
 							/>
 						{/each}
