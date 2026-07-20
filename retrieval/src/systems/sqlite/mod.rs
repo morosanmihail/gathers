@@ -10,7 +10,7 @@ use ::models::{
     Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
     filters::{CardSearchFilters, SortField},
 };
-use models::SqlCard;
+use models::{LEGALITY_FORMATS, SqlCard};
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -97,6 +97,27 @@ impl MagicSQLiteRetrievalSystem {
     }
 }
 
+/// `SELECT ... FROM ...` clause shared by `search_cards` and `get_cards_by_ids`, kept in
+/// sync with the column names `SqlCard::from_row` reads by name.
+fn select_base() -> String {
+    let legality_cols: String = LEGALITY_FORMATS
+        .iter()
+        .map(|f| format!("l.{f}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, \
+         b.scryfallId, a.number, a.subtypes, a.supertypes, a.types, a.manaCost, a.manaValue, \
+         a.type, a.power, a.toughness, a.loyalty, a.defense, a.keywords, a.colors, a.finishes, \
+         a.isReserved, a.isPromo, a.isReprint, a.borderColor, a.frameEffects, a.isFullArt, \
+         a.watermark, a.flavorText, s.name AS set_name, {legality_cols} \
+         FROM cards as a \
+         JOIN cardIdentifiers as b ON a.uuid = b.uuid \
+         LEFT JOIN sets as s ON s.code = a.setCode \
+         LEFT JOIN cardLegalities as l ON l.uuid = a.uuid"
+    )
+}
+
 impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     async fn search_cards(
         &self,
@@ -127,11 +148,11 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         }
         let use_fts = !fts_parts.is_empty();
 
-        let base = "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, b.scryfallId, a.number, a.subtypes, a.supertypes, a.types FROM cards as a JOIN cardIdentifiers as b ON a.uuid = b.uuid";
+        let base = select_base();
         let mut query = if use_fts {
             format!("{base} JOIN cards_fts ON cards_fts.rowid = a.rowid")
         } else {
-            base.to_string()
+            base
         };
 
         let mut conditions = Vec::new();
@@ -195,6 +216,104 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                 i += 1;
             }
         }
+        if let Some(min) = filters.mana_value_min {
+            conditions.push(format!("a.manaValue >= ?{i}"));
+            params.push(min.to_string());
+            i += 1;
+        }
+        if let Some(max) = filters.mana_value_max {
+            conditions.push(format!("a.manaValue <= ?{i}"));
+            params.push(max.to_string());
+            i += 1;
+        }
+        if let Some(colors) = &filters.colors {
+            for colour in colors {
+                conditions.push(format!("a.colors LIKE ?{i}"));
+                params.push(format!("%{colour}%"));
+                i += 1;
+            }
+        }
+        if let Some(keywords) = &filters.keywords
+            && !keywords.is_empty()
+        {
+            for k in keywords {
+                conditions.push(format!("a.keywords LIKE ?{i}"));
+                params.push(format!("%{k}%"));
+                i += 1;
+            }
+        }
+        if let Some(power) = &filters.power
+            && !power.is_empty()
+        {
+            conditions.push(format!("a.power = ?{i}"));
+            params.push(power.to_string());
+            i += 1;
+        }
+        if let Some(toughness) = &filters.toughness
+            && !toughness.is_empty()
+        {
+            conditions.push(format!("a.toughness = ?{i}"));
+            params.push(toughness.to_string());
+            i += 1;
+        }
+        if let Some(loyalty) = &filters.loyalty
+            && !loyalty.is_empty()
+        {
+            conditions.push(format!("a.loyalty = ?{i}"));
+            params.push(loyalty.to_string());
+            i += 1;
+        }
+        if let Some(defense) = &filters.defense
+            && !defense.is_empty()
+        {
+            conditions.push(format!("a.defense = ?{i}"));
+            params.push(defense.to_string());
+            i += 1;
+        }
+        if let Some(is_reserved) = filters.is_reserved {
+            conditions.push(if is_reserved {
+                "a.isReserved = 1".to_string()
+            } else {
+                "(a.isReserved IS NULL OR a.isReserved = 0)".to_string()
+            });
+        }
+        if let Some(is_promo) = filters.is_promo {
+            conditions.push(if is_promo {
+                "a.isPromo = 1".to_string()
+            } else {
+                "(a.isPromo IS NULL OR a.isPromo = 0)".to_string()
+            });
+        }
+        if let Some(is_reprint) = filters.is_reprint {
+            conditions.push(if is_reprint {
+                "a.isReprint = 1".to_string()
+            } else {
+                "(a.isReprint IS NULL OR a.isReprint = 0)".to_string()
+            });
+        }
+        if let Some(is_full_art) = filters.is_full_art {
+            conditions.push(if is_full_art {
+                "a.isFullArt = 1".to_string()
+            } else {
+                "(a.isFullArt IS NULL OR a.isFullArt = 0)".to_string()
+            });
+        }
+        if let Some(border_color) = &filters.border_color
+            && !border_color.is_empty()
+        {
+            conditions.push(format!("a.borderColor = ?{i} COLLATE NOCASE"));
+            params.push(border_color.to_string());
+            i += 1;
+        }
+        // Format name is interpolated directly into the column reference, so it must be
+        // whitelisted against known `cardLegalities` columns to avoid SQL injection.
+        if let Some(legal_in) = &filters.legal_in {
+            let format = legal_in.to_lowercase();
+            if LEGALITY_FORMATS.contains(&format.as_str()) {
+                conditions.push(format!("l.{format} = ?{i}"));
+                params.push("Legal".to_string());
+            }
+        }
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&conditions.join(" AND "));
@@ -224,10 +343,8 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             return Ok(HashMap::new());
         }
         let conn = self.connection.lock().await;
-        let query = format!(
-            "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, b.scryfallId, a.number, a.subtypes, a.supertypes, a.types FROM cards as a JOIN cardIdentifiers as b ON a.uuid = b.uuid WHERE a.uuid IN ({})",
-            sql_placeholders(ids.len())
-        );
+        let base = select_base();
+        let query = format!("{base} WHERE a.uuid IN ({})", sql_placeholders(ids.len()));
         let mut stmt = conn.prepare(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
         Ok(iter

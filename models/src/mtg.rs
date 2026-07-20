@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,29 @@ pub struct MagicCard {
     pub subtypes: Vec<String>,
     pub supertypes: Vec<String>,
     pub types: Vec<String>,
+    pub mana_cost: String,
+    pub mana_value: f64,
+    /// Full type line, e.g. "Legendary Artifact Creature — Autobot".
+    pub type_line: String,
+    pub power: Option<String>,
+    pub toughness: Option<String>,
+    pub loyalty: Option<String>,
+    pub defense: Option<String>,
+    pub keywords: Vec<String>,
+    /// Colours actually printed on the card (as opposed to `color_identity`).
+    pub colors: Vec<CardColour>,
+    /// Format name -> legality status (e.g. "modern" -> "Legal").
+    pub legalities: HashMap<String, String>,
+    pub finishes: Vec<String>,
+    pub is_reserved: bool,
+    pub is_promo: bool,
+    pub is_reprint: bool,
+    pub border_color: String,
+    pub frame_effects: Vec<String>,
+    pub is_full_art: bool,
+    pub watermark: Option<String>,
+    pub flavor_text: Option<String>,
+    pub set_name: String,
 }
 
 impl CardTrait for MagicCard {
@@ -76,6 +100,26 @@ impl Default for MagicCard {
             subtypes: vec![],
             supertypes: vec![],
             types: vec![],
+            mana_cost: "".to_string(),
+            mana_value: 0.0,
+            type_line: "".to_string(),
+            power: None,
+            toughness: None,
+            loyalty: None,
+            defense: None,
+            keywords: vec![],
+            colors: vec![],
+            legalities: HashMap::new(),
+            finishes: vec![],
+            is_reserved: false,
+            is_promo: false,
+            is_reprint: false,
+            border_color: "".to_string(),
+            frame_effects: vec![],
+            is_full_art: false,
+            watermark: None,
+            flavor_text: None,
+            set_name: "".to_string(),
         }
     }
 }
@@ -240,7 +284,13 @@ mod tests {
 
     #[test]
     fn test_rarity_display_roundtrip_via_from() {
-        for r in [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Mythic, Rarity::Special] {
+        for r in [
+            Rarity::Common,
+            Rarity::Uncommon,
+            Rarity::Rare,
+            Rarity::Mythic,
+            Rarity::Special,
+        ] {
             assert_eq!(Rarity::from(r.to_string()), r);
         }
     }

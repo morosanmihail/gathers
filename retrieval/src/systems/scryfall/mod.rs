@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use eyre::OptionExt;
 use models::{
-    Card, CardID, CardIdentifiers, CollectorNumber, SetCode, filters::{CardSearchFilters, SortField, SortOrder},
+    Card, CardID, CardIdentifiers, CollectorNumber, SetCode,
+    filters::{CardSearchFilters, SortField, SortOrder},
 };
 use serde_json::Value;
 
@@ -80,7 +81,11 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
             Some(SortField::Artist) => "artist",
             _ => "name",
         };
-        let dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) { "desc" } else { "asc" };
+        let dir = if matches!(&filters.sort_order, Some(SortOrder::Desc)) {
+            "desc"
+        } else {
+            "asc"
+        };
         let include_extras = false;
 
         let url = format!(
@@ -170,6 +175,66 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
                     subtypes,
                     supertypes,
                     types,
+                    mana_cost: card
+                        .get("mana_cost")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    mana_value: card.get("cmc").and_then(Value::as_f64).unwrap_or_default(),
+                    type_line: type_line.to_string(),
+                    power: card.get("power").and_then(Value::as_str).map(String::from),
+                    toughness: card
+                        .get("toughness")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    loyalty: card
+                        .get("loyalty")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    defense: card
+                        .get("defense")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    keywords: parsing::parse_string_array(card.get("keywords")),
+                    colors: parsing::parse_color_identity(
+                        card.get("colors")
+                            .and_then(Value::as_array)
+                            .unwrap_or(&vec![]),
+                    ),
+                    legalities: parsing::parse_legalities(card.get("legalities")),
+                    finishes: parsing::parse_string_array(card.get("finishes")),
+                    is_reserved: card
+                        .get("reserved")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    is_promo: card.get("promo").and_then(Value::as_bool).unwrap_or(false),
+                    is_reprint: card
+                        .get("reprint")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    border_color: card
+                        .get("border_color")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    frame_effects: parsing::parse_string_array(card.get("frame_effects")),
+                    is_full_art: card
+                        .get("full_art")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    watermark: card
+                        .get("watermark")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    flavor_text: card
+                        .get("flavor_text")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    set_name: card
+                        .get("set_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                 }))
             })
             .collect::<Vec<Card>>();
@@ -246,6 +311,70 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
                 subtypes: vec![],
                 supertypes: vec![],
                 types: vec![],
+                mana_cost: json
+                    .get("mana_cost")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                mana_value: json.get("cmc").and_then(Value::as_f64).unwrap_or_default(),
+                type_line: json
+                    .get("type_line")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                power: json.get("power").and_then(Value::as_str).map(String::from),
+                toughness: json
+                    .get("toughness")
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                loyalty: json
+                    .get("loyalty")
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                defense: json
+                    .get("defense")
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                keywords: parsing::parse_string_array(json.get("keywords")),
+                colors: parsing::parse_color_identity(
+                    json.get("colors")
+                        .and_then(Value::as_array)
+                        .unwrap_or(&vec![]),
+                ),
+                legalities: parsing::parse_legalities(json.get("legalities")),
+                finishes: parsing::parse_string_array(json.get("finishes")),
+                is_reserved: json
+                    .get("reserved")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                is_promo: json.get("promo").and_then(Value::as_bool).unwrap_or(false),
+                is_reprint: json
+                    .get("reprint")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                border_color: json
+                    .get("border_color")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                frame_effects: parsing::parse_string_array(json.get("frame_effects")),
+                is_full_art: json
+                    .get("full_art")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                watermark: json
+                    .get("watermark")
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                flavor_text: json
+                    .get("flavor_text")
+                    .and_then(Value::as_str)
+                    .map(String::from),
+                set_name: json
+                    .get("set_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
             };
 
             result.insert(id, models::Card::Magic(card));

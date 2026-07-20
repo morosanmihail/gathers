@@ -35,6 +35,42 @@ pub struct CardSearchFilters {
     pub subtypes: Option<Vec<String>>,
     pub supertypes: Option<String>,
     pub types: Option<Vec<String>>,
+    /// MTG-only: minimum mana value (converted mana cost), inclusive.
+    #[serde(alias = "manaValueMin")]
+    pub mana_value_min: Option<f64>,
+    /// MTG-only: maximum mana value (converted mana cost), inclusive.
+    #[serde(alias = "manaValueMax")]
+    pub mana_value_max: Option<f64>,
+    /// MTG-only: colours actually printed on the card (vs. `color_identities`).
+    pub colors: Option<Vec<CardColour>>,
+    /// MTG-only: one or more keyword abilities (e.g. "Flying").
+    pub keywords: Option<Vec<String>>,
+    /// MTG-only: exact power match.
+    pub power: Option<String>,
+    /// MTG-only: exact toughness match.
+    pub toughness: Option<String>,
+    /// MTG-only: exact loyalty match.
+    pub loyalty: Option<String>,
+    /// MTG-only: exact defense match (battles).
+    pub defense: Option<String>,
+    /// MTG-only: filter to cards on the Reserved List.
+    #[serde(alias = "isReserved")]
+    pub is_reserved: Option<bool>,
+    /// MTG-only: filter to promotional printings.
+    #[serde(alias = "isPromo")]
+    pub is_promo: Option<bool>,
+    /// MTG-only: filter to reprints.
+    #[serde(alias = "isReprint")]
+    pub is_reprint: Option<bool>,
+    /// MTG-only: filter to full-art printings.
+    #[serde(alias = "isFullArt")]
+    pub is_full_art: Option<bool>,
+    /// MTG-only: border colour (e.g. "black", "borderless").
+    #[serde(alias = "borderColor")]
+    pub border_color: Option<String>,
+    /// MTG-only: format name (e.g. "modern") the card must be Legal in.
+    #[serde(alias = "legalIn")]
+    pub legal_in: Option<String>,
     /// Riftbound-only: filter by one or more card domains.
     pub domains: Option<Vec<CardDomain>>,
     /// Pokemon-only: filter by one or more energy types.
@@ -98,6 +134,76 @@ impl CardSearchFilters {
 
     pub fn with_types(mut self, types: Vec<String>) -> Self {
         self.types = Some(types);
+        self
+    }
+
+    pub fn with_mana_value_min(mut self, mana_value_min: f64) -> Self {
+        self.mana_value_min = Some(mana_value_min);
+        self
+    }
+
+    pub fn with_mana_value_max(mut self, mana_value_max: f64) -> Self {
+        self.mana_value_max = Some(mana_value_max);
+        self
+    }
+
+    pub fn with_colors(mut self, colors: Vec<CardColour>) -> Self {
+        self.colors = Some(colors);
+        self
+    }
+
+    pub fn with_keywords(mut self, keywords: Vec<String>) -> Self {
+        self.keywords = Some(keywords);
+        self
+    }
+
+    pub fn with_power(mut self, power: impl Into<String>) -> Self {
+        self.power = Some(power.into());
+        self
+    }
+
+    pub fn with_toughness(mut self, toughness: impl Into<String>) -> Self {
+        self.toughness = Some(toughness.into());
+        self
+    }
+
+    pub fn with_loyalty(mut self, loyalty: impl Into<String>) -> Self {
+        self.loyalty = Some(loyalty.into());
+        self
+    }
+
+    pub fn with_defense(mut self, defense: impl Into<String>) -> Self {
+        self.defense = Some(defense.into());
+        self
+    }
+
+    pub fn with_is_reserved(mut self, is_reserved: bool) -> Self {
+        self.is_reserved = Some(is_reserved);
+        self
+    }
+
+    pub fn with_is_promo(mut self, is_promo: bool) -> Self {
+        self.is_promo = Some(is_promo);
+        self
+    }
+
+    pub fn with_is_reprint(mut self, is_reprint: bool) -> Self {
+        self.is_reprint = Some(is_reprint);
+        self
+    }
+
+    pub fn with_is_full_art(mut self, is_full_art: bool) -> Self {
+        self.is_full_art = Some(is_full_art);
+        self
+    }
+
+    pub fn with_border_color(mut self, border_color: impl Into<String>) -> Self {
+        self.border_color = Some(border_color.into());
+        self
+    }
+
+    pub fn with_legal_in(mut self, legal_in: impl Into<String>) -> Self {
+        self.legal_in = Some(legal_in.into());
         self
     }
 
@@ -197,6 +303,20 @@ mod tests {
             .with_subtypes(vec!["Instant".to_string()])
             .with_supertypes("Legendary")
             .with_types(vec!["Sorcery".to_string()])
+            .with_mana_value_min(1.0)
+            .with_mana_value_max(3.0)
+            .with_colors(vec![CardColour::Red])
+            .with_keywords(vec!["Flying".to_string()])
+            .with_power("4")
+            .with_toughness("4")
+            .with_loyalty("3")
+            .with_defense("5")
+            .with_is_reserved(true)
+            .with_is_promo(false)
+            .with_is_reprint(true)
+            .with_is_full_art(false)
+            .with_border_color("black")
+            .with_legal_in("modern")
             .with_domains(vec![CardDomain::Fury])
             .with_energy_types(vec![EnergyType::Fire]);
 
@@ -210,8 +330,33 @@ mod tests {
         assert_eq!(filters.subtypes, Some(vec!["Instant".to_string()]));
         assert_eq!(filters.supertypes, Some("Legendary".to_string()));
         assert_eq!(filters.types, Some(vec!["Sorcery".to_string()]));
+        assert_eq!(filters.mana_value_min, Some(1.0));
+        assert_eq!(filters.mana_value_max, Some(3.0));
+        assert_eq!(filters.colors, Some(vec![CardColour::Red]));
+        assert_eq!(filters.keywords, Some(vec!["Flying".to_string()]));
+        assert_eq!(filters.power, Some("4".to_string()));
+        assert_eq!(filters.toughness, Some("4".to_string()));
+        assert_eq!(filters.loyalty, Some("3".to_string()));
+        assert_eq!(filters.defense, Some("5".to_string()));
+        assert_eq!(filters.is_reserved, Some(true));
+        assert_eq!(filters.is_promo, Some(false));
+        assert_eq!(filters.is_reprint, Some(true));
+        assert_eq!(filters.is_full_art, Some(false));
+        assert_eq!(filters.border_color, Some("black".to_string()));
+        assert_eq!(filters.legal_in, Some("modern".to_string()));
         assert_eq!(filters.domains, Some(vec![CardDomain::Fury]));
         assert_eq!(filters.energy_types, Some(vec![EnergyType::Fire]));
+    }
+
+    #[test]
+    fn test_mana_value_camelcase_alias_deserialization() {
+        let json = r#"{"manaValueMin":1.0,"manaValueMax":3.0,"isReserved":true,"borderColor":"black","legalIn":"modern"}"#;
+        let filters: CardSearchFilters = serde_json::from_str(json).unwrap();
+        assert_eq!(filters.mana_value_min, Some(1.0));
+        assert_eq!(filters.mana_value_max, Some(3.0));
+        assert_eq!(filters.is_reserved, Some(true));
+        assert_eq!(filters.border_color, Some("black".to_string()));
+        assert_eq!(filters.legal_in, Some("modern".to_string()));
     }
 
     #[test]

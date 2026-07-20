@@ -62,6 +62,28 @@ pub struct APICardSearchFilters {
     pub subtypes: Option<Vec<String>>,
     pub supertypes: Option<String>,
     pub types: Option<Vec<String>>,
+    #[serde(alias = "manaValueMin")]
+    pub mana_value_min: Option<f64>,
+    #[serde(alias = "manaValueMax")]
+    pub mana_value_max: Option<f64>,
+    pub colors: Option<Vec<APICardColour>>,
+    pub keywords: Option<Vec<String>>,
+    pub power: Option<String>,
+    pub toughness: Option<String>,
+    pub loyalty: Option<String>,
+    pub defense: Option<String>,
+    #[serde(alias = "isReserved")]
+    pub is_reserved: Option<bool>,
+    #[serde(alias = "isPromo")]
+    pub is_promo: Option<bool>,
+    #[serde(alias = "isReprint")]
+    pub is_reprint: Option<bool>,
+    #[serde(alias = "isFullArt")]
+    pub is_full_art: Option<bool>,
+    #[serde(alias = "borderColor")]
+    pub border_color: Option<String>,
+    #[serde(alias = "legalIn")]
+    pub legal_in: Option<String>,
     pub domains: Option<Vec<APICardDomain>>,
     #[serde(alias = "energyTypes")]
     pub energy_types: Option<Vec<APIEnergyType>>,
@@ -86,6 +108,22 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
             subtypes: value.subtypes,
             supertypes: value.supertypes,
             types: value.types,
+            mana_value_min: value.mana_value_min,
+            mana_value_max: value.mana_value_max,
+            colors: value
+                .colors
+                .map(|v| v.into_iter().map(models::CardColour::from).collect()),
+            keywords: value.keywords,
+            power: value.power,
+            toughness: value.toughness,
+            loyalty: value.loyalty,
+            defense: value.defense,
+            is_reserved: value.is_reserved,
+            is_promo: value.is_promo,
+            is_reprint: value.is_reprint,
+            is_full_art: value.is_full_art,
+            border_color: value.border_color,
+            legal_in: value.legal_in,
             domains: value.domains.map(|v| {
                 v.into_iter()
                     .map(models::riftbound::CardDomain::from)
