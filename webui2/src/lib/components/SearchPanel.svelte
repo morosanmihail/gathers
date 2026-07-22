@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SearchFilters, CardSet, TriState } from '$lib/types';
-	import { legalityFormats, borderColors } from '$lib/types';
+	import { legalityFormats, borderColors, colorOptions, riftboundDomains, pokemonEnergyTypes, toggleInList } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import { onMount } from 'svelte';
 
@@ -32,33 +32,10 @@
 
 	let advancedOpen = $state(false);
 
-	function toggleColor(color: string) {
-		const list = filters.colorIdentities.includes(color)
-			? filters.colorIdentities.filter(c => c !== color)
-			: [...filters.colorIdentities, color];
-		set('colorIdentities', list);
-	}
-
-	function toggleActualColor(color: string) {
-		const list = filters.colors.includes(color)
-			? filters.colors.filter(c => c !== color)
-			: [...filters.colors, color];
-		set('colors', list);
-	}
-
-	function toggleDomain(d: string) {
-		const list = filters.domains.includes(d)
-			? filters.domains.filter(x => x !== d)
-			: [...filters.domains, d];
-		set('domains', list);
-	}
-
-	function toggleEnergy(e: string) {
-		const list = filters.energyTypes.includes(e)
-			? filters.energyTypes.filter(x => x !== e)
-			: [...filters.energyTypes, e];
-		set('energyTypes', list);
-	}
+	function toggleColor(color: string) { set('colorIdentities', toggleInList(filters.colorIdentities, color)); }
+	function toggleActualColor(color: string) { set('colors', toggleInList(filters.colors, color)); }
+	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
+	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 
 	const setOptions = $derived(
 		app.cardSets
@@ -66,49 +43,22 @@
 			.slice(0, 20)
 	);
 
-	const colors = [
-		{ value: 'White', label: 'W' },
-		{ value: 'Blue',  label: 'U' },
-		{ value: 'Black', label: 'B' },
-		{ value: 'Red',   label: 'R' },
-		{ value: 'Green', label: 'G' },
-	];
-
-	// Exact enum values from APICardDomain
-	const riftboundDomains = ['Calm', 'Chaos', 'Fury', 'Mind', 'Body', 'Order', 'Colorless'];
-
-	// Exact enum values from APIEnergyType (skip 'Energy' — not useful for filtering)
-	const pokemonEnergyTypes = [
-		'Fire', 'Water', 'Grass', 'Lightning', 'Psychic',
-		'Fighting', 'Darkness', 'Metal', 'Dragon', 'Fairy', 'Colorless',
-	];
+	const colors = colorOptions;
 
 	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
 	const showRift = $derived(activeSystem?.includes('Riftbound') ?? false);
 	const showPoke = $derived(activeSystem?.includes('Pokemon') ?? false);
 
-	// Sort options differ by system
-	const sortOptions = $derived(showRift
-		? [
-			{ value: 'Name',            label: 'Name' },
-			{ value: 'Rarity',         label: 'Rarity' },
-			{ value: 'SetCode',        label: 'Set' },
-			{ value: 'CollectorNumber',label: 'Collector #' },
-		]
-		: showPoke
-		? [
-			{ value: 'Name',            label: 'Name' },
-			{ value: 'Rarity',         label: 'Rarity' },
-			{ value: 'SetCode',        label: 'Set' },
-			{ value: 'CollectorNumber',label: 'Collector #' },
-		]
-		: [
-			{ value: 'Name',            label: 'Name' },
-			{ value: 'Rarity',         label: 'Rarity' },
-			{ value: 'SetCode',        label: 'Set' },
-			{ value: 'CollectorNumber',label: 'Collector #' },
-			{ value: 'Artist',         label: 'Artist' },
-		]);
+	// Sort options differ by system: MTG adds an Artist sort the others don't have
+	const baseSortOptions = [
+		{ value: 'Name',             label: 'Name' },
+		{ value: 'Rarity',           label: 'Rarity' },
+		{ value: 'SetCode',          label: 'Set' },
+		{ value: 'CollectorNumber',  label: 'Collector #' }
+	];
+	const sortOptions = $derived(showRift || showPoke
+		? baseSortOptions
+		: [...baseSortOptions, { value: 'Artist', label: 'Artist' }]);
 </script>
 
 <div class="search-panel">

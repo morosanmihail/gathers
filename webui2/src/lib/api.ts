@@ -15,9 +15,24 @@ import type {
 
 const PAGE_SIZE = 24;
 
+// Generic TTL-keyed cache — backs both the long-lived general cache (system
+// info, collections, sets) and the short-lived stats cache (count + value).
+function ttlCache(ttlMs: number) {
+	const store: Map<string, { data: unknown; ts: number }> = new Map();
+	return {
+		get<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+			const entry = store.get(key);
+			if (entry && Date.now() - entry.ts < ttlMs) return Promise.resolve(entry.data as T);
+			return fetcher().then(data => { store.set(key, { data, ts: Date.now() }); return data; });
+		},
+		delete(key: string) { store.delete(key); },
+		clear() { store.clear(); },
+		keys() { return store.keys(); }
+	};
+}
+
 // General TTL cache (system info, collections, sets)
-const cache: Map<string, { data: unknown; ts: number }> = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 min
+const cache = ttlCache(5 * 60 * 1000);
 
 // Long-lived card detail cache (cards don't change)
 const cardDetailCache: Map<string, MtgCard | RiftboundCard | PokemonCard> = new Map();
@@ -29,14 +44,8 @@ const priceCache: Map<string, CardPrices> = new Map();
 const purchaseHistoryCache: Map<string, PurchaseEntry[]> = new Map();
 
 // Collection stats cache (count + value) — short TTL, invalidated on mutation
-const STATS_TTL = 60 * 1000; // 1 min
-const statsCache: Map<string, { data: unknown; ts: number }> = new Map();
-
-function cachedStats<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-	const entry = statsCache.get(key);
-	if (entry && Date.now() - entry.ts < STATS_TTL) return Promise.resolve(entry.data as T);
-	return fetcher().then(data => { statsCache.set(key, { data, ts: Date.now() }); return data; });
-}
+const statsCache = ttlCache(60 * 1000);
+const cachedStats = statsCache.get;
 
 export function invalidateCollectionStats(collection?: string) {
 	if (!collection) { statsCache.clear(); return; }
@@ -46,6 +55,12 @@ export function invalidateCollectionStats(collection?: string) {
 	purchaseHistoryCache.forEach((_, k) => {
 		if (k.startsWith(`${collection}:`)) purchaseHistoryCache.delete(k);
 	});
+}
+
+function invalidatePurchaseHistory(collection: string) {
+	for (const k of purchaseHistoryCache.keys()) {
+		if (k.startsWith(`${collection}:`)) purchaseHistoryCache.delete(k);
+	}
 }
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
@@ -60,13 +75,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 	return res.json();
 }
 
-async function cachedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-	const entry = cache.get(key);
-	if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data as T;
-	const data = await fetcher();
-	cache.set(key, { data, ts: Date.now() });
-	return data;
-}
+const cachedFetch = cache.get;
 
 export function invalidateCache(prefix?: string) {
 	if (!prefix) { cache.clear(); return; }
@@ -81,7 +90,7 @@ export async function getSystemInfo(): Promise<SystemInfo> {
 }
 
 export function invalidateSystemInfo() {
-	cache.delete('system');
+	invalidateCache('system');
 }
 
 // Collections
@@ -393,10 +402,7 @@ export async function deletePurchaseEntry(collection: string, entryId: number): 
 		`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`,
 		{ method: 'DELETE' }
 	);
-	// Invalidate per-card cache entries for this collection
-	for (const k of purchaseHistoryCache.keys()) {
-		if (k.startsWith(`${collection}:`)) purchaseHistoryCache.delete(k);
-	}
+	invalidatePurchaseHistory(collection);
 }
 
 export async function updatePurchaseEntry(
@@ -412,9 +418,7 @@ export async function updatePurchaseEntry(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit })
 	});
-	for (const k of purchaseHistoryCache.keys()) {
-		if (k.startsWith(`${collection}:`)) purchaseHistoryCache.delete(k);
-	}
+	invalidatePurchaseHistory(collection);
 }
 
 export async function getPurchaseHistory(collection: string, cardId: string): Promise<PurchaseEntry[]> {

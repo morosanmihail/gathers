@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SearchFilters } from '$lib/types';
+	import { colorOptions, riftboundDomains, pokemonEnergyTypes, toggleInList } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 
 	interface Props {
@@ -14,45 +15,17 @@
 		onfilters({ ...filters, [key]: val });
 	}
 
-	function toggleColor(color: string) {
-		const list = filters.colorIdentities.includes(color)
-			? filters.colorIdentities.filter(c => c !== color)
-			: [...filters.colorIdentities, color];
-		set('colorIdentities', list);
-	}
-
-	function toggleDomain(d: string) {
-		const list = filters.domains.includes(d)
-			? filters.domains.filter(x => x !== d)
-			: [...filters.domains, d];
-		set('domains', list);
-	}
-
-	function toggleEnergy(e: string) {
-		const list = filters.energyTypes.includes(e)
-			? filters.energyTypes.filter(x => x !== e)
-			: [...filters.energyTypes, e];
-		set('energyTypes', list);
-	}
+	function toggleColor(color: string) { set('colorIdentities', toggleInList(filters.colorIdentities, color)); }
+	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
+	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 
 	const showMtg  = $derived(app.systems.some(s => s === 'Sql' || s === 'Scryfall'));
 	const showRift = $derived(app.systems.some(s => s.includes('Riftbound')));
 	const showPoke = $derived(app.systems.some(s => s.includes('Pokemon')));
 
-	const colors = [
-		{ value: 'White', label: 'W' },
-		{ value: 'Blue',  label: 'U' },
-		{ value: 'Black', label: 'B' },
-		{ value: 'Red',   label: 'R' },
-		{ value: 'Green', label: 'G' },
-	];
-
-	const domains = ['Calm', 'Chaos', 'Fury', 'Mind', 'Body', 'Order', 'Colorless'];
-
-	const energyTypes = [
-		'Fire', 'Water', 'Grass', 'Lightning', 'Psychic',
-		'Fighting', 'Darkness', 'Metal', 'Dragon', 'Fairy', 'Colorless',
-	];
+	const colors = colorOptions;
+	const domains = riftboundDomains;
+	const energyTypes = pokemonEnergyTypes;
 </script>
 
 <div class="cfilter-bar">

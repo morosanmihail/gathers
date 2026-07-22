@@ -1,11 +1,12 @@
 <script lang="ts">
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { cardImageUrl } from '$lib/types';
+	import { cardImageUrl, rarityClass } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import QtyControls from './QtyControls.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
 	import SetTooltip from './SetTooltip.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -36,12 +37,6 @@
 		if (cached) imgUrl = cached;
 		cachedImageUrl(raw).then(u => { if (imgUrl !== u) imgUrl = u; });
 	});
-
-	function rarityClass(r?: string) {
-		if (!r) return '';
-		const f = r[0].toUpperCase();
-		return `rarity rarity-${f}`;
-	}
 </script>
 
 <div
@@ -54,21 +49,7 @@
 >
 	<!-- Selection checkbox -->
 	{#if collectionMode}
-		<div
-			class="card-tile-select"
-			class:checked={isSelected}
-			role="checkbox"
-			aria-checked={isSelected}
-			tabindex="0"
-			onclick={(e) => { e.stopPropagation(); app.toggleSelected(card.id); }}
-			onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); app.toggleSelected(card.id); } }}
-		>
-			{#if isSelected}
-				<svg width="10" height="10" viewBox="0 0 10 10" fill="white">
-					<path d="M1.5 5L4 7.5 8.5 2" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-				</svg>
-			{/if}
-		</div>
+		<SelectCheckbox checked={isSelected} ontoggle={() => app.toggleSelected(card.id)} />
 	{/if}
 
 	<!-- Qty badge -->

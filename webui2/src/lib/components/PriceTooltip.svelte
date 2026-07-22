@@ -2,6 +2,8 @@
 	import { getPurchaseHistory, type PurchaseEntry } from '$lib/api';
 	import type { CardPrices } from '$lib/types';
 	import { portal } from '$lib/portal';
+	import { createHoverTooltip, clampHorizontal } from '$lib/tooltip.svelte';
+	import { fmtDate } from '$lib/format';
 
 	interface Props {
 		cardId: string;
@@ -12,16 +14,24 @@
 
 	let { cardId, collection, price, cardPrices }: Props = $props();
 
-	let visible = $state(false);
+	const tooltip = createHoverTooltip();
 	let entries = $state<PurchaseEntry[] | null>(null);
 	let loading = $state(false);
-	let tooltipStyle = $state('');
-	let hideTimer: ReturnType<typeof setTimeout>;
+
+	function position(el: HTMLElement) {
+		const rect = el.getBoundingClientRect();
+		const tooltipH = 320;
+		const margin = 8;
+		const xStyle = clampHorizontal(rect, 260);
+		const fitsBelow = rect.bottom + 4 + tooltipH + margin <= window.innerHeight;
+		const yStyle = fitsBelow
+			? `top: ${rect.bottom + 4}px;`
+			: `bottom: ${window.innerHeight - rect.top + 4}px;`;
+		return `${yStyle} ${xStyle}`;
+	}
 
 	async function showEl(el: HTMLElement) {
-		clearTimeout(hideTimer);
-		visible = true;
-		position(el);
+		tooltip.showEl(el, position);
 		if (entries === null && !loading && collection) {
 			loading = true;
 			entries = await getPurchaseHistory(collection, cardId);
@@ -30,26 +40,6 @@
 	}
 
 	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
-
-	function hide() {
-		hideTimer = setTimeout(() => { visible = false; }, 120);
-	}
-
-	function position(el: HTMLElement) {
-		const rect = el.getBoundingClientRect();
-		const tooltipW = 260;
-		const tooltipH = 320;
-		const margin = 8;
-		const spaceRight = window.innerWidth - rect.right;
-		const xStyle = spaceRight >= tooltipW + 8
-			? `left: ${rect.left}px;`
-			: `right: ${window.innerWidth - rect.right}px;`;
-		const fitsBelow = rect.bottom + 4 + tooltipH + margin <= window.innerHeight;
-		const yStyle = fitsBelow
-			? `top: ${rect.bottom + 4}px;`
-			: `bottom: ${window.innerHeight - rect.top + 4}px;`;
-		tooltipStyle = `${yStyle} ${xStyle}`;
-	}
 
 	// Market price rows from all providers
 	const providerRows = $derived.by(() => {
@@ -64,11 +54,6 @@
 			});
 	});
 
-	function fmtDate(iso: string) {
-		try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
-		catch { return iso; }
-	}
-
 	function fmtQty(e: PurchaseEntry) {
 		const parts: string[] = [];
 		if (e.quantity > 0) parts.push(`${e.quantity}×`);
@@ -82,12 +67,12 @@
 	}
 </script>
 
-<div class="price-cell" role="button" tabindex="0" onmouseenter={show} onmouseleave={hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}>
+<div class="price-cell" role="button" tabindex="0" onmouseenter={show} onmouseleave={tooltip.hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') tooltip.hide(); }}>
 	{price ?? ''}
 </div>
 
-{#if visible}
-	<div use:portal class="price-tooltip" role="tooltip" style={tooltipStyle} onmouseenter={() => clearTimeout(hideTimer)} onmouseleave={hide}>
+{#if tooltip.visible}
+	<div use:portal class="price-tooltip" role="tooltip" style={tooltip.style} onmouseenter={tooltip.cancelHide} onmouseleave={tooltip.hide}>
 		<!-- Market prices -->
 		{#if providerRows.length > 0}
 			<div class="price-tooltip-title">Market prices</div>

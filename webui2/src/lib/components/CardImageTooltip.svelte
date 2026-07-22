@@ -3,6 +3,7 @@
 	import type { AnyCard, CollectionCard } from '$lib/types';
 	import { cardImageUrl } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
+	import { createHoverTooltip } from '$lib/tooltip.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -10,9 +11,7 @@
 
 	let { card }: Props = $props();
 
-	let visible = $state(false);
-	let tooltipStyle = $state('');
-	let hideTimer: ReturnType<typeof setTimeout>;
+	const tooltip = createHoverTooltip(80);
 
 	const rawUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 	let resolvedUrl = $state('');
@@ -24,19 +23,6 @@
 		}
 	});
 
-	function showEl(el: HTMLElement) {
-		clearTimeout(hideTimer);
-		if (!rawUrl) return;
-		visible = true;
-		position(el);
-	}
-
-	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
-
-	function hide() {
-		hideTimer = setTimeout(() => { visible = false; }, 80);
-	}
-
 	function position(el: HTMLElement) {
 		const rect = el.getBoundingClientRect();
 		const cardW = 200;
@@ -45,12 +31,17 @@
 		let top = rect.top + rect.height / 2 - cardH / 2;
 		top = Math.max(margin, Math.min(top, window.innerHeight - cardH - margin));
 		const spaceRight = window.innerWidth - rect.right;
-		if (spaceRight >= cardW + margin) {
-			tooltipStyle = `top:${top}px; left:${rect.right + margin}px;`;
-		} else {
-			tooltipStyle = `top:${top}px; left:${rect.left - cardW - margin}px;`;
-		}
+		return spaceRight >= cardW + margin
+			? `top:${top}px; left:${rect.right + margin}px;`
+			: `top:${top}px; left:${rect.left - cardW - margin}px;`;
 	}
+
+	function showEl(el: HTMLElement) {
+		if (!rawUrl) return;
+		tooltip.showEl(el, position);
+	}
+
+	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
 </script>
 
 <span
@@ -58,14 +49,14 @@
 	role="button"
 	tabindex="0"
 	onmouseenter={show}
-	onmouseleave={hide}
-	onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}
+	onmouseleave={tooltip.hide}
+	onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') tooltip.hide(); }}
 >
 	{card.name}
 </span>
 
-{#if visible && resolvedUrl}
-	<div use:portal class="card-img-tooltip" style={tooltipStyle}>
+{#if tooltip.visible && resolvedUrl}
+	<div use:portal class="card-img-tooltip" style={tooltip.style}>
 		<img src={resolvedUrl} alt={card.name} width="200" />
 	</div>
 {/if}

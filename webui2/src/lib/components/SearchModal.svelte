@@ -1,12 +1,10 @@
 <script lang="ts">
 	import SearchPanel from './SearchPanel.svelte';
-	import CardTile from './CardTile.svelte';
-	import CardRow from './CardRow.svelte';
-	import Pagination from './Pagination.svelte';
+	import CardResultsList from './CardResultsList.svelte';
 	import CardDetailModal from './CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters, bestPrice } from '$lib/types';
+	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
 
 	interface Props {
@@ -177,28 +175,29 @@
 						<div class="empty-state-text">No cards found</div>
 					</div>
 				{:else}
-					{#if viewMode === 'grid'}
-						<div class="card-grid" style="padding: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
-							{#each results as card (card.id)}
-								<CardTile {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} onclick={(c) => detailCard = c as AnyCard} />
-							{/each}
-						</div>
-					{:else}
-						<div class="card-list card-list-search">
-							<div class="card-list-header">
-								<div class="card-list-col"></div>
-								<div class="card-list-col">Set</div>
-								<div class="card-list-col">Name</div>
-								<div class="card-list-col">R</div>
-								<div class="card-list-col">Price</div>
-								<div class="card-list-col"></div>
-							</div>
-							{#each results as card (card.id)}
-								<CardRow {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} onclick={(c) => detailCard = c as AnyCard} />
-							{/each}
-						</div>
-					{/if}
-					<Pagination {total} {page} onchange={(p) => doSearch(p)} />
+					<CardResultsList
+						cards={results}
+						{viewMode}
+						listHeaders={[
+							{ field: '', label: '' },
+							{ field: '', label: 'Set' },
+							{ field: '', label: 'Name' },
+							{ field: '', label: 'R' },
+							{ field: '', label: 'Price' },
+							{ field: '', label: '' }
+						]}
+						keyFn={(c) => c.id}
+						{collection}
+						{prices}
+						onAdd={(c) => addCard(c)}
+						onAddFoil={(c) => addCard(c, true)}
+						onclick={(c) => detailCard = c as AnyCard}
+						{total}
+						{page}
+						onPageChange={(p) => doSearch(p)}
+						gridStyle="padding: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;"
+						listClass="card-list card-list-search"
+					/>
 				{/if}
 			</div>
 		</div>

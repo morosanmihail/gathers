@@ -168,6 +168,34 @@ export interface CardPrices {
 	paper?: Record<string, PriceRetailer>;
 }
 
+export function rarityClass(r?: string): string {
+	if (!r) return '';
+	return `rarity rarity-${r[0].toUpperCase()}`;
+}
+
+// Shared filter chip option lists (color identity, Riftbound domains, Pokemon energy types)
+export const colorOptions = [
+	{ value: 'White', label: 'W' },
+	{ value: 'Blue', label: 'U' },
+	{ value: 'Black', label: 'B' },
+	{ value: 'Red', label: 'R' },
+	{ value: 'Green', label: 'G' }
+];
+
+// Exact enum values from APICardDomain
+export const riftboundDomains = ['Calm', 'Chaos', 'Fury', 'Mind', 'Body', 'Order', 'Colorless'];
+
+// Exact enum values from APIEnergyType (skip 'Energy' — not useful for filtering)
+export const pokemonEnergyTypes = [
+	'Fire', 'Water', 'Grass', 'Lightning', 'Psychic',
+	'Fighting', 'Darkness', 'Metal', 'Dragon', 'Fairy', 'Colorless'
+];
+
+// Toggle `value` in/out of a string list, returning a new array
+export function toggleInList(list: string[], value: string): string[] {
+	return list.includes(value) ? list.filter(v => v !== value) : [...list, value];
+}
+
 export function bestPrice(cardPrices: CardPrices): string | null {
 	if (!cardPrices?.paper) return null;
 	const vals = Object.values(cardPrices.paper).flatMap(r => [r.normal, r.foil].filter(v => v != null)) as number[];

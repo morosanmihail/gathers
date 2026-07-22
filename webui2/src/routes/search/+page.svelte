@@ -3,13 +3,11 @@
 	import { afterNavigate } from '$app/navigation';
 	import { replaceState } from '$app/navigation';
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
-	import CardTile from '$lib/components/CardTile.svelte';
-	import CardRow from '$lib/components/CardRow.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
+	import CardResultsList from '$lib/components/CardResultsList.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters, bestPrice } from '$lib/types';
+	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
 
 	let filters = $state(defaultFilters());
@@ -245,40 +243,26 @@
 					<span style="font-size:0.8rem;color:var(--text2);">{results.length} result{results.length !== 1 ? 's' : ''}</span>
 				</div>
 
-				{#if app.viewMode === 'grid'}
-					<div class="card-grid">
-						{#each results as card (card.id)}
-							<CardTile
-								{card}
-								price={bestPrice(prices[card.id])}
-								cardPrices={prices[card.id]}
-								onAdd={app.collectionsEnabled ? promptAdd : undefined}
-								onclick={(c) => detailCard = c as AnyCard}
-							/>
-						{/each}
-					</div>
-				{:else}
-					<div class="card-list card-list-results">
-						<div class="card-list-header">
-							<div class="card-list-col"></div>
-							<div class="card-list-col">Name</div>
-							<div class="card-list-col">Set</div>
-							<div class="card-list-col">Rarity</div>
-							<div class="card-list-col">Price</div>
-							<div class="card-list-col"></div>
-						</div>
-						{#each results as card (card.id)}
-							<CardRow
-								{card}
-								price={bestPrice(prices[card.id])}
-								cardPrices={prices[card.id]}
-								onAdd={app.collectionsEnabled ? promptAdd : undefined}
-								onclick={(c) => detailCard = c as AnyCard}
-							/>
-						{/each}
-					</div>
-				{/if}
-				<Pagination {total} {page} onchange={(p) => doSearch(p)} />
+				<CardResultsList
+					cards={results}
+					viewMode={app.viewMode}
+					listHeaders={[
+						{ field: '', label: '' },
+						{ field: '', label: 'Name' },
+						{ field: '', label: 'Set' },
+						{ field: '', label: 'Rarity' },
+						{ field: '', label: 'Price' },
+						{ field: '', label: '' }
+					]}
+					keyFn={(c) => c.id}
+					{prices}
+					onAdd={app.collectionsEnabled ? promptAdd : undefined}
+					onclick={(c) => detailCard = c as AnyCard}
+					{total}
+					{page}
+					onPageChange={(p) => doSearch(p)}
+					listClass="card-list card-list-results"
+				/>
 			{/if}
 		</div>
 	</div>

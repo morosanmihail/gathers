@@ -2,6 +2,7 @@
 	import { getAllPurchaseHistory, deletePurchaseEntry, updatePurchaseEntry, type PurchaseEntry } from '$lib/api';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { portal } from '$lib/portal';
+	import { fmtDate } from '$lib/format';
 
 	interface Props {
 		collection: string;
@@ -99,10 +100,7 @@
 		}
 	}
 
-	function fmtDate(iso: string) {
-		try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
-		catch { return iso; }
-	}
+
 </script>
 
 <div class="modal-overlay" onclick={(e) => e.target === e.currentTarget && onclose()} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" aria-modal="true" tabindex="-1">

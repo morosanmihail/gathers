@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { AnyCard, CollectionCard, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
-	import { cardImageUrl, legalityFormats } from '$lib/types';
+	import { cardImageUrl, legalityFormats, rarityClass } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 
@@ -41,11 +41,6 @@
 		White: 'W', Blue: 'U', Black: 'B', Red: 'R', Green: 'G',
 		Colourless: 'C', Multicoloured: 'M'
 	};
-
-	function rarityClass(r?: string) {
-		if (!r) return '';
-		return `rarity rarity-${r[0].toUpperCase()}`;
-	}
 
 	function legalityLabel(format: string): string {
 		return legalityFormats.find(f => f.value === format.toLowerCase())?.label ?? format;

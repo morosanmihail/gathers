@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import CardTile from '$lib/components/CardTile.svelte';
-	import CardRow from '$lib/components/CardRow.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
+	import CardResultsList from '$lib/components/CardResultsList.svelte';
 	import CollectionToolbar from '$lib/components/CollectionToolbar.svelte';
 	import CollectionFilterBar from '$lib/components/CollectionFilterBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
@@ -16,7 +14,7 @@
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
-	import { defaultFilters, bestPrice } from '$lib/types';
+	import { defaultFilters } from '$lib/types';
 	import type { CollectionCard, CardPrices, ValueBreakdown } from '$lib/types';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
@@ -269,43 +267,27 @@
 			<div class="empty-state-text">No cards in this collection. Use Search & add above.</div>
 		</div>
 	{:else}
-		{#if app.viewMode === 'grid'}
-			<div class="card-grid">
-				{#each cards as card (card.collectionId + '-' + card.id)}
-					<CardTile {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} onclick={(c) => detailCard = c as CollectionCard} />
-				{/each}
-			</div>
-		{:else}
-			<div class="card-list">
-				<div class="card-list-header">
-					{#each listHeaders as h}
-						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-						<div
-							class="card-list-col"
-							class:active={h.field !== '' && sortBy === h.field}
-							role={h.field ? 'button' : undefined}
-							tabindex={h.field ? 0 : undefined}
-							onclick={() => h.field && handleSortClick(h.field)}
-							onkeydown={(e) => e.key === 'Enter' && h.field && handleSortClick(h.field)}
-						>
-							{h.label}
-							{#if h.field && sortBy === h.field}
-								{sortOrder === 'Asc' ? ' ↑' : ' ↓'}
-							{/if}
-						</div>
-					{/each}
-				</div>
-				{#each cards as card (card.collectionId + '-' + card.id)}
-					<CardRow {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} onclick={(c) => detailCard = c as CollectionCard} />
-				{/each}
-			</div>
-		{/if}
+		<CardResultsList
+			{cards}
+			viewMode={app.viewMode}
+			{listHeaders}
+			keyFn={(c) => (c as CollectionCard).collectionId + '-' + c.id}
+			collectionMode
+			collection={collectionId}
+			{prices}
+			onAdjust={adjustCardQty}
+			onclick={(c) => detailCard = c as CollectionCard}
+			{sortBy}
+			{sortOrder}
+			onSortClick={handleSortClick}
+			total={total}
+			page={currentPage}
+			onPageChange={handlePageChange}
+		/>
 
 		{#if loading}
 			<div class="loading-row"><div class="spinner"></div></div>
 		{/if}
-
-		<Pagination {total} page={currentPage} onchange={handlePageChange} />
 	{/if}
 </div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { portal } from '$lib/portal';
 	import { app } from '$lib/state.svelte';
+	import { createHoverTooltip, clampHorizontal } from '$lib/tooltip.svelte';
 
 	interface Props {
 		setCode?: string;
@@ -8,9 +9,7 @@
 
 	let { setCode }: Props = $props();
 
-	let visible = $state(false);
-	let tooltipStyle = $state('');
-	let hideTimer: ReturnType<typeof setTimeout>;
+	const tooltip = createHoverTooltip();
 
 	const setName = $derived(
 		setCode
@@ -18,39 +17,26 @@
 			: '—'
 	);
 
-	function showEl(el: HTMLElement) {
-		clearTimeout(hideTimer);
-		visible = true;
-		position(el);
-	}
-
-	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
-
-	function hide() {
-		hideTimer = setTimeout(() => { visible = false; }, 120);
-	}
-
 	function position(el: HTMLElement) {
 		const rect = el.getBoundingClientRect();
-		const tooltipW = 220;
 		const tooltipH = 60;
 		const margin = 8;
-		const spaceRight = window.innerWidth - rect.right;
-		const xStyle = spaceRight >= tooltipW + 8
-			? `left: ${rect.left}px;`
-			: `right: ${window.innerWidth - rect.right}px;`;
+		const xStyle = clampHorizontal(rect, 220);
 		const fitsBelow = rect.bottom + 4 + tooltipH + margin <= window.innerHeight;
 		const top = fitsBelow ? rect.bottom + 4 : Math.max(margin, rect.top - tooltipH - 4);
-		tooltipStyle = `top: ${top}px; ${xStyle}`;
+		return `top: ${top}px; ${xStyle}`;
 	}
+
+	function showEl(el: HTMLElement) { tooltip.showEl(el, position); }
+	function show(e: MouseEvent) { showEl(e.currentTarget as HTMLElement); }
 </script>
 
-<span class="set-code-trigger" role="button" tabindex="0" onmouseenter={show} onmouseleave={hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') hide(); }}>
+<span class="set-code-trigger" role="button" tabindex="0" onmouseenter={show} onmouseleave={tooltip.hide} onkeydown={(e) => { if (e.key === 'Enter') showEl(e.currentTarget as HTMLElement); if (e.key === 'Escape') tooltip.hide(); }}>
 	{setCode ? setCode.toUpperCase() : '—'}
 </span>
 
-{#if visible}
-	<div use:portal class="price-tooltip set-tooltip" style={tooltipStyle}>
+{#if tooltip.visible}
+	<div use:portal class="price-tooltip set-tooltip" style={tooltip.style}>
 		<div class="price-tooltip-title">Set</div>
 		<div class="set-tooltip-name">{setName}</div>
 	</div>
