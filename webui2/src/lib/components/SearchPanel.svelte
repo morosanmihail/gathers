@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { SearchFilters, CardSet } from '$lib/types';
+	import type { SearchFilters, CardSet, TriState } from '$lib/types';
+	import { legalityFormats, borderColors } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import { onMount } from 'svelte';
 
@@ -29,11 +30,20 @@
 		onfilters({ ...filters, [key]: val });
 	}
 
+	let advancedOpen = $state(false);
+
 	function toggleColor(color: string) {
 		const list = filters.colorIdentities.includes(color)
 			? filters.colorIdentities.filter(c => c !== color)
 			: [...filters.colorIdentities, color];
 		set('colorIdentities', list);
+	}
+
+	function toggleActualColor(color: string) {
+		const list = filters.colors.includes(color)
+			? filters.colors.filter(c => c !== color)
+			: [...filters.colors, color];
+		set('colors', list);
 	}
 
 	function toggleDomain(d: string) {
@@ -190,6 +200,105 @@
 					<option value="Mythic">Mythic</option>
 				</select>
 			</div>
+
+			<div class="field">
+				<button type="button" class="advanced-toggle" onclick={() => advancedOpen = !advancedOpen}>
+					<span class="advanced-toggle-icon" class:open={advancedOpen}>▸</span>
+					Advanced filters
+				</button>
+			</div>
+
+			{#if advancedOpen}
+				<div class="advanced-filters">
+					<div class="input-group field">
+						<input class="input" type="number" step="0.5" min="0" placeholder="Min mana value" value={filters.manaValueMin}
+							oninput={(e) => set('manaValueMin', (e.target as HTMLInputElement).value)} />
+						<input class="input" type="number" step="0.5" min="0" placeholder="Max mana value" value={filters.manaValueMax}
+							oninput={(e) => set('manaValueMax', (e.target as HTMLInputElement).value)} />
+					</div>
+
+					<div class="field">
+						<span class="field-label">Colors (printed)</span>
+						<div class="color-chips">
+							{#each colors as c}
+								<button
+									type="button"
+									class="color-chip {c.label}"
+									class:active={filters.colors.includes(c.value)}
+									onclick={() => toggleActualColor(c.value)}
+									title={c.value}
+								>{c.label}</button>
+							{/each}
+						</div>
+					</div>
+
+					<div class="input-group field">
+						<input class="input" placeholder="Power…" value={filters.power}
+							oninput={(e) => set('power', (e.target as HTMLInputElement).value)} />
+						<input class="input" placeholder="Toughness…" value={filters.toughness}
+							oninput={(e) => set('toughness', (e.target as HTMLInputElement).value)} />
+					</div>
+
+					<div class="input-group field">
+						<input class="input" placeholder="Loyalty…" value={filters.loyalty}
+							oninput={(e) => set('loyalty', (e.target as HTMLInputElement).value)} />
+						<input class="input" placeholder="Defense…" value={filters.defense}
+							oninput={(e) => set('defense', (e.target as HTMLInputElement).value)} />
+					</div>
+
+					<div class="field">
+						<input class="input" placeholder="Keywords… (e.g. Flying, Trample)" value={filters.keywords}
+							oninput={(e) => set('keywords', (e.target as HTMLInputElement).value)} />
+					</div>
+
+					<div class="input-group field">
+						<select class="input" value={filters.borderColor}
+							onchange={(e) => set('borderColor', (e.target as HTMLSelectElement).value)}>
+							<option value="">Any border</option>
+							{#each borderColors as b}
+								<option value={b}>{b[0].toUpperCase() + b.slice(1)}</option>
+							{/each}
+						</select>
+						<select class="input" value={filters.legalIn}
+							onchange={(e) => set('legalIn', (e.target as HTMLSelectElement).value)}>
+							<option value="">Legal in any format</option>
+							{#each legalityFormats as f}
+								<option value={f.value}>{f.label}</option>
+							{/each}
+						</select>
+					</div>
+
+					<div class="input-group field">
+						<select class="input" value={filters.isReserved}
+							onchange={(e) => set('isReserved', (e.target as HTMLSelectElement).value as TriState)}>
+							<option value="">Reserved: any</option>
+							<option value="true">Reserved: yes</option>
+							<option value="false">Reserved: no</option>
+						</select>
+						<select class="input" value={filters.isPromo}
+							onchange={(e) => set('isPromo', (e.target as HTMLSelectElement).value as TriState)}>
+							<option value="">Promo: any</option>
+							<option value="true">Promo: yes</option>
+							<option value="false">Promo: no</option>
+						</select>
+					</div>
+
+					<div class="input-group field">
+						<select class="input" value={filters.isReprint}
+							onchange={(e) => set('isReprint', (e.target as HTMLSelectElement).value as TriState)}>
+							<option value="">Reprint: any</option>
+							<option value="true">Reprint: yes</option>
+							<option value="false">Reprint: no</option>
+						</select>
+						<select class="input" value={filters.isFullArt}
+							onchange={(e) => set('isFullArt', (e.target as HTMLSelectElement).value as TriState)}>
+							<option value="">Full art: any</option>
+							<option value="true">Full art: yes</option>
+							<option value="false">Full art: no</option>
+						</select>
+					</div>
+				</div>
+			{/if}
 		{/if}
 
 		<!-- Riftbound: artist + domains + rarity -->
@@ -264,3 +373,38 @@
 		</button>
 	</form>
 </div>
+
+<style>
+	.advanced-toggle {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
+		background: none;
+		border: none;
+		padding: 4px 0;
+		color: var(--text2);
+		font-size: 0.78rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		cursor: pointer;
+	}
+
+	.advanced-toggle:hover { color: var(--accent-text); }
+
+	.advanced-toggle-icon {
+		display: inline-block;
+		transition: transform 0.12s;
+	}
+
+	.advanced-toggle-icon.open { transform: rotate(90deg); }
+
+	.advanced-filters {
+		display: flex;
+		flex-direction: column;
+		border-top: 1px solid var(--border);
+		padding-top: 10px;
+		margin-bottom: 4px;
+	}
+</style>

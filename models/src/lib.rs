@@ -22,6 +22,10 @@ pub type SetName = String;
 pub type CollectionID = String;
 pub type CollectorNumber = String;
 
+// MagicCard carries much more mtgjson metadata than the other variants; boxing it would
+// mean threading Box<MagicCard> through every `Card::Magic` match arm across the
+// workspace for a minor size win, so the size difference is accepted instead.
+#[allow(clippy::large_enum_variant)]
 #[enum_dispatch]
 #[derive(Debug, Clone)]
 pub enum Card {

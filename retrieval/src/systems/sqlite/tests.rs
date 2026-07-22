@@ -437,6 +437,211 @@ async fn test_search_cards_two_type_filter_is_stricter_than_one() {
     );
 }
 
+// ── New MagicCard field tests ─────────────────────────────────────────────
+
+fn as_magic(c: &::models::Card) -> &::models::MagicCard {
+    match c {
+        ::models::Card::Magic(m) => m,
+        _ => panic!("expected a Magic card"),
+    }
+}
+
+#[tokio::test]
+async fn test_search_cards_populates_new_fields() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        name: Some("Grave Titan".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, None).await.unwrap();
+    let card = as_magic(cards.first().expect("expected Grave Titan"));
+
+    assert_eq!(card.mana_cost, "{4}{B}{B}");
+    assert_eq!(card.mana_value, 6.0);
+    assert_eq!(card.type_line, "Creature — Giant");
+    assert_eq!(card.power, Some("6".to_string()));
+    assert_eq!(card.toughness, Some("6".to_string()));
+    assert_eq!(card.keywords, vec!["Deathtouch".to_string()]);
+    assert_eq!(card.colors, vec![CardColour::Black]);
+    assert_eq!(card.finishes, vec!["nonfoil".to_string()]);
+    assert_eq!(card.border_color, "black");
+    assert!(card.is_reprint);
+    assert!(!card.is_promo);
+    assert!(!card.is_reserved);
+    assert!(!card.is_full_art);
+    assert_eq!(
+        card.legalities.get("standard").map(String::as_str),
+        Some("Legal")
+    );
+    assert_eq!(
+        card.legalities.get("modern").map(String::as_str),
+        Some("Legal")
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_mana_value_range() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        mana_value_min: Some(5.0),
+        mana_value_max: Some(7.0),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    for c in &cards {
+        let m = as_magic(c);
+        assert!(
+            (5.0..=7.0).contains(&m.mana_value),
+            "{} has mana_value {} outside [5,7]",
+            m.name,
+            m.mana_value
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_search_cards_with_colors_filter() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        colors: Some(vec![CardColour::Black]),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    assert!(
+        cards
+            .iter()
+            .all(|c| as_magic(c).colors.contains(&CardColour::Black))
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_keywords_filter() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        keywords: Some(vec!["Cycling".to_string()]),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert_eq!(cards.len(), 2);
+    assert!(
+        cards
+            .iter()
+            .all(|c| as_magic(c).keywords.iter().any(|k| k == "Cycling"))
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_power_filter() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        power: Some("6".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    assert!(
+        cards
+            .iter()
+            .all(|c| as_magic(c).power.as_deref() == Some("6"))
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_is_reprint_true() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        is_reprint: Some(true),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    assert!(cards.iter().all(|c| as_magic(c).is_reprint));
+}
+
+#[tokio::test]
+async fn test_search_cards_with_is_reprint_false_excludes_reprints() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        is_reprint: Some(false),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    assert!(cards.iter().all(|c| !as_magic(c).is_reprint));
+}
+
+#[tokio::test]
+async fn test_search_cards_with_border_color_filter() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        border_color: Some("borderless".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    assert!(!cards.is_empty());
+    assert!(
+        cards
+            .iter()
+            .all(|c| as_magic(c).border_color.eq_ignore_ascii_case("borderless"))
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_legal_in_filter() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        legal_in: Some("standard".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    // Only Grave Titan and Rule of Law are seeded as Standard-legal in the fixture.
+    assert!(!cards.is_empty());
+    assert!(
+        cards
+            .iter()
+            .all(|c| as_magic(c).legalities.get("standard").map(String::as_str) == Some("Legal"))
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_legal_in_excludes_non_legal() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        legal_in: Some("modern".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    // Goblin King is only legacy/vintage/commander legal in the fixture, not modern.
+    assert!(
+        !cards.iter().any(|c| as_magic(c).name == "Goblin King"),
+        "Goblin King should not be modern-legal"
+    );
+}
+
+#[tokio::test]
+async fn test_search_cards_with_unknown_legal_in_format_is_ignored() {
+    // Unknown format names must not be interpolated into SQL; the filter is a no-op
+    // rather than erroring or matching everything.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        legal_in: Some("definitely-not-a-format; DROP TABLE cards;--".to_string()),
+        ..Default::default()
+    };
+    let with_bad_format = system
+        .search_cards(filters, None, Some(50))
+        .await
+        .unwrap()
+        .len();
+    let without_filter = system
+        .search_cards(CardSearchFilters::default(), None, Some(50))
+        .await
+        .unwrap()
+        .len();
+    assert_eq!(with_bad_format, without_filter);
+}
+
 // ── Price tests ───────────────────────────────────────────────────────────
 
 // entries: (uuid, source, provider, priceType, finish, price)

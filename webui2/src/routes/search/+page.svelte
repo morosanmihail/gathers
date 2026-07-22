@@ -9,7 +9,7 @@
 	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, bestPrice } from '$lib/types';
-	import type { AnyCard, CollectionCard, CardPrices } from '$lib/types';
+	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
 
 	let filters = $state(defaultFilters());
 	let results = $state<AnyCard[]>([]);
@@ -56,6 +56,22 @@
 		if (params.has('sortOrder'))       overrides.sortOrder = str('sortOrder') as 'Asc' | 'Desc';
 		if (params.has('system'))          activeSystem = str('system');
 
+		// Advanced (MTG-only) filters
+		if (params.has('manaMin'))         { overrides.manaValueMin = str('manaMin'); hasFilter = true; }
+		if (params.has('manaMax'))         { overrides.manaValueMax = str('manaMax'); hasFilter = true; }
+		if (params.has('cardColors'))      { overrides.colors = str('cardColors').split(',').filter(Boolean); hasFilter = true; }
+		if (params.has('keywords'))        { overrides.keywords = str('keywords'); hasFilter = true; }
+		if (params.has('power'))           { overrides.power = str('power'); hasFilter = true; }
+		if (params.has('toughness'))       { overrides.toughness = str('toughness'); hasFilter = true; }
+		if (params.has('loyalty'))         { overrides.loyalty = str('loyalty'); hasFilter = true; }
+		if (params.has('defense'))         { overrides.defense = str('defense'); hasFilter = true; }
+		if (params.has('reserved'))        { overrides.isReserved = str('reserved') as SearchFilters['isReserved']; hasFilter = true; }
+		if (params.has('promo'))           { overrides.isPromo = str('promo') as SearchFilters['isPromo']; hasFilter = true; }
+		if (params.has('reprint'))         { overrides.isReprint = str('reprint') as SearchFilters['isReprint']; hasFilter = true; }
+		if (params.has('fullArt'))         { overrides.isFullArt = str('fullArt') as SearchFilters['isFullArt']; hasFilter = true; }
+		if (params.has('borderColor'))     { overrides.borderColor = str('borderColor'); hasFilter = true; }
+		if (params.has('legalIn'))         { overrides.legalIn = str('legalIn'); hasFilter = true; }
+
 		if (hasFilter) {
 			filters = { ...defaultFilters(), ...overrides };
 			const p = params.has('page') ? Math.max(1, parseInt(params.get('page')!) || 1) : 1;
@@ -96,6 +112,22 @@
 		if (filters.sortBy !== 'Name')       params.set('sortBy', filters.sortBy);
 		if (filters.sortOrder !== 'Asc')     params.set('sortOrder', filters.sortOrder);
 		if (activeSystem)                    params.set('system', activeSystem);
+
+		// Advanced (MTG-only) filters
+		if (filters.manaValueMin)            params.set('manaMin', filters.manaValueMin);
+		if (filters.manaValueMax)            params.set('manaMax', filters.manaValueMax);
+		if (filters.colors.length)           params.set('cardColors', filters.colors.join(','));
+		if (filters.keywords)                params.set('keywords', filters.keywords);
+		if (filters.power)                   params.set('power', filters.power);
+		if (filters.toughness)               params.set('toughness', filters.toughness);
+		if (filters.loyalty)                 params.set('loyalty', filters.loyalty);
+		if (filters.defense)                 params.set('defense', filters.defense);
+		if (filters.isReserved)              params.set('reserved', filters.isReserved);
+		if (filters.isPromo)                 params.set('promo', filters.isPromo);
+		if (filters.isReprint)               params.set('reprint', filters.isReprint);
+		if (filters.isFullArt)               params.set('fullArt', filters.isFullArt);
+		if (filters.borderColor)             params.set('borderColor', filters.borderColor);
+		if (filters.legalIn)                 params.set('legalIn', filters.legalIn);
 		if (p > 1)                           params.set('page', String(p));
 		const qs = params.toString();
 		return qs ? `?${qs}` : '/search';
@@ -117,8 +149,18 @@
 			} else {
 				data = await searchMtg(filters, p);
 			}
+			// The search endpoints don't return a total count, so page count is a moving
+			// estimate: exact once a short page proves we've hit the end, otherwise "at
+			// least one more page" so the pager grows as the user pages forward instead
+			// of jumping straight to a bogus 99. If we overshot (e.g. jumped straight to
+			// a stale/URL-provided page number past the real end), step back rather than
+			// showing a dead empty page with no way back except browser back.
+			if (data.length === 0 && p > 1) {
+				await doSearch(p - 1);
+				return;
+			}
 			results = data;
-			if (p === 1) total = data.length >= PAGE_SIZE ? PAGE_SIZE * 99 : data.length;
+			total = data.length < PAGE_SIZE ? (p - 1) * PAGE_SIZE + data.length : p * PAGE_SIZE + 1;
 			searched = true;
 
 			if (app.pricingEnabled && activeSystem !== 'RiftboundSQLite' && data.length) {
