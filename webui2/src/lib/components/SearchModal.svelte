@@ -3,6 +3,7 @@
 	import CardTile from './CardTile.svelte';
 	import CardRow from './CardRow.svelte';
 	import Pagination from './Pagination.svelte';
+	import CardDetailModal from './CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, bestPrice } from '$lib/types';
@@ -27,6 +28,7 @@
 	let activeSystem = $state('');
 	let viewMode = $state<ViewMode>('grid');
 	let prices = $state<Record<string, CardPrices>>({});
+	let detailCard = $state<AnyCard | null>(null);
 
 	$effect(() => {
 		if (!activeSystem && app.systems.length > 0) activeSystem = app.systems[0];
@@ -178,7 +180,7 @@
 					{#if viewMode === 'grid'}
 						<div class="card-grid" style="padding: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
 							{#each results as card (card.id)}
-								<CardTile {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} />
+								<CardTile {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} onclick={(c) => detailCard = c as AnyCard} />
 							{/each}
 						</div>
 					{:else}
@@ -192,7 +194,7 @@
 								<div class="card-list-col"></div>
 							</div>
 							{#each results as card (card.id)}
-								<CardRow {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} />
+								<CardRow {card} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdd={(c) => addCard(c)} onAddFoil={(c) => addCard(c, true)} onclick={(c) => detailCard = c as AnyCard} />
 							{/each}
 						</div>
 					{/if}
@@ -202,3 +204,7 @@
 		</div>
 	</div>
 </div>
+
+{#if detailCard}
+	<CardDetailModal card={detailCard} onclose={() => detailCard = null} />
+{/if}

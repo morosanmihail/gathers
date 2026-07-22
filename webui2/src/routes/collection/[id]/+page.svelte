@@ -7,6 +7,7 @@
 	import CollectionFilterBar from '$lib/components/CollectionFilterBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import PurchaseHistoryModal from '$lib/components/PurchaseHistoryModal.svelte';
+	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import {
 		getCollectionCards, getCollectionCount,
 		searchCollectionCards, searchCollectionCount,
@@ -39,6 +40,7 @@
 	let searchOpen = $state(false);
 	let filterOpen = $state(false);
 	let historyOpen = $state(false);
+	let detailCard = $state<CollectionCard | null>(null);
 	let filterDebounce: ReturnType<typeof setTimeout> | null = null;
 
 	const filterActive = $derived(
@@ -270,7 +272,7 @@
 		{#if app.viewMode === 'grid'}
 			<div class="card-grid">
 				{#each cards as card (card.collectionId + '-' + card.id)}
-					<CardTile {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} />
+					<CardTile {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} onclick={(c) => detailCard = c as CollectionCard} />
 				{/each}
 			</div>
 		{:else}
@@ -294,7 +296,7 @@
 					{/each}
 				</div>
 				{#each cards as card (card.collectionId + '-' + card.id)}
-					<CardRow {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} />
+					<CardRow {card} collectionMode collection={collectionId} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} onAdjust={adjustCardQty} onclick={(c) => detailCard = c as CollectionCard} />
 				{/each}
 			</div>
 		{/if}
@@ -320,4 +322,8 @@
 		collection={collectionId}
 		onclose={() => historyOpen = false}
 	/>
+{/if}
+
+{#if detailCard}
+	<CardDetailModal card={detailCard} onclose={() => detailCard = null} />
 {/if}
