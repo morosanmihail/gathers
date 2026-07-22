@@ -52,8 +52,15 @@
 			} else {
 				data = await searchMtg(filters, p);
 			}
+			// No total-count endpoint for these searches: grow the estimate as the user
+			// pages forward (exact once a short page proves the end), and step back if
+			// we overshot instead of stranding them on a dead empty page.
+			if (data.length === 0 && p > 1) {
+				await doSearch(p - 1);
+				return;
+			}
 			results = data;
-			if (p === 1) total = data.length >= PAGE_SIZE ? PAGE_SIZE * 10 : data.length;
+			total = data.length < PAGE_SIZE ? (p - 1) * PAGE_SIZE + data.length : p * PAGE_SIZE + 1;
 			searched = true;
 
 			if (app.pricingEnabled) {

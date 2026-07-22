@@ -120,7 +120,25 @@ export interface SearchFilters {
 	energyTypes: string[];
 	sortBy: string;
 	sortOrder: 'Asc' | 'Desc';
+	// MTG-only advanced filters
+	manaValueMin: string;
+	manaValueMax: string;
+	colors: string[];
+	keywords: string;
+	power: string;
+	toughness: string;
+	loyalty: string;
+	defense: string;
+	isReserved: TriState;
+	isPromo: TriState;
+	isReprint: TriState;
+	isFullArt: TriState;
+	borderColor: string;
+	legalIn: string;
 }
+
+// '' = don't filter, 'true'/'false' = require present/absent
+export type TriState = '' | 'true' | 'false';
 
 export interface PriceRetailer {
 	normal?: number;
@@ -173,9 +191,52 @@ export function defaultFilters(): SearchFilters {
 		domains: [],
 		energyTypes: [],
 		sortBy: 'Name',
-		sortOrder: 'Asc'
+		sortOrder: 'Asc',
+		manaValueMin: '',
+		manaValueMax: '',
+		colors: [],
+		keywords: '',
+		power: '',
+		toughness: '',
+		loyalty: '',
+		defense: '',
+		isReserved: '',
+		isPromo: '',
+		isReprint: '',
+		isFullArt: '',
+		borderColor: '',
+		legalIn: ''
 	};
 }
+
+// mtgjson `cardLegalities` format columns — must match retrieval::LEGALITY_FORMATS server-side.
+export const legalityFormats: { value: string; label: string }[] = [
+	{ value: 'standard', label: 'Standard' },
+	{ value: 'pioneer', label: 'Pioneer' },
+	{ value: 'modern', label: 'Modern' },
+	{ value: 'legacy', label: 'Legacy' },
+	{ value: 'vintage', label: 'Vintage' },
+	{ value: 'commander', label: 'Commander' },
+	{ value: 'paupercommander', label: 'Pauper Commander' },
+	{ value: 'pauper', label: 'Pauper' },
+	{ value: 'brawl', label: 'Brawl' },
+	{ value: 'standardbrawl', label: 'Standard Brawl' },
+	{ value: 'alchemy', label: 'Alchemy' },
+	{ value: 'historic', label: 'Historic' },
+	{ value: 'timeless', label: 'Timeless' },
+	{ value: 'gladiator', label: 'Gladiator' },
+	{ value: 'penny', label: 'Penny Dreadful' },
+	{ value: 'duel', label: 'Duel Commander' },
+	{ value: 'oathbreaker', label: 'Oathbreaker' },
+	{ value: 'predh', label: 'PreDH' },
+	{ value: 'premodern', label: 'Premodern' },
+	{ value: 'oldschool', label: 'Old School' },
+	{ value: 'future', label: 'Future' },
+	{ value: 'tlr', label: 'The List' }
+];
+
+// Known mtgjson `borderColor` values.
+export const borderColors = ['black', 'white', 'borderless', 'silver', 'gold', 'yellow'];
 
 export function cardImageUrl(card: CollectionCard | MtgCard | RiftboundCard | PokemonCard): string {
 	// Riftbound and Pokemon store image URL directly

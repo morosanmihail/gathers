@@ -458,6 +458,25 @@ function buildSearchBody(filters: SearchFilters): Record<string, unknown> {
 	if (filters.energyTypes.length) body.energyTypes = filters.energyTypes;
 	if (filters.sortBy) body.sortBy = filters.sortBy;
 	if (filters.sortOrder) body.sortOrder = filters.sortOrder;
+
+	// MTG-only advanced filters
+	const manaMin = parseFloat(filters.manaValueMin);
+	if (!isNaN(manaMin)) body.manaValueMin = manaMin;
+	const manaMax = parseFloat(filters.manaValueMax);
+	if (!isNaN(manaMax)) body.manaValueMax = manaMax;
+	if (filters.colors.length) body.colors = filters.colors;
+	const keywords = filters.keywords.split(',').map(k => k.trim()).filter(Boolean);
+	if (keywords.length) body.keywords = keywords;
+	if (filters.power) body.power = filters.power;
+	if (filters.toughness) body.toughness = filters.toughness;
+	if (filters.loyalty) body.loyalty = filters.loyalty;
+	if (filters.defense) body.defense = filters.defense;
+	if (filters.isReserved) body.isReserved = filters.isReserved === 'true';
+	if (filters.isPromo) body.isPromo = filters.isPromo === 'true';
+	if (filters.isReprint) body.isReprint = filters.isReprint === 'true';
+	if (filters.isFullArt) body.isFullArt = filters.isFullArt === 'true';
+	if (filters.borderColor) body.borderColor = filters.borderColor;
+	if (filters.legalIn) body.legalIn = filters.legalIn;
 	return body;
 }
 
