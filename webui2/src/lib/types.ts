@@ -41,6 +41,24 @@ export interface MtgCard {
 	manaCost?: string;
 	power?: string;
 	toughness?: string;
+	// Extended fields (mtgjson metadata)
+	manaValue?: number;
+	typeLine?: string;
+	loyalty?: string;
+	defense?: string;
+	keywords?: string[];
+	colors?: string[];
+	legalities?: Record<string, string>;
+	finishes?: string[];
+	isReserved?: boolean;
+	isPromo?: boolean;
+	isReprint?: boolean;
+	borderColor?: string;
+	frameEffects?: string[];
+	isFullArt?: boolean;
+	watermark?: string;
+	flavorText?: string;
+	setName?: string;
 }
 
 export interface RiftboundCard {
@@ -89,6 +107,7 @@ export interface CollectionCard {
 	image?: string;
 	name: string;
 	setCode?: string;
+	collectorNumber?: string;
 	rarity?: string;
 	artist?: string;
 	text?: string;

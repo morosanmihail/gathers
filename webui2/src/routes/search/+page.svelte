@@ -6,6 +6,7 @@
 	import CardTile from '$lib/components/CardTile.svelte';
 	import CardRow from '$lib/components/CardRow.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, bestPrice } from '$lib/types';
@@ -25,6 +26,7 @@
 	let addCollection = $state('');
 	let addPrice = $state('');
 	let toast = $state('');
+	let detailCard = $state<AnyCard | null>(null);
 
 	// Pick first available system once loaded
 	$effect(() => {
@@ -251,6 +253,7 @@
 								price={bestPrice(prices[card.id])}
 								cardPrices={prices[card.id]}
 								onAdd={app.collectionsEnabled ? promptAdd : undefined}
+								onclick={(c) => detailCard = c as AnyCard}
 							/>
 						{/each}
 					</div>
@@ -270,6 +273,7 @@
 								price={bestPrice(prices[card.id])}
 								cardPrices={prices[card.id]}
 								onAdd={app.collectionsEnabled ? promptAdd : undefined}
+								onclick={(c) => detailCard = c as AnyCard}
 							/>
 						{/each}
 					</div>
@@ -310,4 +314,8 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if detailCard}
+	<CardDetailModal card={detailCard} onclose={() => detailCard = null} />
 {/if}
