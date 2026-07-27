@@ -3,7 +3,8 @@ use reqwest::StatusCode;
 
 use crate::models::{
     AllPurchaseHistoryResponse, CardToAdd, Collection, CollectionAddResponse, CollectionCard,
-    CollectionRemoveResponse, PublicCollectionPage, PurchaseHistoryResponse,
+    CollectionRemoveResponse, PublicCollectionPage, PurchaseHistoryResponse, ShareLink,
+    ShareLinkRevokeResponse,
 };
 
 /// HTTP client for the GatheRs server.
@@ -120,16 +121,42 @@ impl GathersClient {
     // ── shareable read-only view ────────────────────────────────────────────
 
     /// One page of the read-only, shareable collection view — full card data
-    /// merged with collection metadata, in a single request.
+    /// merged with collection metadata, in a single request. `token` is a
+    /// share link minted via `create_share_link`, not the collection id.
     pub async fn public_cards(
         &self,
-        collection_id: &str,
+        token: &str,
         offset: usize,
         limit: usize,
     ) -> eyre::Result<PublicCollectionPage> {
         self.get(&format!(
-            "/api/share/collection/{}?offset={offset}&limit={limit}",
-            urlenc(collection_id)
+            "/api/share/{}?offset={offset}&limit={limit}",
+            urlenc(token)
+        ))
+        .await
+    }
+
+    // ── share link management (owner-only) ──────────────────────────────────
+
+    pub async fn create_share_link(&self, collection_id: &str) -> eyre::Result<ShareLink> {
+        self.post_empty(&format!("/api/collection/share/{}", urlenc(collection_id)))
+            .await
+    }
+
+    pub async fn list_share_links(&self, collection_id: &str) -> eyre::Result<Vec<ShareLink>> {
+        self.get(&format!("/api/collection/share/{}", urlenc(collection_id)))
+            .await
+    }
+
+    pub async fn revoke_share_link(
+        &self,
+        collection_id: &str,
+        token: &str,
+    ) -> eyre::Result<ShareLinkRevokeResponse> {
+        self.delete(&format!(
+            "/api/collection/share/{}/{}",
+            urlenc(collection_id),
+            urlenc(token)
         ))
         .await
     }
@@ -199,6 +226,17 @@ impl GathersClient {
             .await
             .with_context(|| format!("POST {url}"))?;
         parse_response(resp, "POST", &url).await
+    }
+
+    async fn delete<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {
+        let url = format!("{}{path}", self.base_url);
+        let resp = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url}"))?;
+        parse_response(resp, "DELETE", &url).await
     }
 }
 

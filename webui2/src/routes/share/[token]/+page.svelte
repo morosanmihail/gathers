@@ -10,7 +10,7 @@
 	// collection-entry columns, not card-level fields like name/rarity).
 	const SORTABLE_FIELDS = new Set(['Quantity', 'FoilQuantity']);
 
-	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
+	const token = $derived(decodeURIComponent($page.params.token ?? ''));
 
 	let cards = $state<CollectionCard[]>([]);
 	let total = $state(0);
@@ -21,11 +21,13 @@
 	let sortOrder = $state<'Asc' | 'Desc'>('Asc');
 	let detailCard = $state<CollectionCard | null>(null);
 
+	const collectionId = $derived(cards[0]?.collectionId ?? '');
+
 	async function load(p = currentPage) {
 		loading = true;
 		error = '';
 		try {
-			const result = await getPublicCollectionCards(collectionId, p, sortBy, sortOrder);
+			const result = await getPublicCollectionCards(token, p, sortBy, sortOrder);
 			cards = result.cards;
 			total = result.total;
 		} catch (e) {
@@ -38,7 +40,7 @@
 	}
 
 	$effect(() => {
-		collectionId;
+		token;
 		currentPage = 1;
 		load(1);
 	});
@@ -72,7 +74,7 @@
 </script>
 
 <svelte:head>
-	<title>{collectionId} - gatheRs (shared)</title>
+	<title>{collectionId || 'Shared collection'} - gatheRs (shared)</title>
 </svelte:head>
 
 <div class="app-shell">
@@ -116,7 +118,7 @@
 
 	<main class="content">
 		<div class="page-header">
-			<h1 class="page-title">{collectionId}</h1>
+			<h1 class="page-title">{collectionId || 'Shared collection'}</h1>
 			{#if !loading && !error}
 				<span class="page-subtitle">{total.toLocaleString()} card{total !== 1 ? 's' : ''}</span>
 			{/if}

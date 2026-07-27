@@ -20,12 +20,13 @@
 		onSearchOpen: () => void;
 		searchOpen: boolean;
 		onHistoryOpen?: () => void;
+		onShareOpen?: () => void;
 		onFilterOpen?: () => void;
 		filterOpen?: boolean;
 		filterActive?: boolean;
 	}
 
-	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
+	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onShareOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
 
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
 	let moveDest = $state('');
@@ -246,6 +247,19 @@
 				<path d="M8 3l2 2" stroke="currentColor" stroke-width="1.3"/>
 			</svg>
 			Rename
+		</button>
+	{/if}
+
+	<!-- Share links -->
+	{#if onShareOpen}
+		<button class="btn" onclick={onShareOpen} title="Manage shareable links">
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+				<circle cx="3" cy="7" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<circle cx="11" cy="3" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<circle cx="11" cy="11" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<path d="M4.6 6.2L9.4 3.8M4.6 7.8L9.4 10.2" stroke="currentColor" stroke-width="1.3"/>
+			</svg>
+			Share
 		</button>
 	{/if}
 

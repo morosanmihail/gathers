@@ -5,6 +5,7 @@
 	import CollectionFilterBar from '$lib/components/CollectionFilterBar.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import PurchaseHistoryModal from '$lib/components/PurchaseHistoryModal.svelte';
+	import ShareLinksModal from '$lib/components/ShareLinksModal.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import {
 		getCollectionCards, getCollectionCount,
@@ -38,6 +39,7 @@
 	let searchOpen = $state(false);
 	let filterOpen = $state(false);
 	let historyOpen = $state(false);
+	let shareOpen = $state(false);
 	let detailCard = $state<CollectionCard | null>(null);
 	let filterDebounce: ReturnType<typeof setTimeout> | null = null;
 
@@ -203,6 +205,7 @@
 		onSearchOpen={() => searchOpen = !searchOpen}
 		{searchOpen}
 		onHistoryOpen={() => historyOpen = true}
+		onShareOpen={() => shareOpen = true}
 		onFilterOpen={() => { filterOpen = !filterOpen; if (!filterOpen) { collectionFilters = defaultFilters(); currentPage = 1; load(1); } }}
 		{filterOpen}
 		{filterActive}
@@ -303,6 +306,13 @@
 	<PurchaseHistoryModal
 		collection={collectionId}
 		onclose={() => historyOpen = false}
+	/>
+{/if}
+
+{#if shareOpen}
+	<ShareLinksModal
+		collection={collectionId}
+		onclose={() => shareOpen = false}
 	/>
 {/if}
 

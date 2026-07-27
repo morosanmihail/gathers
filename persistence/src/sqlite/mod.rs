@@ -1,6 +1,7 @@
 mod cards;
 mod collections;
 mod purchase_history;
+mod share_links;
 #[cfg(test)]
 mod tests;
 
@@ -13,7 +14,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, UpdateEntryResult};
+use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -280,5 +281,25 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<UpdateEntryResult> {
         let conn = self.connection.lock().await;
         purchase_history::update_entry(&conn, collection_id, entry_id, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit)
+    }
+
+    async fn create_share_link(&mut self, collection_id: &CollectionID) -> eyre::Result<ShareLink> {
+        let conn = self.connection.lock().await;
+        share_links::create(&conn, collection_id)
+    }
+
+    async fn list_share_links(&self, collection_id: &CollectionID) -> eyre::Result<Vec<ShareLink>> {
+        let conn = self.connection.lock().await;
+        share_links::list(&conn, collection_id)
+    }
+
+    async fn revoke_share_link(&mut self, collection_id: &CollectionID, token: &str) -> eyre::Result<bool> {
+        let conn = self.connection.lock().await;
+        share_links::revoke(&conn, collection_id, token)
+    }
+
+    async fn resolve_share_link(&self, token: &str) -> eyre::Result<Option<CollectionID>> {
+        let conn = self.connection.lock().await;
+        share_links::resolve(&conn, token)
     }
 }

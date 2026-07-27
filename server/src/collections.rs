@@ -23,7 +23,7 @@ use crate::{
         CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
         CollectionPurchaseHistoryEntry, CollectionRenameRequest, CollectionValueBreakdown,
         CollectionsSearchQuery, PublicCollectionPage, PurchaseHistoryResponse, ResultCard,
-        ResultCardInner,
+        ResultCardInner, ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
 use models::CardTrait as _;
@@ -362,6 +362,61 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorPayload {
                     error: format!("Failed to move cards. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_list(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<Vec<ShareLinkResponse>>, ApiError> {
+        let storage = &state.1.lock().await.storage;
+
+        match storage.list_share_links(&id).await {
+            Ok(links) => Ok(Json(links.into_iter().map(ShareLinkResponse::from).collect())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to list share links. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_create(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<ShareLinkResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+
+        match storage.create_share_link(&id).await {
+            Ok(link) => Ok(Json(link.into())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to create share link. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_revoke(
+        State(state): State<GathersState>,
+        Path((id, token)): Path<(String, String)>,
+    ) -> Result<Json<ShareLinkRevokeResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+
+        match storage.revoke_share_link(&id, &token).await {
+            Ok(revoked) => Ok(Json(ShareLinkRevokeResponse { revoked })),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to revoke share link. {e}"),
                 }),
             )),
         }
@@ -1210,6 +1265,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/remove/{id}", post(remove))
         .api_route("/rename/{id}", post(rename))
         .api_route("/move/{id}", post(move_to))
+        .api_route("/share/{id}", get(share_list).post(share_create))
+        .api_route("/share/{id}/{token}", delete(share_revoke))
         .api_route("/cards/{id}/list", get(cards_get))
         .api_route("/cards/{id}/count", get(collection_cards_count))
         .api_route("/cards/{id}/search", post(collection_cards_search))
@@ -1230,15 +1287,44 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 /// reverse proxy can carve out an auth exception for exactly this prefix
 /// (plus the matching `/share` webui2 page) without exposing any of the
 /// collection-editing endpoints.
+///
+/// A collection is reachable here only via an opaque share `token` that the
+/// owner explicitly minted (see the `/share` management endpoints on
+/// `collection_routes`) and can revoke at any time — knowing the collection's
+/// name grants no access.
 pub fn public_collection_routes() -> ApiRouter<GathersState> {
     /// One page of full card data for a collection, merging entry metadata
     /// (quantity, provider, ...) with full card details in a single response
     /// so a shared link doesn't need per-card follow-up requests.
     async fn get_public_cards(
         State(state): State<GathersState>,
-        Path(collection_id): Path<String>,
+        Path(token): Path<String>,
         Query(query): Query<CollectionCardsQuery>,
     ) -> Result<Json<PublicCollectionPage>, ApiError> {
+        let collection_id = state
+            .1
+            .lock()
+            .await
+            .storage
+            .resolve_share_link(&token)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorPayload {
+                        error: format!("Failed to resolve share link. {e}"),
+                    }),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorPayload {
+                        error: "This share link is invalid or has been revoked.".to_string(),
+                    }),
+                )
+            })?;
+
         let collection_params = CollectionCardsParams {
             offset: query.offset,
             limit: query.limit.min(1000),
@@ -1336,5 +1422,5 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
         Ok(Json(PublicCollectionPage { cards, total }))
     }
 
-    ApiRouter::new().api_route("/collection/{id}", get(get_public_cards))
+    ApiRouter::new().api_route("/{token}", get(get_public_cards))
 }

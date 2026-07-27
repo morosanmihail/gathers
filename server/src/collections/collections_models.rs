@@ -230,6 +230,33 @@ pub struct PublicCollectionPage {
     pub total: usize,
 }
 
+/// A shareable, read-only link granting public access to a collection via
+/// its opaque `token`. Owner-managed: created and revoked explicitly through
+/// the `/collection/share/{id}` endpoints.
+#[derive(Serialize, JsonSchema)]
+pub struct ShareLinkResponse {
+    pub token: String,
+    #[serde(rename = "collectionId")]
+    pub collection_id: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+impl From<persistence::ShareLink> for ShareLinkResponse {
+    fn from(value: persistence::ShareLink) -> Self {
+        Self {
+            token: value.token,
+            collection_id: value.collection_id,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ShareLinkRevokeResponse {
+    pub revoked: bool,
+}
+
 impl From<&CollectionCard> for models::CollectionCard {
     fn from(value: &CollectionCard) -> Self {
         models::CollectionCard {

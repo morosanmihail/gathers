@@ -1,7 +1,12 @@
 //! End-to-end test for the shareable, read-only collection view:
-//!   /api/share/collection/{id} should return full card data merged with
-//!   collection metadata, paginated, matching what /cards/{id}/list +
-//!   per-provider card lookups would otherwise take multiple requests to get.
+//!   /api/share/{token} should return full card data merged with collection
+//!   metadata, paginated, matching what /cards/{id}/list + per-provider card
+//!   lookups would otherwise take multiple requests to get.
+//!
+//!   A collection is only reachable this way through an explicitly minted
+//!   share token (/api/collection/share/{id}) — knowing the collection's
+//!   name grants no access, and revoking the token immediately invalidates
+//!   it (/api/collection/share/{id}/{token}, DELETE).
 //!
 //! Run against a live server:
 //!   cargo run --example share_view
@@ -46,23 +51,39 @@ async fn main() -> eyre::Result<()> {
 }
 
 async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
-    // ── 1. Empty collection ───────────────────────────────────────────────────
-    step("1. Shared view of a freshly created (empty) collection");
+    // ── 1. No share link yet: collection name alone grants no access ────────
+    step("1. Without a share link, the collection isn't reachable at all");
 
     client.add_collection(col).await?;
 
-    let page = client.public_cards(col, 0, 1000).await?;
+    ensure(
+        client.public_cards(col, 0, 1000).await.is_err(),
+        "the collection id itself is not a valid share token",
+    )?;
+    ok("collection name alone doesn't grant access to /api/share");
+
+    // ── 2. Create a share link, verify the empty collection view ────────────
+    step("2. Create a share link, view the (empty) collection through it");
+
+    let link = client.create_share_link(col).await?;
+    ensure(!link.token.is_empty(), "created link has a non-empty token")?;
+    eq(link.collection_id.as_str(), col, "link is scoped to our collection")?;
+
+    let links = client.list_share_links(col).await?;
+    eq(links.len(), 1, "collection now has exactly 1 share link")?;
+
+    let page = client.public_cards(&link.token, 0, 1000).await?;
     eq(page.total, 0, "empty collection: total = 0")?;
     ensure(page.cards.is_empty(), "empty collection: no cards")?;
-    ok("empty collection returns total=0, no cards");
+    ok("share token resolves to the collection; empty collection returns total=0, no cards");
 
-    // ── 2. Add cards, verify full data is merged in a single request ─────────
-    step("2. Add cards, verify merged card data");
+    // ── 3. Add cards, verify full data is merged in a single request ─────────
+    step("3. Add cards, verify merged card data");
 
     client.add_cards(col, CARD_A, 4, 0, None).await?;
     client.add_cards(col, CARD_B, 0, 2, None).await?;
 
-    let page = client.public_cards(col, 0, 1000).await?;
+    let page = client.public_cards(&link.token, 0, 1000).await?;
     eq(page.total, 2, "2 distinct cards")?;
     eq(page.cards.len(), 2, "page returns both cards in one request")?;
 
@@ -84,14 +105,14 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     ensure(!field_str(b, "name").is_empty(), "card B has a non-empty name")?;
     ok("both cards present with quantities + full card details merged in");
 
-    // ── 3. Pagination: two pages of size 1 cover both cards, no overlap ──────
-    step("3. Pagination");
+    // ── 4. Pagination: two pages of size 1 cover both cards, no overlap ──────
+    step("4. Pagination");
 
-    let page0 = client.public_cards(col, 0, 1).await?;
+    let page0 = client.public_cards(&link.token, 0, 1).await?;
     eq(page0.cards.len(), 1, "page 0: 1 card")?;
     eq(page0.total, 2, "page 0: total still 2")?;
 
-    let page1 = client.public_cards(col, 1, 1).await?;
+    let page1 = client.public_cards(&link.token, 1, 1).await?;
     eq(page1.cards.len(), 1, "page 1: 1 card")?;
     eq(page1.total, 2, "page 1: total still 2")?;
 
@@ -102,6 +123,20 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     ensure(ids.contains(id0.as_str()), "page 0 card is one of the two added")?;
     ensure(ids.contains(id1.as_str()), "page 1 card is one of the two added")?;
     ok("pagination covers exactly the 2 cards with no overlap");
+
+    // ── 5. Revoking the link immediately invalidates it ──────────────────────
+    step("5. Revoke the share link");
+
+    let revoke = client.revoke_share_link(col, &link.token).await?;
+    ensure(revoke.revoked, "revoke reports the token was found and removed")?;
+
+    ensure(
+        client.public_cards(&link.token, 0, 1000).await.is_err(),
+        "the revoked token no longer resolves to the collection",
+    )?;
+    let links = client.list_share_links(col).await?;
+    ensure(links.is_empty(), "collection has no active share links left")?;
+    ok("revoked token is immediately invalid");
 
     println!("\n✓ All assertions passed");
     Ok(())
