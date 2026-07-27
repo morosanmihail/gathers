@@ -15,7 +15,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 
-use crate::collections::collection_routes;
+use crate::collections::{collection_routes, public_collection_routes};
 use crate::mtg_api::mtg_routes;
 use crate::pokemon_api::pokemon_routes;
 use crate::riftbound_api::riftbound_routes;
@@ -690,6 +690,7 @@ async fn main() -> eyre::Result<()> {
         .nest("/api/riftbound", riftbound_routes())
         .nest("/api/pokemon", pokemon_routes())
         .nest("/api/collection", collection_routes())
+        .nest("/api/share", public_collection_routes())
         .nest("/api/settings", settings_routes())
         .api_route("/api/system", get(get_system_info))
         .route("/api.json", axum::routing::get(serve_api))

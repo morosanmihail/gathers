@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 
 use crate::models::{
     AllPurchaseHistoryResponse, CardToAdd, Collection, CollectionAddResponse, CollectionCard,
-    CollectionRemoveResponse, PurchaseHistoryResponse,
+    CollectionRemoveResponse, PublicCollectionPage, PurchaseHistoryResponse,
 };
 
 /// HTTP client for the GatheRs server.
@@ -114,6 +114,23 @@ impl GathersClient {
             &format!("/api/collection/move/{}", urlenc(to_collection_id)),
             cards,
         )
+        .await
+    }
+
+    // ── shareable read-only view ────────────────────────────────────────────
+
+    /// One page of the read-only, shareable collection view — full card data
+    /// merged with collection metadata, in a single request.
+    pub async fn public_cards(
+        &self,
+        collection_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> eyre::Result<PublicCollectionPage> {
+        self.get(&format!(
+            "/api/share/collection/{}?offset={offset}&limit={limit}",
+            urlenc(collection_id)
+        ))
         .await
     }
 

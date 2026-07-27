@@ -75,3 +75,13 @@ pub struct CollectionPurchaseHistoryEntry {
 pub struct AllPurchaseHistoryResponse {
     pub entries: Vec<CollectionPurchaseHistoryEntry>,
 }
+
+/// Response from the read-only `/api/share/collection/{id}` endpoint. Each
+/// entry in `cards` is a full card (whichever provider it belongs to) merged
+/// with its collection metadata (quantity, provider, ...) — the shape varies
+/// by provider, so it's left as raw JSON rather than a fixed struct.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicCollectionPage {
+    pub cards: Vec<serde_json::Value>,
+    pub total: usize,
+}

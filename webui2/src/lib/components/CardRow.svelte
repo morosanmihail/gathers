@@ -11,6 +11,7 @@
 	interface Props {
 		card: AnyCard | CollectionCard;
 		collectionMode?: boolean;
+		selectable?: boolean;
 		collection?: string;
 		price?: string | null;
 		cardPrices?: CardPrices;
@@ -20,7 +21,7 @@
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -36,7 +37,7 @@
 >
 	<!-- Select checkbox -->
 	<div class="card-row-cell" style="display:flex;align-items:center;justify-content:center;">
-		{#if collectionMode}
+		{#if collectionMode && selectable}
 			<SelectCheckbox
 				checked={isSelected}
 				ontoggle={() => app.toggleSelected(card.id)}

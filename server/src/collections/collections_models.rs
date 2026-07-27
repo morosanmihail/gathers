@@ -220,6 +220,16 @@ pub struct CollectionCard {
     pub provider: String,
 }
 
+/// A page of full card data for a shareable, read-only collection view.
+/// Each entry in `cards` merges the collection entry (quantity, provider, ...)
+/// with the full card details, so the client needs a single request per page
+/// instead of a separate card-detail lookup.
+#[derive(Serialize, JsonSchema)]
+pub struct PublicCollectionPage {
+    pub cards: Vec<serde_json::Value>,
+    pub total: usize,
+}
+
 impl From<&CollectionCard> for models::CollectionCard {
     fn from(value: &CollectionCard) -> Self {
         models::CollectionCard {

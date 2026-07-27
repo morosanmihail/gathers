@@ -249,6 +249,31 @@ export async function getCollectionCount(collection: string, provider = ''): Pro
 	});
 }
 
+// Shareable, read-only collection view — a single request returns a page of
+// fully merged card data (entry + card details), unlike getCollectionCards
+// which needs a follow-up batch lookup per provider. Lives under /api/share
+// so a reverse proxy can expose just this prefix (plus the /share webui2
+// route) without authenticating the rest of the app.
+export interface PublicCollectionPage {
+	cards: CollectionCard[];
+	total: number;
+}
+
+export async function getPublicCollectionCards(
+	collection: string,
+	page: number,
+	sortBy = '',
+	sortOrder = 'Asc'
+): Promise<PublicCollectionPage> {
+	const params = new URLSearchParams({
+		offset: String((page - 1) * PAGE_SIZE),
+		limit: String(PAGE_SIZE)
+	});
+	if (sortBy) params.set('sort_by', sortBy);
+	if (sortOrder !== 'Asc') params.set('sort_order', sortOrder);
+	return fetchJSON(`/api/share/collection/${encodeURIComponent(collection)}?${params}`);
+}
+
 export async function searchCollectionCards(
 	collection: string,
 	filters: SearchFilters,

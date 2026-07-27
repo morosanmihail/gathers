@@ -16,6 +16,7 @@
 		listHeaders: ListHeader[];
 		keyFn: (card: AnyCard | CollectionCard) => string;
 		collectionMode?: boolean;
+		selectable?: boolean;
 		collection?: string;
 		prices?: Record<string, CardPrices>;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
@@ -34,7 +35,7 @@
 	}
 
 	let {
-		cards, viewMode, listHeaders, keyFn, collectionMode = false, collection = '',
+		cards, viewMode, listHeaders, keyFn, collectionMode = false, selectable = true, collection = '',
 		prices = {}, onAdd, onAddFoil, onAdjust, onclick, sortBy = '', sortOrder = 'Asc',
 		onSortClick, total, page, onPageChange, gridClass = 'card-grid', gridStyle = '', listClass = 'card-list'
 	}: Props = $props();
@@ -43,7 +44,7 @@
 {#if viewMode === 'grid'}
 	<div class={gridClass} style={gridStyle}>
 		{#each cards as card (keyFn(card))}
-			<CardTile {card} {collectionMode} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
+			<CardTile {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
 		{/each}
 	</div>
 {:else}
@@ -71,7 +72,7 @@
 			{/each}
 		</div>
 		{#each cards as card (keyFn(card))}
-			<CardRow {card} {collectionMode} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
+			<CardRow {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
 		{/each}
 	</div>
 {/if}
