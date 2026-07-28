@@ -75,3 +75,29 @@ pub struct CollectionPurchaseHistoryEntry {
 pub struct AllPurchaseHistoryResponse {
     pub entries: Vec<CollectionPurchaseHistoryEntry>,
 }
+
+/// Response from the read-only `/api/share/{token}` endpoint. Each entry in
+/// `cards` is a full card (whichever provider it belongs to) merged with its
+/// collection metadata (quantity, provider, ...) — the shape varies by
+/// provider, so it's left as raw JSON rather than a fixed struct.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicCollectionPage {
+    pub cards: Vec<serde_json::Value>,
+    pub total: usize,
+}
+
+/// A shareable, read-only link granting public access to a collection via
+/// its opaque `token`, minted through `/api/collection/share/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareLink {
+    pub token: String,
+    #[serde(rename = "collectionId")]
+    pub collection_id: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareLinkRevokeResponse {
+    pub revoked: bool,
+}

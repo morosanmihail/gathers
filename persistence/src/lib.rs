@@ -151,6 +151,42 @@ pub trait PersistenceSystemTrait {
         normal_price_per_unit: Option<f64>,
         foil_price_per_unit: Option<f64>,
     ) -> impl std::future::Future<Output = eyre::Result<UpdateEntryResult>>;
+
+    /// Explicitly grants read-only public access to a collection by minting
+    /// a new, unguessable share token. This is the only way a collection
+    /// becomes reachable through the public share endpoint.
+    fn create_share_link(
+        &mut self,
+        collection_id: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<ShareLink>>;
+
+    fn list_share_links(
+        &self,
+        collection_id: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<ShareLink>>>;
+
+    /// Invalidates a share link. Returns `false` if the token didn't exist
+    /// (or belonged to a different collection).
+    fn revoke_share_link(
+        &mut self,
+        collection_id: &CollectionID,
+        token: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
+
+    /// Resolves a share token to its collection id, if the token is valid
+    /// (exists and hasn't been revoked).
+    fn resolve_share_link(
+        &self,
+        token: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionID>>>;
+}
+
+/// A single shareable, read-only link granting public access to a collection.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ShareLink {
+    pub token: String,
+    pub collection_id: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -22,7 +22,8 @@ use crate::{
         APICardSearchFilters, CardIdentInner, CardToAdd, CollectionAddResponse, CollectionCard,
         CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
         CollectionPurchaseHistoryEntry, CollectionRenameRequest, CollectionValueBreakdown,
-        CollectionsSearchQuery, PurchaseHistoryResponse, ResultCard, ResultCardInner,
+        CollectionsSearchQuery, PublicCollectionPage, PurchaseHistoryResponse, ResultCard,
+        ResultCardInner, ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
 use models::CardTrait as _;
@@ -153,6 +154,27 @@ fn matches_card_filters(card: &Card, filters: &APICardSearchFilters) -> bool {
     }
 
     true
+}
+
+/// Serializes a card's full detail (whichever provider it belongs to) into a
+/// flat JSON object matching the shape the webui2 client already expects for
+/// a merged "collection card" (see `PublicCollectionPage`).
+fn card_to_public_json(card: &Card) -> serde_json::Map<String, serde_json::Value> {
+    let value = match card {
+        Card::Magic(m) => {
+            serde_json::to_value(crate::mtg_api::mtg_api_models::APICard::from(m.clone()))
+        }
+        Card::Riftbound(r) => serde_json::to_value(
+            crate::riftbound_api::riftbound_api_models::APIRiftboundCard::from(r.clone()),
+        ),
+        Card::Pokemon(p) => serde_json::to_value(
+            crate::pokemon_api::pokemon_api_models::APIPokemonCard::from(p.clone()),
+        ),
+    };
+    match value {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    }
 }
 
 fn card_name(card: &Card) -> &str {
@@ -340,6 +362,61 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorPayload {
                     error: format!("Failed to move cards. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_list(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<Vec<ShareLinkResponse>>, ApiError> {
+        let storage = &state.1.lock().await.storage;
+
+        match storage.list_share_links(&id).await {
+            Ok(links) => Ok(Json(links.into_iter().map(ShareLinkResponse::from).collect())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to list share links. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_create(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<ShareLinkResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+
+        match storage.create_share_link(&id).await {
+            Ok(link) => Ok(Json(link.into())),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to create share link. {e}"),
+                }),
+            )),
+        }
+    }
+
+    async fn share_revoke(
+        State(state): State<GathersState>,
+        Path((id, token)): Path<(String, String)>,
+    ) -> Result<Json<ShareLinkRevokeResponse>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+
+        match storage.revoke_share_link(&id, &token).await {
+            Ok(revoked) => Ok(Json(ShareLinkRevokeResponse { revoked })),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to revoke share link. {e}"),
                 }),
             )),
         }
@@ -1188,6 +1265,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/remove/{id}", post(remove))
         .api_route("/rename/{id}", post(rename))
         .api_route("/move/{id}", post(move_to))
+        .api_route("/share/{id}", get(share_list).post(share_create))
+        .api_route("/share/{id}/{token}", delete(share_revoke))
         .api_route("/cards/{id}/list", get(cards_get))
         .api_route("/cards/{id}/count", get(collection_cards_count))
         .api_route("/cards/{id}/search", post(collection_cards_search))
@@ -1201,4 +1280,147 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/value_breakdown", get(collection_value_breakdown))
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export))
+}
+
+/// Routes for read-only, shareable collection links. Distinct from
+/// `collection_routes` (mounted separately, under `/api/share`) so that a
+/// reverse proxy can carve out an auth exception for exactly this prefix
+/// (plus the matching `/share` webui2 page) without exposing any of the
+/// collection-editing endpoints.
+///
+/// A collection is reachable here only via an opaque share `token` that the
+/// owner explicitly minted (see the `/share` management endpoints on
+/// `collection_routes`) and can revoke at any time — knowing the collection's
+/// name grants no access.
+pub fn public_collection_routes() -> ApiRouter<GathersState> {
+    /// One page of full card data for a collection, merging entry metadata
+    /// (quantity, provider, ...) with full card details in a single response
+    /// so a shared link doesn't need per-card follow-up requests.
+    async fn get_public_cards(
+        State(state): State<GathersState>,
+        Path(token): Path<String>,
+        Query(query): Query<CollectionCardsQuery>,
+    ) -> Result<Json<PublicCollectionPage>, ApiError> {
+        let collection_id = state
+            .1
+            .lock()
+            .await
+            .storage
+            .resolve_share_link(&token)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorPayload {
+                        error: format!("Failed to resolve share link. {e}"),
+                    }),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorPayload {
+                        error: "This share link is invalid or has been revoked.".to_string(),
+                    }),
+                )
+            })?;
+
+        let collection_params = CollectionCardsParams {
+            offset: query.offset,
+            limit: query.limit.min(1000),
+            sort_by: query.sort_by.map(persistence::CollectionSortField::from),
+            sort_order: query.sort_order.map(models::filters::SortOrder::from),
+            provider: query.provider.clone(),
+            providers: query.providers
+                .as_deref()
+                .map(|s| s.split(',').map(str::to_string).collect())
+                .unwrap_or_default(),
+        };
+
+        let entries = state
+            .1
+            .lock()
+            .await
+            .storage
+            .get_cards_in_collection_paginated(&collection_id, collection_params)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorPayload {
+                        error: format!("Failed to get cards from collection. {e}"),
+                    }),
+                )
+            })?;
+
+        let providers: Vec<String> = if let Some(p) = query.provider.clone() {
+            vec![p]
+        } else {
+            query.providers
+                .as_deref()
+                .map(|s| s.split(',').map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        let total = state
+            .1
+            .lock()
+            .await
+            .storage
+            .get_cards_in_collection_count(collection_id.clone(), &providers)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorPayload {
+                        error: format!("Failed to get card count for collection. {e}"),
+                    }),
+                )
+            })?;
+
+        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
+
+        let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in &entries {
+            ids_by_provider.entry(entry.provider.clone()).or_default().push(entry.uuid.clone());
+        }
+
+        let mut card_data: HashMap<String, Card> = HashMap::new();
+        for (provider, ids) in &ids_by_provider {
+            if let Some(retrieval) = retrieval_systems.get(provider)
+                && let Ok(data) = retrieval.get_cards_by_ids(ids.clone()).await
+            {
+                card_data.extend(data);
+            }
+        }
+
+        let cards = entries
+            .into_iter()
+            .map(|entry| {
+                let mut obj = card_data
+                    .get(&entry.uuid)
+                    .map(card_to_public_json)
+                    .unwrap_or_default();
+                let time_added = DateTime::parse_from_rfc3339(&entry.time_added)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                obj.insert("id".to_string(), serde_json::Value::String(entry.uuid));
+                obj.insert("quantity".to_string(), serde_json::Value::from(entry.quantity));
+                obj.insert("foilQuantity".to_string(), serde_json::Value::from(entry.foil_quantity));
+                obj.insert(
+                    "collectionId".to_string(),
+                    serde_json::Value::String(collection_id.clone()),
+                );
+                obj.insert(
+                    "timeAdded".to_string(),
+                    serde_json::Value::String(time_added.to_rfc3339()),
+                );
+                obj.insert("provider".to_string(), serde_json::Value::String(entry.provider));
+                serde_json::Value::Object(obj)
+            })
+            .collect();
+
+        Ok(Json(PublicCollectionPage { cards, total }))
+    }
+
+    ApiRouter::new().api_route("/{token}", get(get_public_cards))
 }

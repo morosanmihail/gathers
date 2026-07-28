@@ -249,6 +249,57 @@ export async function getCollectionCount(collection: string, provider = ''): Pro
 	});
 }
 
+// Shareable, read-only collection view — a single request returns a page of
+// fully merged card data (entry + card details), unlike getCollectionCards
+// which needs a follow-up batch lookup per provider. Lives under /api/share
+// so a reverse proxy can expose just this prefix (plus the /share webui2
+// route) without authenticating the rest of the app. Reachable only via an
+// opaque share token the owner explicitly created — the collection name
+// alone grants no access.
+export interface PublicCollectionPage {
+	cards: CollectionCard[];
+	total: number;
+}
+
+export async function getPublicCollectionCards(
+	token: string,
+	page: number,
+	sortBy = '',
+	sortOrder = 'Asc'
+): Promise<PublicCollectionPage> {
+	const params = new URLSearchParams({
+		offset: String((page - 1) * PAGE_SIZE),
+		limit: String(PAGE_SIZE)
+	});
+	if (sortBy) params.set('sort_by', sortBy);
+	if (sortOrder !== 'Asc') params.set('sort_order', sortOrder);
+	return fetchJSON(`/api/share/${encodeURIComponent(token)}?${params}`);
+}
+
+// Share link management — owner-only, lives under /api/collection so it's
+// never exposed by a proxy exception scoped to /api/share.
+export interface ShareLink {
+	token: string;
+	collectionId: string;
+	createdAt: string;
+}
+
+export async function listShareLinks(collection: string): Promise<ShareLink[]> {
+	return fetchJSON(`/api/collection/share/${encodeURIComponent(collection)}`);
+}
+
+export async function createShareLink(collection: string): Promise<ShareLink> {
+	return fetchJSON(`/api/collection/share/${encodeURIComponent(collection)}`, {
+		method: 'POST'
+	});
+}
+
+export async function revokeShareLink(collection: string, token: string): Promise<void> {
+	await fetchJSON(`/api/collection/share/${encodeURIComponent(collection)}/${encodeURIComponent(token)}`, {
+		method: 'DELETE'
+	});
+}
+
 export async function searchCollectionCards(
 	collection: string,
 	filters: SearchFilters,

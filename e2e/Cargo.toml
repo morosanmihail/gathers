@@ -10,6 +10,9 @@ name = "e2e"
 [[example]]
 name = "collection_lifecycle"
 
+[[example]]
+name = "share_view"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }
