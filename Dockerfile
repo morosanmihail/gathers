@@ -1,34 +1,23 @@
-FROM rust:1.92 as builder
+# syntax=docker/dockerfile:1
+FROM rust:1.92-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential libsqlite3-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY . .
 
-COPY ./Cargo.lock ./Cargo.lock
-COPY ./Cargo.toml ./Cargo.toml
-COPY ./gathers/Cargo.toml ./gathers/Cargo.toml
-COPY ./server/Cargo.toml ./server/Cargo.toml
-COPY ./persistence/Cargo.toml ./persistence/Cargo.toml
-COPY ./retrieval/Cargo.toml ./retrieval/Cargo.toml
-COPY ./models/Cargo.toml ./models/Cargo.toml
-COPY ./benches/Cargo.toml ./benches/Cargo.toml
-COPY ./e2e/Cargo.toml ./e2e/Cargo.toml
-COPY ./mirror/Cargo.toml ./mirror/Cargo.toml
-
-COPY ./gathers/src ./gathers/src
-COPY ./server/src ./server/src
-COPY ./persistence/src ./persistence/src
-COPY ./retrieval/src ./retrieval/src
-COPY ./models/src ./models/src
-COPY ./benches/src ./benches/src
-COPY ./e2e/src ./e2e/src
-COPY ./e2e/examples ./e2e/examples
-COPY ./mirror/src ./mirror/src
-COPY ./persistence/migrations ./persistence/migrations
-
-RUN cargo build --release --bin server
+RUN --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release --locked --bin server \
+    && cp target/release/server /server
 
 FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y ca-certificates libsqlite3-0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash app
 USER app
@@ -36,7 +25,7 @@ WORKDIR /home/app
 
 RUN mkdir -p /home/app/.local/share/gathers/DB
 
-COPY --from=builder /app/target/release/server .
+COPY --from=builder /server ./server
 
 EXPOSE 5234
 

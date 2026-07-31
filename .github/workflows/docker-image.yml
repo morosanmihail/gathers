@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -29,6 +32,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: ghcr.io/morosanmihail/gathers-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
 
       - name: Build and push Mirror image
         uses: docker/build-push-action@v6
@@ -37,6 +42,8 @@ jobs:
           file: ./Dockerfile.mirror
           push: true
           tags: ghcr.io/morosanmihail/gathers-mirror:latest
+          cache-from: type=gha,scope=mirror
+          cache-to: type=gha,mode=max,scope=mirror
 
       - name: Build and push Web UI image
         uses: docker/build-push-action@v6
@@ -46,6 +53,8 @@ jobs:
           build-args: |
             REACT_APP_COLLECTIONS_ENABLED=true
           tags: ghcr.io/morosanmihail/gathers-webui:latest
+          cache-from: type=gha,scope=webui
+          cache-to: type=gha,mode=max,scope=webui
 
       - name: Build and push Web UI 2 image
         uses: docker/build-push-action@v6
@@ -53,3 +62,5 @@ jobs:
           context: ./webui2
           push: true
           tags: ghcr.io/morosanmihail/gathers-webui2:latest
+          cache-from: type=gha,scope=webui2
+          cache-to: type=gha,mode=max,scope=webui2
