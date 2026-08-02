@@ -94,7 +94,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let conn = self.connection.lock().await;
         let mut query =
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate FROM cards"
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards"
                 .to_string();
         let mut conditions = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -110,10 +110,25 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         if let Some(set_code) = &filters.set_code
             && !set_code.is_empty()
         {
-            conditions.push(format!(
-                "(expName LIKE ?{i} OR expIdTCGP LIKE ?{i} OR expCodeTCGP LIKE ?{i})"
-            ));
-            params.push(format!("%{set_code}%"));
+            // expCodeTCGP holds the short form set key printed in the corner of the
+            // card (e.g. "PAR" for Paradox Rift). When the input matches one exactly,
+            // filter on that alone — falling through to the fuzzy expName/expIdTCGP
+            // `LIKE` below would also pull in unrelated sets whose full name happens
+            // to contain the same letters (e.g. "PAR" is a substring of "Sparks").
+            let is_short_code: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM cards WHERE expCodeTCGP = ?1 COLLATE NOCASE)",
+                    rusqlite::params![set_code],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+            if is_short_code {
+                conditions.push(format!("expCodeTCGP = ?{i} COLLATE NOCASE"));
+                params.push(set_code.clone());
+            } else {
+                conditions.push(format!("(expName LIKE ?{i} OR expIdTCGP LIKE ?{i})"));
+                params.push(format!("%{set_code}%"));
+            }
             i += 1;
         }
         if let Some(collector_number) = &filters.collector_number
@@ -189,7 +204,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         let conn = self.connection.lock().await;
         let query = format!(
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate FROM cards WHERE cardId IN ({})",
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards WHERE cardId IN ({})",
             sql_placeholders(ids.len())
         );
         let mut stmt = conn.prepare(&query)?;
@@ -202,12 +217,14 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
         let conn = self.connection.lock().await;
-        let mut stmt =
-            conn.prepare("SELECT DISTINCT expName FROM cards WHERE expName IS NOT NULL")?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT expName, expCodeTCGP FROM cards WHERE expName IS NOT NULL",
+        )?;
         let iter = stmt.query_map([], |row| {
             let name: String = row.get(0)?;
+            let short_code: Option<String> = row.get(1)?;
             Ok(Set {
-                code: name.clone(),
+                code: short_code.filter(|c| !c.is_empty()).unwrap_or_else(|| name.clone()),
                 name,
             })
         })?;

@@ -5,6 +5,7 @@ pub struct SqlPokemonCard {
     pub id: String,
     pub name: String,
     pub set_code: String,
+    pub set_short_code: Option<String>,
     pub rarity: String,
     pub energy_type: String,
     pub card_type: String,
@@ -29,6 +30,7 @@ impl SqlPokemonCard {
             pokedex: row.get(8).ok(),
             description: row.get(9).ok(),
             release_date: row.get(10).ok(),
+            set_short_code: row.get(11).ok(),
         })
     }
 }
@@ -45,6 +47,7 @@ impl From<SqlPokemonCard> for PokemonCard {
             id: value.id,
             name: value.name,
             set_code: value.set_code,
+            set_short_code: value.set_short_code.filter(|c| !c.is_empty()),
             rarity: PokemonRarity::from(value.rarity),
             energy_types,
             card_type: value.card_type,

@@ -407,6 +407,10 @@ export async function getMtgCardSets(): Promise<CardSet[]> {
 	return cachedFetch('mtg-sets', () => fetchJSON<CardSet[]>('/api/mtg/sets'));
 }
 
+export async function getPokemonCardSets(): Promise<CardSet[]> {
+	return cachedFetch('pokemon-sets', () => fetchJSON<CardSet[]>('/api/pokemon/sets'));
+}
+
 async function fetchPrices(endpoint: string, ids: string[]): Promise<Record<string, CardPrices>> {
 	const missing = ids.filter(id => !priceCache.has(id));
 	if (missing.length) {
