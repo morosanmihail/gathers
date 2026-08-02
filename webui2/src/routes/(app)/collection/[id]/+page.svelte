@@ -51,7 +51,8 @@
 		collectionFilters.rarity !== '' ||
 		collectionFilters.colorIdentities.length > 0 ||
 		collectionFilters.domains.length > 0 ||
-		collectionFilters.energyTypes.length > 0
+		collectionFilters.energyTypes.length > 0 ||
+		collectionFilters.provider !== ''
 	);
 
 	const sortIsCardLevel = $derived(sortBy !== '' && !COLLECTION_SORT_FIELDS.has(sortBy));
@@ -74,8 +75,8 @@
 				total = count;
 			} else {
 				const [data, count] = await Promise.all([
-					getCollectionCards(collectionId, p, sortBy, sortOrder),
-					getCollectionCount(collectionId)
+					getCollectionCards(collectionId, p, sortBy, sortOrder, collectionFilters.provider),
+					getCollectionCount(collectionId, collectionFilters.provider)
 				]);
 				cards = data;
 				total = count;

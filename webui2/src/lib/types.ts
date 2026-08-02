@@ -132,6 +132,9 @@ export interface CardSet {
 }
 
 export interface SearchFilters {
+	// Collection views only: restrict to a single card game's provider (e.g.
+	// 'MagicSQLite', 'RiftboundSQLite', 'PokemonSQLite'). '' = all games.
+	provider: string;
 	name: string;
 	setCode: string;
 	artist: string;
@@ -234,6 +237,7 @@ export interface Settings {
 
 export function defaultFilters(): SearchFilters {
 	return {
+		provider: '',
 		name: '',
 		setCode: '',
 		artist: '',

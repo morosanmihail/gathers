@@ -19,9 +19,15 @@
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 
-	const showMtg  = $derived(app.systems.some(s => s === 'Sql' || s === 'Scryfall'));
-	const showRift = $derived(app.systems.some(s => s.includes('Riftbound')));
-	const showPoke = $derived(app.systems.some(s => s.includes('Pokemon')));
+	// Provider string for each installed game, '' if that game isn't configured
+	const mtgProvider  = $derived(app.systems.find(s => s === 'MagicSQLite' || s === 'Scryfall') ?? '');
+	const riftProvider = $derived(app.systems.find(s => s.includes('Riftbound')) ?? '');
+	const pokeProvider = $derived(app.systems.find(s => s.includes('Pokemon')) ?? '');
+	const gameCount = $derived([mtgProvider, riftProvider, pokeProvider].filter(Boolean).length);
+
+	const showMtg  = $derived(!!mtgProvider  && (filters.provider === '' || filters.provider === mtgProvider));
+	const showRift = $derived(!!riftProvider && (filters.provider === '' || filters.provider === riftProvider));
+	const showPoke = $derived(!!pokeProvider && (filters.provider === '' || filters.provider === pokeProvider));
 
 	const colors = colorOptions;
 	const domains = riftboundDomains;
@@ -69,6 +75,21 @@
 			<option value="Rare">Rare</option>
 			<option value="Mythic">{showRift ? 'Epic' : 'Mythic'}</option>
 		</select>
+
+		{#if gameCount > 1}
+			<select
+				class="input cfilter-input"
+				value={filters.provider}
+				onchange={(e) => set('provider', (e.target as HTMLSelectElement).value)}
+				style="max-width: 130px"
+				title="Filter by card game"
+			>
+				<option value="">All games</option>
+				{#if mtgProvider}<option value={mtgProvider}>Magic: The Gathering</option>{/if}
+				{#if riftProvider}<option value={riftProvider}>Riftbound</option>{/if}
+				{#if pokeProvider}<option value={pokeProvider}>Pokémon</option>{/if}
+			</select>
+		{/if}
 
 		{#if showMtg}
 			<div class="cfilter-sep"></div>
