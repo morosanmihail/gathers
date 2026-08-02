@@ -72,43 +72,52 @@
 
 		{#if showMtg}
 			<div class="cfilter-sep"></div>
-			<div class="color-chips">
-				{#each colors as c}
-					<button
-						type="button"
-						class="color-chip {c.label}"
-						class:active={filters.colorIdentities.includes(c.value)}
-						onclick={() => toggleColor(c.value)}
-						title={c.value}
-					>{c.label}</button>
-				{/each}
+			<div class="cfilter-group">
+				<span class="cfilter-group-label" style="--game-accent: #d8a848">MTG</span>
+				<div class="color-chips">
+					{#each colors as c}
+						<button
+							type="button"
+							class="color-chip {c.label}"
+							class:active={filters.colorIdentities.includes(c.value)}
+							onclick={() => toggleColor(c.value)}
+							title={c.value}
+						>{c.label}</button>
+					{/each}
+				</div>
 			</div>
 		{/if}
 
 		{#if showRift}
 			<div class="cfilter-sep"></div>
-			<div class="cfilter-domain-chips">
-				{#each domains as d}
-					<button
-						type="button"
-						class="cfilter-domain-chip"
-						class:active={filters.domains.includes(d)}
-						onclick={() => toggleDomain(d)}
-						title={d}
-					>{d.slice(0, 2)}</button>
-				{/each}
+			<div class="cfilter-group">
+				<span class="cfilter-group-label" style="--game-accent: #8891e0">Riftbound</span>
+				<div class="cfilter-domain-chips">
+					{#each domains as d}
+						<button
+							type="button"
+							class="cfilter-domain-chip"
+							class:active={filters.domains.includes(d)}
+							onclick={() => toggleDomain(d)}
+							title={d}
+						>{d.slice(0, 2)}</button>
+					{/each}
+				</div>
 			</div>
 		{/if}
 
 		{#if showPoke}
 			<div class="cfilter-sep"></div>
-			<div class="cfilter-energy-chips">
-				{#each energyTypes as e}
-					<label class="chip-checkbox" class:checked={filters.energyTypes.includes(e)}>
-						<input type="checkbox" checked={filters.energyTypes.includes(e)} onchange={() => toggleEnergy(e)} />
-						{e}
-					</label>
-				{/each}
+			<div class="cfilter-group">
+				<span class="cfilter-group-label" style="--game-accent: #e07a5f">Pokémon</span>
+				<div class="cfilter-energy-chips">
+					{#each energyTypes as e}
+						<label class="chip-checkbox" class:checked={filters.energyTypes.includes(e)}>
+							<input type="checkbox" checked={filters.energyTypes.includes(e)} onchange={() => toggleEnergy(e)} />
+							{e}
+						</label>
+					{/each}
+				</div>
 			</div>
 		{/if}
 
@@ -151,6 +160,20 @@
 		height: 24px;
 		background: var(--border);
 		flex-shrink: 0;
+	}
+
+	.cfilter-group {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.cfilter-group-label {
+		font-size: 0.62rem;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: var(--game-accent, var(--text2));
 	}
 
 	.cfilter-domain-chips {
