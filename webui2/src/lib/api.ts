@@ -151,6 +151,7 @@ async function getRawSearchEntries(
 		offset: String((page - 1) * PAGE_SIZE),
 		limit: String(PAGE_SIZE)
 	});
+	if (filters.provider) params.set('provider', filters.provider);
 	return fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/search?${params}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -313,7 +314,9 @@ export async function searchCollectionCount(
 	collection: string,
 	filters: SearchFilters
 ): Promise<number> {
-	return fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/search/count`, {
+	const params = new URLSearchParams();
+	if (filters.provider) params.set('provider', filters.provider);
+	return fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/search/count?${params}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(buildSearchBody(filters))
