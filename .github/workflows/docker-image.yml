@@ -3,64 +3,116 @@ name: Docker Image CI
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 permissions:
   contents: read
   packages: write
 
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      mirror: ${{ steps.filter.outputs.mirror }}
+      webui: ${{ steps.filter.outputs.webui }}
+      webui2: ${{ steps.filter.outputs.webui2 }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - "models/**"
+              - "retrieval/**"
+              - "gathers/**"
+              - "server/**"
+              - "persistence/**"
+              - "mirror/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "Dockerfile"
+            mirror:
+              - "models/**"
+              - "retrieval/**"
+              - "gathers/**"
+              - "server/**"
+              - "persistence/**"
+              - "mirror/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "Dockerfile.mirror"
+            webui:
+              - "webui/**"
+            webui2:
+              - "webui2/**"
+
+  build-and-push:
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui == 'true' || needs.changes.outputs.webui2 == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            enabled: ${{ needs.changes.outputs.api }}
+            context: .
+            file: ./Dockerfile
+            image: gathers-api
+          - name: mirror
+            enabled: ${{ needs.changes.outputs.mirror }}
+            context: .
+            file: ./Dockerfile.mirror
+            image: gathers-mirror
+          - name: webui
+            enabled: ${{ needs.changes.outputs.webui }}
+            context: ./webui
+            file: ./webui/Dockerfile
+            image: gathers-webui
+            build-args: |
+              REACT_APP_COLLECTIONS_ENABLED=true
+          - name: webui2
+            enabled: ${{ needs.changes.outputs.webui2 }}
+            context: ./webui2
+            file: ./webui2/Dockerfile
+            image: gathers-webui2
+
+    steps:
+      - name: Skip unchanged image
+        if: matrix.enabled != 'true'
+        run: echo "No changes for ${{ matrix.name }}, skipping" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        if: matrix.enabled == 'true'
 
       - name: Set up Docker Buildx
+        if: matrix.enabled == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: matrix.enabled == 'true' && github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push API image
+      - name: Build and push ${{ matrix.name }} image
+        if: matrix.enabled == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ghcr.io/morosanmihail/gathers-api:latest
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,mode=max,scope=api
-
-      - name: Build and push Mirror image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.mirror
-          push: true
-          tags: ghcr.io/morosanmihail/gathers-mirror:latest
-          cache-from: type=gha,scope=mirror
-          cache-to: type=gha,mode=max,scope=mirror
-
-      - name: Build and push Web UI image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./webui
-          push: true
-          build-args: |
-            REACT_APP_COLLECTIONS_ENABLED=true
-          tags: ghcr.io/morosanmihail/gathers-webui:latest
-          cache-from: type=gha,scope=webui
-          cache-to: type=gha,mode=max,scope=webui
-
-      - name: Build and push Web UI 2 image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./webui2
-          push: true
-          tags: ghcr.io/morosanmihail/gathers-webui2:latest
-          cache-from: type=gha,scope=webui2
-          cache-to: type=gha,mode=max,scope=webui2
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: ${{ github.event_name == 'push' }}
+          build-args: ${{ matrix.build-args }}
+          tags: |
+            ghcr.io/morosanmihail/${{ matrix.image }}:latest
+            ghcr.io/morosanmihail/${{ matrix.image }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
