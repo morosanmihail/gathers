@@ -10,6 +10,8 @@ pub enum SortField {
     SetCode,
     CollectorNumber,
     Artist,
+    /// Pokemon-only: card release date.
+    ReleaseDate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -76,6 +78,8 @@ pub struct CardSearchFilters {
     /// Pokemon-only: filter by one or more energy types.
     #[serde(alias = "energyTypes")]
     pub energy_types: Option<Vec<EnergyType>>,
+    /// Pokemon-only: exact National Pokédex number match.
+    pub pokedex: Option<i64>,
     #[serde(alias = "sortBy")]
     pub sort_by: Option<SortField>,
     #[serde(alias = "sortOrder")]
@@ -217,6 +221,11 @@ impl CardSearchFilters {
         self
     }
 
+    pub fn with_pokedex(mut self, pokedex: i64) -> Self {
+        self.pokedex = Some(pokedex);
+        self
+    }
+
     pub fn with_sort_by(mut self, sort_by: SortField) -> Self {
         self.sort_by = Some(sort_by);
         self
@@ -240,6 +249,7 @@ mod tests {
             SortField::SetCode,
             SortField::CollectorNumber,
             SortField::Artist,
+            SortField::ReleaseDate,
         ] {
             let json = serde_json::to_string(&field).unwrap();
             let decoded: SortField = serde_json::from_str(&json).unwrap();
@@ -318,7 +328,8 @@ mod tests {
             .with_border_color("black")
             .with_legal_in("modern")
             .with_domains(vec![CardDomain::Fury])
-            .with_energy_types(vec![EnergyType::Fire]);
+            .with_energy_types(vec![EnergyType::Fire])
+            .with_pokedex(1);
 
         assert_eq!(filters.name, Some("Bolt".to_string()));
         assert_eq!(filters.color_identities, Some(vec![CardColour::Red]));
@@ -346,6 +357,7 @@ mod tests {
         assert_eq!(filters.legal_in, Some("modern".to_string()));
         assert_eq!(filters.domains, Some(vec![CardDomain::Fury]));
         assert_eq!(filters.energy_types, Some(vec![EnergyType::Fire]));
+        assert_eq!(filters.pokedex, Some(1));
     }
 
     #[test]

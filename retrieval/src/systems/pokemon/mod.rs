@@ -94,7 +94,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let conn = self.connection.lock().await;
         let mut query =
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex FROM cards"
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate FROM cards"
                 .to_string();
         let mut conditions = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -128,6 +128,13 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             params.push(rarity.to_single_string().to_owned());
             i += 1;
         }
+        if let Some(text) = &filters.text
+            && !text.is_empty()
+        {
+            conditions.push(format!("description LIKE ?{i}"));
+            params.push(format!("%{text}%"));
+            i += 1;
+        }
         if let Some(energy_types) = &filters.energy_types {
             for energy_type in energy_types {
                 conditions.push(format!("energyType LIKE ?{i}"));
@@ -144,6 +151,10 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
                 i += 1;
             }
         }
+        if let Some(pokedex) = &filters.pokedex {
+            conditions.push(format!("pokedex = ?{i}"));
+            params.push(pokedex.to_string());
+        }
 
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
@@ -155,6 +166,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             Some(SortField::SetCode) => "expName",
             Some(SortField::CollectorNumber) => "CAST(expCardNumber AS INTEGER)",
             Some(SortField::Artist) => "name",
+            Some(SortField::ReleaseDate) => "releaseDate",
             _ => "name",
         };
         query.push_str(&format!(
@@ -177,7 +189,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         let conn = self.connection.lock().await;
         let query = format!(
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex FROM cards WHERE cardId IN ({})",
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate FROM cards WHERE cardId IN ({})",
             sql_placeholders(ids.len())
         );
         let mut stmt = conn.prepare(&query)?;

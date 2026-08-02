@@ -279,6 +279,88 @@ async fn test_pokedex_is_none_for_trainers() {
     }
 }
 
+#[tokio::test]
+async fn test_search_returns_description_and_release_date() {
+    let system = setup_test_db().await;
+    let ids = vec!["Pokemon-Go-Bulbasaur-001".to_string()];
+    let cards = system.get_cards_by_ids(ids).await.unwrap();
+    if let Card::Pokemon(p) = &cards["Pokemon-Go-Bulbasaur-001"] {
+        assert_eq!(p.release_date.as_deref(), Some("2022-07-01T00:00:00Z"));
+        assert_eq!(p.pokedex, Some(1));
+    } else {
+        panic!("expected Pokemon card");
+    }
+}
+
+#[tokio::test]
+async fn test_search_by_text_matches_description() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        text: Some("Last Gift".to_string()),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(10))
+        .await
+        .unwrap();
+    assert!(!cards.is_empty());
+    assert!(cards.iter().all(|c| {
+        if let Card::Pokemon(p) = c {
+            p.description
+                .as_deref()
+                .is_some_and(|d| d.contains("Last Gift"))
+        } else {
+            false
+        }
+    }));
+}
+
+#[tokio::test]
+async fn test_search_by_pokedex() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        pokedex: Some(1),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(30))
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 23);
+    assert!(cards.iter().all(|c| {
+        if let Card::Pokemon(p) = c {
+            p.pokedex == Some(1) && p.name.contains("Bulbasaur")
+        } else {
+            false
+        }
+    }));
+}
+
+#[tokio::test]
+async fn test_search_sort_by_release_date() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        name: Some("Bulbasaur".to_string()),
+        sort_by: Some(::models::filters::SortField::ReleaseDate),
+        sort_order: Some(::models::filters::SortOrder::Asc),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(50))
+        .await
+        .unwrap();
+    let dates: Vec<Option<String>> = cards
+        .iter()
+        .map(|c| match c {
+            Card::Pokemon(p) => p.release_date.clone(),
+            _ => None,
+        })
+        .collect();
+    let mut sorted = dates.clone();
+    sorted.sort();
+    assert_eq!(dates, sorted);
+}
+
 // ── Price tests ───────────────────────────────────────────────────────────
 
 fn make_prices_db(dir: &TempDir) -> String {

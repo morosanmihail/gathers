@@ -3,6 +3,7 @@
 	import { cardImageUrl, legalityFormats, rarityClass } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
+	import { fmtDate } from '$lib/format';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -252,6 +253,24 @@
 							<span class="card-detail-chips">
 								{#each poke.energyTypes as e}<span class="chip-checkbox checked">{e}</span>{/each}
 							</span>
+						</div>
+					{/if}
+					{#if poke.pokedex}
+						<div class="card-detail-row">
+							<span class="card-detail-label">National Pokédex #</span>
+							<span>{poke.pokedex}</span>
+						</div>
+					{/if}
+					{#if poke.releaseDate}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Released</span>
+							<span>{fmtDate(poke.releaseDate)}</span>
+						</div>
+					{/if}
+					{#if poke.description}
+						<div class="card-detail-block">
+							<span class="card-detail-label">Description</span>
+							<p class="card-detail-text">{poke.description}</p>
 						</div>
 					{/if}
 				{/if}

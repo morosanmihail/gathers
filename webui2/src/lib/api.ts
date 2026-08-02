@@ -511,6 +511,8 @@ function buildSearchBody(filters: SearchFilters): Record<string, unknown> {
 	if (filters.colorIdentities.length) body.colorIdentities = filters.colorIdentities;
 	if (filters.domains.length) body.domains = filters.domains;
 	if (filters.energyTypes.length) body.energyTypes = filters.energyTypes;
+	const pokedex = parseInt(filters.pokedex, 10);
+	if (!isNaN(pokedex)) body.pokedex = pokedex;
 	if (filters.sortBy) body.sortBy = filters.sortBy;
 	if (filters.sortOrder) body.sortOrder = filters.sortOrder;
 

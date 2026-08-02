@@ -13,6 +13,8 @@ pub struct PokemonCard {
     pub energy_types: Vec<EnergyType>,
     pub card_type: String,
     pub pokedex: Option<i64>,
+    pub description: Option<String>,
+    pub release_date: Option<String>,
 }
 
 impl CardTrait for PokemonCard {
