@@ -15,6 +15,8 @@ pub enum APISortField {
     SetCode,
     CollectorNumber,
     Artist,
+    /// Pokemon-only: card release date.
+    ReleaseDate,
 }
 
 impl From<APISortField> for models::filters::SortField {
@@ -25,6 +27,7 @@ impl From<APISortField> for models::filters::SortField {
             APISortField::SetCode => models::filters::SortField::SetCode,
             APISortField::CollectorNumber => models::filters::SortField::CollectorNumber,
             APISortField::Artist => models::filters::SortField::Artist,
+            APISortField::ReleaseDate => models::filters::SortField::ReleaseDate,
         }
     }
 }
@@ -87,6 +90,7 @@ pub struct APICardSearchFilters {
     pub domains: Option<Vec<APICardDomain>>,
     #[serde(alias = "energyTypes")]
     pub energy_types: Option<Vec<APIEnergyType>>,
+    pub pokedex: Option<i64>,
     #[serde(alias = "sortBy")]
     pub sort_by: Option<APISortField>,
     #[serde(alias = "sortOrder")]
@@ -134,6 +138,7 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
                     .map(models::pokemon::EnergyType::from)
                     .collect()
             }),
+            pokedex: value.pokedex,
             sort_by: value.sort_by.map(models::filters::SortField::from),
             sort_order: value.sort_order.map(models::filters::SortOrder::from),
         }

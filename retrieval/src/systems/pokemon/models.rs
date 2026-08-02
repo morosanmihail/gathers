@@ -11,6 +11,8 @@ pub struct SqlPokemonCard {
     pub image: String,
     pub collector_number: String,
     pub pokedex: Option<i64>,
+    pub description: Option<String>,
+    pub release_date: Option<String>,
 }
 
 impl SqlPokemonCard {
@@ -25,6 +27,8 @@ impl SqlPokemonCard {
             image: row.get(6)?,
             collector_number: row.get(7)?,
             pokedex: row.get(8).ok(),
+            description: row.get(9).ok(),
+            release_date: row.get(10).ok(),
         })
     }
 }
@@ -50,6 +54,8 @@ impl From<SqlPokemonCard> for PokemonCard {
                 Some(p) if p < 100000 => Some(p),
                 _ => None,
             },
+            description: value.description.filter(|d| !d.is_empty()),
+            release_date: value.release_date.filter(|d| !d.is_empty()),
         }
     }
 }

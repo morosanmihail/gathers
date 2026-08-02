@@ -56,9 +56,13 @@
 		{ value: 'SetCode',          label: 'Set' },
 		{ value: 'CollectorNumber',  label: 'Collector #' }
 	];
-	const sortOptions = $derived(showRift || showPoke
-		? baseSortOptions
-		: [...baseSortOptions, { value: 'Artist', label: 'Artist' }]);
+	const sortOptions = $derived(
+		showPoke
+			? [...baseSortOptions, { value: 'ReleaseDate', label: 'Release date' }]
+			: showRift
+				? baseSortOptions
+				: [...baseSortOptions, { value: 'Artist', label: 'Artist' }]
+	);
 </script>
 
 <div class="search-panel">
@@ -112,9 +116,9 @@
 				style="max-width: 130px" />
 		</div>
 
-		<!-- Rules text — all systems -->
+		<!-- Rules text — all systems (Pokemon: matches card description) -->
 		<div class="field">
-			<input class="input" placeholder="Rules text…" value={filters.text}
+			<input class="input" placeholder={showPoke ? 'Card description…' : 'Rules text…'} value={filters.text}
 				oninput={(e) => set('text', (e.target as HTMLInputElement).value)} />
 		</div>
 
@@ -283,7 +287,7 @@
 			</div>
 		{/if}
 
-		<!-- Pokemon: energy types only (rarity filter broken server-side — case mismatch) -->
+		<!-- Pokemon: energy types + pokedex # (rarity filter broken server-side — case mismatch) -->
 		{#if showPoke}
 			<div class="field">
 				<span class="field-label">Energy Type</span>
@@ -296,6 +300,11 @@
 						</label>
 					{/each}
 				</div>
+			</div>
+
+			<div class="field">
+				<input class="input" type="number" min="1" placeholder="National Pokédex #" value={filters.pokedex}
+					oninput={(e) => set('pokedex', (e.target as HTMLInputElement).value)} />
 			</div>
 		{/if}
 

@@ -135,6 +135,10 @@ pub struct APIPokemonCard {
     pub card_type: String,
     #[serde(rename = "collectorNumber")]
     pub collector_number: String,
+    pub description: Option<String>,
+    #[serde(rename = "releaseDate")]
+    pub release_date: Option<String>,
+    pub pokedex: Option<i64>,
 }
 
 impl From<PokemonCard> for APIPokemonCard {
@@ -148,6 +152,9 @@ impl From<PokemonCard> for APIPokemonCard {
             energy_types: value.energy_types.into_iter().map(Into::into).collect(),
             card_type: value.card_type,
             collector_number: value.collector_number,
+            description: value.description,
+            release_date: value.release_date,
+            pokedex: value.pokedex,
         }
     }
 }

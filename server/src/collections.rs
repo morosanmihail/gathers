@@ -254,6 +254,17 @@ fn sort_collection_cards(
                 };
                 aa.cmp(ab)
             }
+            APISortField::ReleaseDate => {
+                let da = match card_a {
+                    Some(Card::Pokemon(p)) => p.release_date.as_deref().unwrap_or(""),
+                    _ => "",
+                };
+                let db = match card_b {
+                    Some(Card::Pokemon(p)) => p.release_date.as_deref().unwrap_or(""),
+                    _ => "",
+                };
+                da.cmp(db)
+            }
         };
         if desc { ord.reverse() } else { ord }
     });

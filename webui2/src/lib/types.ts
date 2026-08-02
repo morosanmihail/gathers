@@ -82,6 +82,9 @@ export interface PokemonCard {
 	cardType?: string;
 	collectorNumber?: string;
 	image?: string;
+	description?: string;
+	releaseDate?: string;
+	pokedex?: number;
 }
 
 export type AnyCard = MtgCard | RiftboundCard | PokemonCard;
@@ -137,6 +140,8 @@ export interface SearchFilters {
 	colorIdentities: string[];
 	domains: string[];
 	energyTypes: string[];
+	// Pokemon-only: exact National Pokédex number match.
+	pokedex: string;
 	sortBy: string;
 	sortOrder: 'Asc' | 'Desc';
 	// MTG-only advanced filters
@@ -237,6 +242,7 @@ export function defaultFilters(): SearchFilters {
 		colorIdentities: [],
 		domains: [],
 		energyTypes: [],
+		pokedex: '',
 		sortBy: 'Name',
 		sortOrder: 'Asc',
 		manaValueMin: '',
