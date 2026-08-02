@@ -44,6 +44,11 @@
 		cachedImageUrl(raw).then(u => { if (imgUrl !== u) imgUrl = u; });
 	});
 
+	let imgExpanded = $state(false);
+	function toggleImgExpanded() {
+		imgExpanded = !imgExpanded;
+	}
+
 	const COLOR_LETTER: Record<string, string> = {
 		White: 'W', Blue: 'U', Black: 'B', Red: 'R', Green: 'G',
 		Colourless: 'C', Multicoloured: 'M'
@@ -81,7 +86,7 @@
 <div
 	class="modal-overlay"
 	onclick={(e) => e.target === e.currentTarget && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
+	onkeydown={(e) => e.key === 'Escape' && (imgExpanded ? (imgExpanded = false) : onclose())}
 	role="dialog"
 	aria-modal="true"
 	tabindex="-1"
@@ -95,7 +100,18 @@
 		<div class="modal-body card-detail-body">
 			<div class="card-detail-art">
 				{#if imgUrl}
-					<img src={imgUrl} alt={card.name} />
+					{#if imgExpanded}
+						<button class="img-expand-backdrop" onclick={toggleImgExpanded} aria-label="Shrink image"></button>
+					{/if}
+					<button
+						class="card-detail-img-btn"
+						class:expanded={imgExpanded}
+						onclick={toggleImgExpanded}
+						title={imgExpanded ? 'Click to shrink' : 'Click to enlarge'}
+						aria-label={imgExpanded ? 'Shrink card image' : 'Enlarge card image'}
+					>
+						<img src={imgUrl} alt={card.name} />
+					</button>
 				{:else}
 					<div class="card-detail-art-placeholder">
 						<div style="font-size: 2.5rem;">🃏</div>
@@ -303,6 +319,48 @@
 		width: 100%;
 		border-radius: var(--radius-lg);
 		display: block;
+	}
+
+	.card-detail-img-btn {
+		display: block;
+		width: 100%;
+		padding: 0;
+		border: none;
+		background: none;
+		cursor: zoom-in;
+	}
+
+	.card-detail-img-btn img {
+		border-radius: var(--radius-lg);
+	}
+
+	.card-detail-img-btn.expanded {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: auto;
+		height: 92vh;
+		max-width: 92vw;
+		z-index: 310;
+		cursor: zoom-out;
+	}
+
+	.card-detail-img-btn.expanded img {
+		height: 100%;
+		width: auto;
+		max-width: 92vw;
+		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+	}
+
+	.img-expand-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.7);
+		border: none;
+		padding: 0;
+		z-index: 300;
+		cursor: zoom-out;
 	}
 
 	.card-detail-art-placeholder {
