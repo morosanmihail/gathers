@@ -80,6 +80,95 @@ async fn test_search_by_set_code() {
 }
 
 #[tokio::test]
+async fn test_search_by_short_set_code() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        set_code: Some("PAR".to_string()),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(10))
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 10);
+    for card in cards {
+        if let Card::Pokemon(p) = card {
+            assert_eq!(p.set_code, "Paradox Rift");
+            assert_eq!(p.set_short_code.as_deref(), Some("PAR"));
+        } else {
+            panic!("expected Pokemon card");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_search_by_short_set_code_lowercase() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        set_code: Some("par".to_string()),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(10))
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 10);
+    for card in cards {
+        if let Card::Pokemon(p) = card {
+            assert_eq!(p.set_code, "Paradox Rift");
+        } else {
+            panic!("expected Pokemon card");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_search_by_short_set_code_excludes_unrelated_name_match() {
+    // "PAR" is also a substring of the unrelated "Surging Sparks" set name —
+    // an exact short-code match should not pull those cards in.
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        set_code: Some("PAR".to_string()),
+        ..Default::default()
+    };
+    let cards = system
+        .search_cards(filters, Some(0), Some(500))
+        .await
+        .unwrap();
+    assert!(cards.iter().all(|c| {
+        if let Card::Pokemon(p) = c {
+            p.set_code == "Paradox Rift"
+        } else {
+            false
+        }
+    }));
+}
+
+#[tokio::test]
+async fn test_search_returns_set_short_code() {
+    let system = setup_test_db().await;
+    let ids = vec!["Paradox-Rift-Iron-Moth-028".to_string()];
+    let cards = system.get_cards_by_ids(ids).await.unwrap();
+    if let Card::Pokemon(p) = &cards["Paradox-Rift-Iron-Moth-028"] {
+        assert_eq!(p.set_short_code.as_deref(), Some("PAR"));
+    } else {
+        panic!("expected Pokemon card");
+    }
+}
+
+#[tokio::test]
+async fn test_set_short_code_none_when_missing() {
+    let system = setup_test_db().await;
+    let ids = vec!["Silver-Tempest-Serena-164".to_string()];
+    let cards = system.get_cards_by_ids(ids).await.unwrap();
+    if let Card::Pokemon(p) = &cards["Silver-Tempest-Serena-164"] {
+        assert_eq!(p.set_short_code, None);
+    } else {
+        panic!("expected Pokemon card");
+    }
+}
+
+#[tokio::test]
 async fn test_search_by_collector_number() {
     let system = setup_test_db().await;
     let filters = CardSearchFilters {
@@ -217,9 +306,19 @@ async fn test_get_sets() {
     let system = setup_test_db().await;
     let sets = system.get_sets().await.unwrap();
     assert!(sets.len() >= 157);
-    let codes: Vec<&str> = sets.iter().map(|s| s.code.as_str()).collect();
-    assert!(codes.contains(&"Base Set"));
-    assert!(codes.contains(&"Jungle"));
+    let names: Vec<&str> = sets.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"Base Set"));
+    assert!(names.contains(&"Jungle"));
+}
+
+#[tokio::test]
+async fn test_get_sets_returns_short_code() {
+    let system = setup_test_db().await;
+    let sets = system.get_sets().await.unwrap();
+    let paradox_rift = sets.iter().find(|s| s.name == "Paradox Rift").unwrap();
+    assert_eq!(paradox_rift.code, "PAR");
+    let jungle = sets.iter().find(|s| s.name == "Jungle").unwrap();
+    assert_eq!(jungle.code, "JU");
 }
 
 #[tokio::test]

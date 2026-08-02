@@ -127,6 +127,8 @@ pub struct APIPokemonCard {
     pub name: String,
     #[serde(rename = "setCode")]
     pub set_code: String,
+    #[serde(rename = "setShortCode")]
+    pub set_short_code: Option<String>,
     pub rarity: APIPokemonRarity,
     pub image: String,
     #[serde(rename = "energyTypes")]
@@ -147,6 +149,7 @@ impl From<PokemonCard> for APIPokemonCard {
             id: value.id,
             name: value.name,
             set_code: value.set_code,
+            set_short_code: value.set_short_code,
             rarity: value.rarity.into(),
             image: value.image,
             energy_types: value.energy_types.into_iter().map(Into::into).collect(),

@@ -25,8 +25,14 @@
 	const setName = $derived(
 		mtg.setName ||
 		(card.setCode ? app.cardSets.find(s => s.code.toLowerCase() === card.setCode!.toLowerCase())?.name : '') ||
+		(isPoke ? card.setCode : '') ||
 		''
 	);
+
+	// Pokemon's `setCode` field actually holds the full set name (e.g. "Paradox
+	// Rift") — the short form key printed in the card's corner (e.g. "PAR")
+	// lives in `setShortCode` instead.
+	const setDisplayCode = $derived(isPoke ? poke.setShortCode : card.setCode);
 
 	const rawImgUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 	let imgUrl = $state('');
@@ -102,7 +108,7 @@
 				<!-- Common meta -->
 				<div class="card-detail-row">
 					<span class="card-detail-label">Set</span>
-					<span>{setName || '—'} {card.setCode ? `(${card.setCode.toUpperCase()})` : ''}</span>
+					<span>{setName || '—'} {setDisplayCode ? `(${setDisplayCode.toUpperCase()})` : ''}</span>
 				</div>
 				<div class="card-detail-row">
 					<span class="card-detail-label">Collector #</span>

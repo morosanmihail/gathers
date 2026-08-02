@@ -24,7 +24,10 @@
 		compact = false
 	}: Props = $props();
 
-	onMount(() => app.loadCardSets());
+	onMount(() => {
+		app.loadCardSets();
+		app.loadPokemonCardSets();
+	});
 
 	function set(key: keyof SearchFilters, val: unknown) {
 		onfilters({ ...filters, [key]: val });
@@ -37,17 +40,17 @@
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 
+	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
+	const showRift = $derived(activeSystem?.includes('Riftbound') ?? false);
+	const showPoke = $derived(activeSystem?.includes('Pokemon') ?? false);
+
 	const setOptions = $derived(
-		app.cardSets
+		(showPoke ? app.pokemonCardSets : app.cardSets)
 			.filter(s => !filters.setCode || s.code.toLowerCase().startsWith(filters.setCode.toLowerCase()) || s.name.toLowerCase().includes(filters.setCode.toLowerCase()))
 			.slice(0, 20)
 	);
 
 	const colors = colorOptions;
-
-	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
-	const showRift = $derived(activeSystem?.includes('Riftbound') ?? false);
-	const showPoke = $derived(activeSystem?.includes('Pokemon') ?? false);
 
 	// Sort options differ by system: MTG adds an Artist sort the others don't have
 	const baseSortOptions = [
@@ -90,11 +93,11 @@
 
 		<!-- Set code — all systems -->
 		<div class="input-group field">
-			{#if showMtg}
+			{#if showMtg || showPoke}
 				<input
 					class="input"
 					list="set-datalist"
-					placeholder="Set code…"
+					placeholder={showPoke ? 'Set name or code…' : 'Set code…'}
 					value={filters.setCode}
 					oninput={(e) => {
 						const raw = (e.target as HTMLInputElement).value;

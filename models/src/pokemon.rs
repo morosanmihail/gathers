@@ -6,6 +6,8 @@ use crate::{CardID, CardName, CardTrait, CollectorNumber, SetCode};
 pub struct PokemonCard {
     pub id: CardID,
     pub set_code: SetCode,
+    /// Short form set key printed in the corner of the card, e.g. "PAR" for Paradox Rift.
+    pub set_short_code: Option<String>,
     pub collector_number: CollectorNumber,
     pub name: CardName,
     pub rarity: PokemonRarity,

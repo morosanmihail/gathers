@@ -1,5 +1,5 @@
 import type { Collection, SystemInfo, Theme, ViewMode, CardSet } from './types';
-import { listCollections, getSystemInfo, getMtgCardSets } from './api';
+import { listCollections, getSystemInfo, getMtgCardSets, getPokemonCardSets } from './api';
 import { injectThemeStyles } from './themes/index';
 
 class AppState {
@@ -9,6 +9,7 @@ class AppState {
 	theme = $state<Theme>('dark');
 	viewMode = $state<ViewMode>('grid');
 	cardSets = $state<CardSet[]>([]);
+	pokemonCardSets = $state<CardSet[]>([]);
 	selectedCards = $state<Set<string>>(new Set());
 	pendingOps = $state<Map<string, string>>(new Map());
 
@@ -47,6 +48,15 @@ class AppState {
 		if (this.cardSets.length) return;
 		try {
 			this.cardSets = await getMtgCardSets();
+		} catch {
+			/* ignore */
+		}
+	}
+
+	async loadPokemonCardSets() {
+		if (this.pokemonCardSets.length) return;
+		try {
+			this.pokemonCardSets = await getPokemonCardSets();
 		} catch {
 			/* ignore */
 		}

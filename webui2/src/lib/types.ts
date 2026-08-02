@@ -77,6 +77,7 @@ export interface PokemonCard {
 	id: string;
 	name: string;
 	setCode?: string;
+	setShortCode?: string;
 	rarity?: string;
 	energyTypes?: unknown[];
 	cardType?: string;

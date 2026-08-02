@@ -7,7 +7,7 @@ use aide::axum::{
 use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
-use models::Card;
+use models::{Card, Set};
 use retrieval::RetrievalSystemTrait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -99,7 +99,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
             .map(Json)
     }
 
-    async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<String>>, ApiError> {
+    async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<Set>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_pokemon()?;
 
@@ -113,7 +113,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
                     }),
                 )
             })
-            .map(|s| Json(s.iter().map(|s| s.code.clone()).collect()))
+            .map(Json)
     }
 
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
