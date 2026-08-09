@@ -87,6 +87,7 @@ impl PersistenceSystem {
                     uuid: c.0.clone(),
                     quantity: c.1 as i32,
                     foil_quantity: c.2 as i32,
+                    want_quantity: 0,
                     collection: collection_id.clone(),
                     time_added: time_added.clone(),
                     provider: c.3.clone(),

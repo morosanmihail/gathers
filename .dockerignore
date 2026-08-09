@@ -3,8 +3,6 @@ target/
 
 # Node
 node_modules/
-webui/node_modules/
-webui/build/
 webui2/node_modules/
 webui2/build/
 

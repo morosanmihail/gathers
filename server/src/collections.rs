@@ -23,7 +23,7 @@ use crate::{
         CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
         CollectionPurchaseHistoryEntry, CollectionRenameRequest, CollectionValueBreakdown,
         CollectionsSearchQuery, PublicCollectionPage, PurchaseHistoryResponse, ResultCard,
-        ResultCardInner, ShareLinkResponse, ShareLinkRevokeResponse,
+        ResultCardInner, SetWantQuantityRequest, ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
 use models::CardTrait as _;
@@ -508,6 +508,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 id: card.uuid.to_string(),
                 quantity: card.quantity,
                 foil_quantity: card.foil_quantity,
+                want_quantity: card.want_quantity,
                 collection_id: collection_id.to_string(),
                 time_added: DateTime::parse_from_rfc3339(&card.time_added)
                     .map(|dt| dt.with_timezone(&Utc))
@@ -622,6 +623,58 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .await
     }
 
+    async fn cards_want_set(
+        State(state): State<GathersState>,
+        Path(collection_id): Path<String>,
+        Json(input): Json<SetWantQuantityRequest>,
+    ) -> Result<Json<CollectionCard>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        // Identify the provider by finding which configured system has this card.
+        // Only used if the card doesn't already have a row in the collection;
+        // an existing row keeps its own provider regardless.
+        let systems = clone_retrieval_systems_by_name(&state).await;
+        let card_ids = vec![input.id.clone()];
+        let mut provider = String::new();
+        for (name, system) in &systems {
+            if let Ok(found) = system.get_cards_by_ids(card_ids.clone()).await
+                && !found.is_empty()
+            {
+                provider = name.clone();
+                break;
+            }
+        }
+
+        let storage = &mut state.1.lock().await.storage;
+
+        if let Err(e) = validate_collection(storage, &collection_id).await {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, e));
+        };
+
+        match storage
+            .set_want_quantity(&collection_id, &input.id, input.want_quantity, &provider)
+            .await
+        {
+            Ok(card) => Ok(Json(CollectionCard {
+                id: card.uuid,
+                quantity: card.quantity,
+                foil_quantity: card.foil_quantity,
+                want_quantity: card.want_quantity,
+                collection_id: collection_id.clone(),
+                time_added: DateTime::parse_from_rfc3339(&card.time_added)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+                provider: card.provider,
+            })),
+            Err(e) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to set want quantity. {e}"),
+                }),
+            )),
+        }
+    }
+
     async fn cards_get(
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
@@ -660,6 +713,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 id: card.uuid,
                 quantity: card.quantity,
                 foil_quantity: card.foil_quantity,
+                want_quantity: card.want_quantity,
                 collection_id: collection_id.clone(),
                 time_added: DateTime::parse_from_rfc3339(&card.time_added)
                     .map(|dt| dt.with_timezone(&Utc))
@@ -950,6 +1004,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 id: cc.uuid.clone(),
                 quantity: cc.quantity,
                 foil_quantity: cc.foil_quantity,
+                want_quantity: cc.want_quantity,
                 collection_id: collection_id.clone(),
                 time_added: DateTime::parse_from_rfc3339(&cc.time_added)
                     .map(|dt| dt.with_timezone(&Utc))
@@ -1285,6 +1340,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/search", post(search_temp))
         .api_route("/cards/{id}/add", post(cards_add))
         .api_route("/cards/{id}/delete", post(cards_remove))
+        .api_route("/cards/{id}/want", post(cards_want_set))
         .api_route("/cards/{id}/purchase_history/{card_uuid}", get(purchase_history))
         .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
         .api_route("/cards/{id}/purchase_history_entry/{entry_id}", delete(delete_purchase_entry).patch(update_purchase_entry))
@@ -1417,6 +1473,7 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                 obj.insert("id".to_string(), serde_json::Value::String(entry.uuid));
                 obj.insert("quantity".to_string(), serde_json::Value::from(entry.quantity));
                 obj.insert("foilQuantity".to_string(), serde_json::Value::from(entry.foil_quantity));
+                obj.insert("wantQuantity".to_string(), serde_json::Value::from(entry.want_quantity));
                 obj.insert(
                     "collectionId".to_string(),
                     serde_json::Value::String(collection_id.clone()),

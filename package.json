@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "concurrently \"cd webui && npm start\" \"cargo run --bin server -- --port 5234\"",
-    "start-webui": "cd webui && npm start"
+    "start": "concurrently \"cd webui2 && npm run dev\" \"cargo run --bin server -- --port 5234\"",
+    "start-webui2": "cd webui2 && npm run dev"
   },
   "eslintConfig": {},
   "browserslist": {},

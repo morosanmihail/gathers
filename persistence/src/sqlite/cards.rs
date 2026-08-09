@@ -14,7 +14,7 @@ pub(super) fn add_cards(
 
     let placeholders = cards
         .iter()
-        .map(|_| "(?, ?, ?, ?, ?, ?, ?)")
+        .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?)")
         .collect::<Vec<_>>()
         .join(",");
     let mut query_params: Vec<String> = vec![];
@@ -23,18 +23,20 @@ pub(super) fn add_cards(
         query_params.push(collection_id.clone());
         query_params.push(c.quantity.to_string());
         query_params.push(c.foil_quantity.to_string());
+        query_params.push(c.want_quantity.to_string());
         query_params.push(c.time_added.clone());
         query_params.push(c.time_added.clone()); // timeupdated = timeadded on creation
         query_params.push(c.provider.clone());
     }
     let query = format!(
-        "INSERT INTO cards (uuid, collection, quantity, foilquantity, timeadded, timeupdated, provider)
+        "INSERT INTO cards (uuid, collection, quantity, foilquantity, want_quantity, timeadded, timeupdated, provider)
 VALUES {}
 ON CONFLICT (uuid, collection) DO UPDATE SET
  quantity = max(cards.quantity + EXCLUDED.quantity, 0),
  foilquantity = max(cards.foilquantity + EXCLUDED.foilquantity, 0),
+ want_quantity = max(cards.want_quantity + EXCLUDED.want_quantity, 0),
  timeupdated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-RETURNING uuid, collection, quantity, foilquantity, timeadded, provider",
+RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, provider",
         placeholders
     );
     let mut stmt = conn.prepare(&query)?;
@@ -45,19 +47,60 @@ RETURNING uuid, collection, quantity, foilquantity, timeadded, provider",
                 collection: row.get(1)?,
                 quantity: row.get(2)?,
                 foil_quantity: row.get(3)?,
-                time_added: row.get(4)?,
-                provider: row.get(5)?,
+                want_quantity: row.get(4)?,
+                time_added: row.get(5)?,
+                provider: row.get(6)?,
             })
         })?
         .flatten()
         .collect();
 
     conn.execute(
-        "DELETE FROM cards WHERE quantity = 0 AND foilquantity = 0",
+        "DELETE FROM cards WHERE quantity = 0 AND foilquantity = 0 AND want_quantity = 0",
         [],
     )?;
 
     Ok(result)
+}
+
+pub(super) fn set_want_quantity(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    card_uuid: &models::CardID,
+    want_quantity: i32,
+    provider: &str,
+    time: &str,
+) -> eyre::Result<CollectionCard> {
+    let want_quantity = want_quantity.max(0);
+    let mut stmt = conn.prepare(
+        "INSERT INTO cards (uuid, collection, quantity, foilquantity, want_quantity, timeadded, timeupdated, provider)
+VALUES (?1, ?2, 0, 0, ?3, ?4, ?4, ?5)
+ON CONFLICT (uuid, collection) DO UPDATE SET
+ want_quantity = ?3,
+ timeupdated = ?4
+RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, provider",
+    )?;
+    let card = stmt.query_row(
+        rusqlite::params![card_uuid, collection_id, want_quantity, time, provider],
+        |row| {
+            Ok(CollectionCard {
+                uuid: row.get(0)?,
+                collection: row.get(1)?,
+                quantity: row.get(2)?,
+                foil_quantity: row.get(3)?,
+                want_quantity: row.get(4)?,
+                time_added: row.get(5)?,
+                provider: row.get(6)?,
+            })
+        },
+    )?;
+
+    conn.execute(
+        "DELETE FROM cards WHERE quantity = 0 AND foilquantity = 0 AND want_quantity = 0",
+        [],
+    )?;
+
+    Ok(card)
 }
 
 pub(super) fn get_paginated(
@@ -88,6 +131,7 @@ pub(super) fn get_paginated(
     let sort_col = match &params.sort_by {
         Some(CollectionSortField::Quantity) => "quantity",
         Some(CollectionSortField::FoilQuantity) => "foilquantity",
+        Some(CollectionSortField::WantQuantity) => "want_quantity",
         Some(CollectionSortField::Provider) => "provider",
         _ => "timeadded",
     };
@@ -98,7 +142,7 @@ pub(super) fn get_paginated(
     };
 
     let query = format!(
-        "SELECT uuid, quantity, foilquantity, timeadded, provider \
+        "SELECT uuid, quantity, foilquantity, want_quantity, timeadded, provider \
          FROM cards WHERE {} ORDER BY {} {} LIMIT ?{} OFFSET ?{}",
         conditions.join(" AND "),
         sort_col,
@@ -117,9 +161,10 @@ pub(super) fn get_paginated(
                 uuid: row.get(0)?,
                 quantity: row.get(1)?,
                 foil_quantity: row.get(2)?,
-                time_added: row.get(3)?,
+                want_quantity: row.get(3)?,
+                time_added: row.get(4)?,
                 collection: collection_id.clone(),
-                provider: row.get(4)?,
+                provider: row.get(5)?,
             })
         })?
         .collect::<Result<_, _>>()?;

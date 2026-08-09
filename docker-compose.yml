@@ -36,20 +36,6 @@ services:
       - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
     restart: unless-stopped
 
-  gathers-webui:
-    image: ghcr.io/morosanmihail/gathers-webui:latest
-    ports:
-      - "3000:3000"
-    depends_on:
-      - gathers-api
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
   gathers-webui2:
     image: ghcr.io/morosanmihail/gathers-webui2:latest
     ports:

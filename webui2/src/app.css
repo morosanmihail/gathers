@@ -356,6 +356,9 @@ label.field-label {
 	box-shadow: 0 0 0 2px var(--accent-glow), var(--shadow);
 }
 
+.card-tile.want-only { opacity: 0.5; }
+.card-tile.want-only:hover { opacity: 0.75; }
+
 .card-tile-img {
 	width: 100%;
 	aspect-ratio: 5/7;
@@ -491,6 +494,8 @@ label.field-label {
 
 .card-row:hover { background: var(--surface); }
 .card-row.selected { background: var(--accent-glow); }
+.card-row.want-only { opacity: 0.5; }
+.card-row.want-only:hover { opacity: 0.75; }
 
 .card-row-cell {
 	padding: 6px 8px;

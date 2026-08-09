@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { cardImageUrl, rarityClass } from '$lib/types';
+	import { cardImageUrl, rarityClass, isWantOnly } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import QtyControls from './QtyControls.svelte';
@@ -43,6 +43,7 @@
 <div
 	class="card-tile"
 	class:selected={isSelected}
+	class:want-only={collectionMode && isWantOnly(col)}
 	role="button"
 	tabindex="0"
 	onclick={() => onclick?.(card)}

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { rarityClass } from '$lib/types';
+	import { rarityClass, isWantOnly } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
 	import QtyControls from './QtyControls.svelte';
@@ -30,6 +30,7 @@
 <div
 	class="card-row"
 	class:selected={isSelected}
+	class:want-only={collectionMode && isWantOnly(col)}
 	role="row"
 	tabindex="0"
 	onclick={() => onclick?.(card)}

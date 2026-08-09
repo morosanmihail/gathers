@@ -228,7 +228,7 @@ async fn test_move_same_collection_no_history_corruption() {
 
     p.move_cards_between_collections(
         &[CollectionCard {
-            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0,
+            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, want_quantity: 0,
             time_added: OLD_TIME.to_string(), collection: col.clone(), provider: "".to_string(),
         }],
         col.clone(),
@@ -249,7 +249,7 @@ async fn test_move_cards_trims_source_history() {
 
     p.move_cards_between_collections(
         &[CollectionCard {
-            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0,
+            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, want_quantity: 0,
             time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string(),
         }],
         col_b.clone(),
@@ -271,7 +271,7 @@ async fn test_move_cards_transfers_history_to_destination() {
 
     p.move_cards_between_collections(
         &[CollectionCard {
-            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0,
+            uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, want_quantity: 0,
             time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string(),
         }],
         col_b.clone(),
@@ -298,7 +298,7 @@ async fn test_move_cards_foil_history_transferred() {
 
     p.move_cards_between_collections(
         &[CollectionCard {
-            uuid: "card1".to_string(), quantity: 0, foil_quantity: 2,
+            uuid: "card1".to_string(), quantity: 0, foil_quantity: 2, want_quantity: 0,
             time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string(),
         }],
         col_b.clone(),

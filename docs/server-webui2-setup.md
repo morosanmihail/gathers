@@ -2,7 +2,7 @@
 
 # How To Start
 
-The following command spins up both the React webUI, as well as the backend axum server.
+The following command spins up both the Svelte webUI (v2), as well as the backend axum server.
 
 ```bash
 npm start
@@ -11,7 +11,7 @@ npm start
 You can start them individually by doing the following for the webui:
 
 ```bash
-npm run start-webui
+npm run start-webui2
 ```
 
 Or the following for the backend server:
@@ -27,7 +27,7 @@ The `--system` flag may be specified multiple times to enable multiple retrieval
 cargo run --bin server -- --system sql --system riftbound-sql --port 5234
 ```
 
-You can then access the webui at `http://localhost:3000`.
+You can then access the webui at `http://localhost:5173`.
 
 ## Config File
 

@@ -223,6 +223,7 @@ async function enrichEntries(entries: CollectionEntry[]): Promise<CollectionCard
 			id: entry.id,
 			quantity: entry.quantity,
 			foilQuantity: entry.foilQuantity,
+			wantQuantity: entry.wantQuantity ?? 0,
 			collectionId: entry.collectionId,
 			timeAdded: entry.timeAdded,
 			provider: entry.provider || 'MagicSQLite',
@@ -348,6 +349,15 @@ export async function deleteCardFromCollection(collection: string, cardId: strin
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ id: cardId, quantity, foilQuantity })
+	});
+	invalidateCollectionStats(collection);
+}
+
+export async function setWantQuantity(collection: string, cardId: string, wantQuantity: number): Promise<void> {
+	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/want`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ id: cardId, wantQuantity })
 	});
 	invalidateCollectionStats(collection);
 }
