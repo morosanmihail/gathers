@@ -8,7 +8,7 @@ async fn test_move_cards_between_collections() {
     add_card(&mut p, &DEFAULT.into(), &"default_card".to_string(), 3, 1).await;
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: cid.clone(), quantity: 4, foil_quantity: 0, time_added: "".to_string(), collection: col.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: cid.clone(), quantity: 4, foil_quantity: 0, want_quantity: 0, time_added: "".to_string(), collection: col.clone(), provider: "".to_string() }],
         DEFAULT.to_string(),
     ).await.unwrap();
 
@@ -30,7 +30,7 @@ async fn test_move_cards_between_collections_skips_zero_quantity() {
     add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 0, foil_quantity: 0, time_added: OLD_TIME.to_string(), collection: col.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 0, foil_quantity: 0, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col.clone(), provider: "".to_string() }],
         DEFAULT.to_string(),
     ).await.unwrap();
 
@@ -49,7 +49,7 @@ async fn test_move_partial_preserves_provider() {
     p.add_card_to_collection(&col_a, &"card1".to_string(), 5, 2, OLD_TIME, "mtg").await.unwrap();
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
         col_b.clone(),
     ).await.unwrap();
 
@@ -71,7 +71,7 @@ async fn test_move_all_copies_preserves_provider() {
     p.add_card_to_collection(&col_a, &"card1".to_string(), 4, 1, OLD_TIME, "riftbound").await.unwrap();
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 4, foil_quantity: 1, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 4, foil_quantity: 1, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
         col_b.clone(),
     ).await.unwrap();
 
@@ -91,7 +91,7 @@ async fn test_move_same_collection_is_noop() {
     p.add_card_to_collection(&col, &"card1".to_string(), 5, 2, OLD_TIME, "mtg").await.unwrap();
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 5, foil_quantity: 2, time_added: OLD_TIME.to_string(), collection: col.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 5, foil_quantity: 2, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col.clone(), provider: "".to_string() }],
         col.clone(),
     ).await.unwrap();
 

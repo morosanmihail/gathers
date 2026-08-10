@@ -34,7 +34,7 @@ async fn test_timeupdated_updated_on_move_source() {
     p.add_card_to_collection(&col_a, &"card1".to_string(), 5, 2, OLD_TIME, "").await.unwrap();
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 3, foil_quantity: 1, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 3, foil_quantity: 1, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
         col_b.clone(),
     ).await.unwrap();
 
@@ -50,7 +50,7 @@ async fn test_timeupdated_updated_on_move_destination_existing_card() {
     p.add_card_to_collection(&col_b, &"card1".to_string(), 1, 0, OLD_TIME, "").await.unwrap();
 
     p.move_cards_between_collections(
-        &[CollectionCard { uuid: "card1".to_string(), quantity: 2, foil_quantity: 1, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 2, foil_quantity: 1, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
         col_b.clone(),
     ).await.unwrap();
 

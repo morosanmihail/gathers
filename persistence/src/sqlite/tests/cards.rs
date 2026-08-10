@@ -36,8 +36,8 @@ async fn test_add_cards_to_collection() {
     p.add_cards_to_collection(
         &col,
         &[
-            CollectionCard { uuid: "12345".to_string(), quantity: 2, foil_quantity: 1, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
-            CollectionCard { uuid: "12346".to_string(), quantity: 5, foil_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
+            CollectionCard { uuid: "12345".to_string(), quantity: 2, foil_quantity: 1, want_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
+            CollectionCard { uuid: "12346".to_string(), quantity: 5, foil_quantity: 0, want_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
         ],
     ).await.unwrap();
 
@@ -48,7 +48,7 @@ async fn test_add_cards_to_collection() {
 
     p.add_cards_to_collection(
         &col,
-        &[CollectionCard { uuid: "12345".to_string(), quantity: 3, foil_quantity: 2, time_added: t.clone(), provider: "".to_string(), collection: col.clone() }],
+        &[CollectionCard { uuid: "12345".to_string(), quantity: 3, foil_quantity: 2, want_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() }],
     ).await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100)).await.unwrap();
@@ -59,8 +59,8 @@ async fn test_add_cards_to_collection() {
     p.add_cards_to_collection(
         &col,
         &[
-            CollectionCard { uuid: "12345".to_string(), quantity: -3, foil_quantity: -1, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
-            CollectionCard { uuid: "12346".to_string(), quantity: 5, foil_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
+            CollectionCard { uuid: "12345".to_string(), quantity: -3, foil_quantity: -1, want_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
+            CollectionCard { uuid: "12346".to_string(), quantity: 5, foil_quantity: 0, want_quantity: 0, time_added: t.clone(), provider: "".to_string(), collection: col.clone() },
         ],
     ).await.unwrap();
 
@@ -143,6 +143,89 @@ async fn test_get_cards_count_with_providers_filter() {
 
     let count = p.get_cards_in_collection_count(col.clone(), &["Unknown".to_string()]).await.unwrap();
     assert_eq!(count, 0);
+}
+
+// ── want quantity ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_adjust_want_quantity_creates_wishlist_only_row() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    let card = p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
+    assert_eq!(card.quantity, 0);
+    assert_eq!(card.foil_quantity, 0);
+    assert_eq!(card.want_quantity, 3);
+    assert_eq!(card.provider, "mtg");
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].want_quantity, 3);
+}
+
+#[tokio::test]
+async fn test_adjust_want_quantity_does_not_touch_owned_quantity() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 2, 1).await;
+
+    p.adjust_want_quantity(&col, &"card1".to_string(), 4, "mtg").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(cards[0].quantity, 2);
+    assert_eq!(cards[0].foil_quantity, 1);
+    assert_eq!(cards[0].want_quantity, 4);
+}
+
+#[tokio::test]
+async fn test_adjust_want_quantity_accumulates() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    p.adjust_want_quantity(&col, &"card1".to_string(), 1, "mtg").await.unwrap();
+    p.adjust_want_quantity(&col, &"card1".to_string(), 1, "mtg").await.unwrap();
+    let card = p.adjust_want_quantity(&col, &"card1".to_string(), 1, "mtg").await.unwrap();
+    assert_eq!(card.want_quantity, 3);
+
+    let card = p.adjust_want_quantity(&col, &"card1".to_string(), -2, "mtg").await.unwrap();
+    assert_eq!(card.want_quantity, 1);
+}
+
+#[tokio::test]
+async fn test_adjust_want_quantity_clamps_negative_to_zero() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    p.adjust_want_quantity(&col, &"card1".to_string(), 2, "mtg").await.unwrap();
+    let card = p.adjust_want_quantity(&col, &"card1".to_string(), -100, "mtg").await.unwrap();
+    assert_eq!(card.want_quantity, 0);
+}
+
+#[tokio::test]
+async fn test_adjust_want_quantity_to_zero_purges_wishlist_only_row() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
+    p.adjust_want_quantity(&col, &"card1".to_string(), -3, "mtg").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(cards.len(), 0);
+}
+
+#[tokio::test]
+async fn test_owned_card_survives_want_quantity_cleared_to_zero() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 1, 0).await;
+
+    p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
+    p.adjust_want_quantity(&col, &"card1".to_string(), -3, "mtg").await.unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].quantity, 1);
+    assert_eq!(cards[0].want_quantity, 0);
 }
 
 #[tokio::test]

@@ -14,15 +14,6 @@ local_resource(
 )
 
 local_resource(
-    'webui',
-    serve_cmd='cd webui && npm start',
-    deps=['webui/package.json'],
-    resource_deps=['server'],
-    links=[link('http://localhost:3000', 'UI')],
-    labels=['frontend'],
-)
-
-local_resource(
     'webui2',
     serve_cmd='cd webui2 && npm run dev',
     deps=['webui2/src', 'webui2/package.json', 'webui2/svelte.config.js', 'webui2/vite.config.ts'],

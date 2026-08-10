@@ -356,6 +356,9 @@ label.field-label {
 	box-shadow: 0 0 0 2px var(--accent-glow), var(--shadow);
 }
 
+.card-tile.want-only { opacity: 0.5; }
+.card-tile.want-only:hover { opacity: 0.75; }
+
 .card-tile-img {
 	width: 100%;
 	aspect-ratio: 5/7;
@@ -491,6 +494,8 @@ label.field-label {
 
 .card-row:hover { background: var(--surface); }
 .card-row.selected { background: var(--accent-glow); }
+.card-row.want-only { opacity: 0.5; }
+.card-row.want-only:hover { opacity: 0.75; }
 
 .card-row-cell {
 	padding: 6px 8px;
@@ -992,6 +997,35 @@ label.field-label {
 }
 
 .card-tile:hover .card-tile-add { opacity: 1; }
+
+.add-dropdown-menu {
+	position: fixed;
+	z-index: 600;
+	background: var(--surface2);
+	border: 1px solid var(--border2);
+	border-radius: var(--radius);
+	padding: 4px;
+	min-width: 130px;
+	box-shadow: var(--shadow);
+	display: flex;
+	flex-direction: column;
+}
+
+.add-dropdown-item {
+	padding: 6px 10px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 0.8rem;
+	color: var(--text2);
+	border: none;
+	background: none;
+	width: 100%;
+	text-align: left;
+	white-space: nowrap;
+	transition: background 0.1s, color 0.1s;
+}
+
+.add-dropdown-item:hover { background: var(--surface3); color: var(--text); }
 
 /* ─── Download progress ────────────────────────────────── */
 .download-banner {

@@ -22,15 +22,15 @@ services:
       - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
     restart: unless-stopped
 
-  gathers-webui:
-    image: ghcr.io/morosanmihail/gathers-webui:latest
+  gathers-webui2:
+    image: ghcr.io/morosanmihail/gathers-webui2:latest
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
       - gathers-api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -50,7 +50,7 @@ volumes:
 
 2. The MTG database will be auto-downloaded on first start if not already present.
 
-3. The web UI will be available at `http://localhost:3000`. The API server listens on port 5234.
+3. The web UI will be available at `http://localhost:3001`. The API server listens on port 5234.
 
 4. To stop the server:
    ```bash
@@ -133,7 +133,7 @@ The `system` field controls which card databases are active. Supported values: `
 
 ## Ports
 
-- `3000`: Web UI
+- `3001`: Web UI
 - `5234`: API server
 
 ## Building Manually

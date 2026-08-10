@@ -95,6 +95,7 @@ export interface CollectionEntry {
 	id: string;
 	quantity: number;
 	foilQuantity: number;
+	wantQuantity: number;
 	collectionId: string;
 	timeAdded: string;
 	provider: string;
@@ -106,6 +107,7 @@ export interface CollectionCard {
 	id: string;
 	quantity: number;
 	foilQuantity: number;
+	wantQuantity?: number;
 	timeAdded?: string;
 	provider?: string;
 	image?: string;
@@ -175,6 +177,12 @@ export interface PriceRetailer {
 
 export interface CardPrices {
 	paper?: Record<string, PriceRetailer>;
+}
+
+// True when a collection card is tracked purely as a wishlist entry — none
+// owned yet, only a desired quantity.
+export function isWantOnly(card: CollectionCard): boolean {
+	return (card.quantity ?? 0) === 0 && (card.foilQuantity ?? 0) === 0 && (card.wantQuantity ?? 0) > 0;
 }
 
 export function rarityClass(r?: string): string {

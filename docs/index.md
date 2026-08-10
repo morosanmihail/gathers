@@ -24,9 +24,9 @@ Also allows you to manipulate the collections.
 
 REST server to leverage the retrieval and persistence crates.
 
-## webui
+## webui2
 
-A React web ui to interact with the server. It is quite ancient, from when gathers was actually hometg and written in C#.
+A Svelte 5 / SvelteKit web ui to interact with the server.
 
 Combined with the server, they allow you to use both the `retrieval` crate to search for cards, but also the `persistence` crate to store a database of the cards you own, or are interested in.
 

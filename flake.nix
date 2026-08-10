@@ -57,15 +57,15 @@
               }
           ) {};
 
-          gathers-webui = pkgs.callPackage (
+          gathers-webui2 = pkgs.callPackage (
             {
               importNpmLock,
               buildNpmPackage,
             }:
               buildNpmPackage {
-                name = "gathers-webui";
-                src = ./webui;
-                npmDeps = importNpmLock {npmRoot = ./webui;};
+                name = "gathers-webui2";
+                src = ./webui2;
+                npmDeps = importNpmLock {npmRoot = ./webui2;};
                 inherit (importNpmLock) npmConfigHook;
               }
           ) {};

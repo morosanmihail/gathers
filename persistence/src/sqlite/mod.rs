@@ -103,6 +103,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 collection: collection_id.clone(),
                 quantity,
                 foil_quantity,
+                want_quantity: 0,
                 time_added: time_added.to_string(),
                 provider: provider.to_string(),
             }],
@@ -142,6 +143,33 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         Ok(result)
     }
 
+    async fn adjust_want_quantity(
+        &mut self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+        delta: i32,
+        provider: &str,
+    ) -> eyre::Result<CollectionCard> {
+        let conn = self.connection.lock().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut result = cards::add_cards(
+            &conn,
+            collection_id,
+            &[CollectionCard {
+                uuid: card_uuid.clone(),
+                collection: collection_id.clone(),
+                quantity: 0,
+                foil_quantity: 0,
+                want_quantity: delta,
+                time_added: now,
+                provider: provider.to_string(),
+            }],
+        )?;
+        result
+            .pop()
+            .ok_or_else(|| eyre::eyre!("No card returned from want-quantity upsert"))
+    }
+
     async fn move_cards_between_collections(
         &mut self,
         input_cards: &[CollectionCard],
@@ -164,6 +192,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     collection: c.collection.clone(),
                     quantity: -c.quantity,
                     foil_quantity: -c.foil_quantity,
+                    want_quantity: 0,
                     time_added: c.time_added.clone(),
                     provider: c.provider.clone(),
                 }],
@@ -193,6 +222,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     collection: to_collection_id.clone(),
                     quantity: c.quantity,
                     foil_quantity: c.foil_quantity,
+                    want_quantity: 0,
                     time_added: c.time_added.clone(),
                     provider,
                 }],

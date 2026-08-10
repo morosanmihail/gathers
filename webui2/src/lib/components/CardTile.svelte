@@ -1,12 +1,13 @@
 <script lang="ts">
 	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { cardImageUrl, rarityClass } from '$lib/types';
+	import { cardImageUrl, rarityClass, isWantOnly } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import QtyControls from './QtyControls.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
 	import SetTooltip from './SetTooltip.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
+	import AddDropdown from './AddDropdown.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -17,11 +18,12 @@
 		collection?: string;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
 		onAddFoil?: (card: AnyCard | CollectionCard) => void;
+		onAddWanted?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, selectable = true, price = null, cardPrices, collection = '', onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, price = null, cardPrices, collection = '', onAdd, onAddFoil, onAddWanted, onAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -43,6 +45,7 @@
 <div
 	class="card-tile"
 	class:selected={isSelected}
+	class:want-only={collectionMode && isWantOnly(col)}
 	role="button"
 	tabindex="0"
 	onclick={() => onclick?.(card)}
@@ -100,23 +103,14 @@
 		</div>
 	{/if}
 
-	<!-- Add to collection buttons (search mode) -->
-	{#if !collectionMode && (onAdd || onAddFoil)}
-		<div class="card-tile-add" style="display:flex;gap:4px;">
-			{#if onAdd}
-				<button
-					class="btn btn-sm btn-accent"
-					onclick={(e) => { e.stopPropagation(); onAdd(card); }}
-					title="Add to collection"
-				>+</button>
-			{/if}
-			{#if onAddFoil}
-				<button
-					class="btn btn-sm btn-ghost"
-					onclick={(e) => { e.stopPropagation(); onAddFoil(card); }}
-					title="Add as foil"
-				>+✦</button>
-			{/if}
+	<!-- Add to collection dropdown (search mode) -->
+	{#if !collectionMode && (onAdd || onAddFoil || onAddWanted)}
+		<div class="card-tile-add" role="presentation" onclick={(e) => e.stopPropagation()}>
+			<AddDropdown
+				onAdd={onAdd ? () => onAdd(card) : undefined}
+				onAddFoil={onAddFoil ? () => onAddFoil(card) : undefined}
+				onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
+			/>
 		</div>
 	{/if}
 </div>

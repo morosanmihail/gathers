@@ -20,7 +20,6 @@ jobs:
     outputs:
       api: ${{ steps.filter.outputs.api }}
       mirror: ${{ steps.filter.outputs.mirror }}
-      webui: ${{ steps.filter.outputs.webui }}
       webui2: ${{ steps.filter.outputs.webui2 }}
     steps:
       - uses: actions/checkout@v4
@@ -48,14 +47,12 @@ jobs:
               - "Cargo.toml"
               - "Cargo.lock"
               - "Dockerfile.mirror"
-            webui:
-              - "webui/**"
             webui2:
               - "webui2/**"
 
   build-and-push:
     needs: changes
-    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui == 'true' || needs.changes.outputs.webui2 == 'true'
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui2 == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -70,13 +67,6 @@ jobs:
             context: .
             file: ./Dockerfile.mirror
             image: gathers-mirror
-          - name: webui
-            enabled: ${{ needs.changes.outputs.webui }}
-            context: ./webui
-            file: ./webui/Dockerfile
-            image: gathers-webui
-            build-args: |
-              REACT_APP_COLLECTIONS_ENABLED=true
           - name: webui2
             enabled: ${{ needs.changes.outputs.webui2 }}
             context: ./webui2

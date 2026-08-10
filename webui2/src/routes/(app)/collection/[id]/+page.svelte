@@ -10,7 +10,7 @@
 	import {
 		getCollectionCards, getCollectionCount,
 		searchCollectionCards, searchCollectionCount,
-		addCardToCollection, deleteCardFromCollection,
+		addCardToCollection, deleteCardFromCollection, adjustWantQuantity,
 		getMtgPrices, getPokemonPrices, getCollectionValue, PAGE_SIZE
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
@@ -136,11 +136,23 @@
 				const qty = foil ? c.quantity : Math.max(0, c.quantity + delta);
 				const foilQty = foil ? Math.max(0, c.foilQuantity + delta) : c.foilQuantity;
 				return { ...c, quantity: qty, foilQuantity: foilQty };
-			}).filter(c => c.quantity > 0 || c.foilQuantity > 0);
+			}).filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);
 			total = Math.max(0, total + delta);
 			refreshValue();
 		} catch (e) {
 			console.error('[gathers] adjustCardQty failed:', e);
+		}
+	}
+
+	async function handleWantChange(card: CollectionCard, delta: number) {
+		try {
+			await adjustWantQuantity(collectionId, card.id, delta);
+			const wantQuantity = Math.max(0, (card.wantQuantity ?? 0) + delta);
+			cards = cards.map(c => c.id === card.id ? { ...c, wantQuantity } : c)
+				.filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);
+			if (detailCard?.id === card.id) detailCard = { ...detailCard, wantQuantity };
+		} catch (e) {
+			console.error('[gathers] handleWantChange failed:', e);
 		}
 	}
 
@@ -318,5 +330,9 @@
 {/if}
 
 {#if detailCard}
-	<CardDetailModal card={detailCard} onclose={() => detailCard = null} />
+	<CardDetailModal
+		card={detailCard}
+		onclose={() => detailCard = null}
+		onWantChange={(delta) => detailCard && handleWantChange(detailCard, delta)}
+	/>
 {/if}

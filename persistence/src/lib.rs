@@ -16,6 +16,7 @@ pub enum CollectionSortField {
     TimeAdded,
     Quantity,
     FoilQuantity,
+    WantQuantity,
     Provider,
 }
 
@@ -101,6 +102,17 @@ pub trait PersistenceSystemTrait {
         collection_id: &CollectionID,
         params: CollectionCardsParams,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<CollectionCard>>>;
+
+    /// Adjusts (by delta, floored at 0) the quantity of a card the owner wants
+    /// to acquire in a collection. Same delta model as `add_card_to_collection`,
+    /// and works even if the card isn't owned yet (a wishlist entry).
+    fn adjust_want_quantity(
+        &mut self,
+        collection_id: &CollectionID,
+        card_uuid: &CardID,
+        delta: i32,
+        provider: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<CollectionCard>>;
 
     fn move_cards_between_collections(
         &mut self,

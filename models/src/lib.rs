@@ -51,6 +51,9 @@ pub struct CollectionCard {
     pub uuid: CardID,
     pub quantity: i32,
     pub foil_quantity: i32,
+    /// Quantity the owner wants to acquire, independent of `quantity`/`foil_quantity`
+    /// already owned. Lets a card be tracked as a wishlist entry before any are owned.
+    pub want_quantity: i32,
     pub time_added: String,
     pub collection: CollectionID,
     pub provider: String,

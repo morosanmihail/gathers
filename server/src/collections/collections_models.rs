@@ -176,12 +176,19 @@ pub struct CardToAdd {
     pub purchase_price: Option<f64>,
 }
 
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct AdjustWantQuantityRequest {
+    pub id: String,
+    pub delta: i32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema, PartialEq)]
 pub enum APICollectionSortField {
     #[default]
     TimeAdded,
     Quantity,
     FoilQuantity,
+    WantQuantity,
     Provider,
 }
 
@@ -191,6 +198,7 @@ impl From<APICollectionSortField> for persistence::CollectionSortField {
             APICollectionSortField::TimeAdded => persistence::CollectionSortField::TimeAdded,
             APICollectionSortField::Quantity => persistence::CollectionSortField::Quantity,
             APICollectionSortField::FoilQuantity => persistence::CollectionSortField::FoilQuantity,
+            APICollectionSortField::WantQuantity => persistence::CollectionSortField::WantQuantity,
             APICollectionSortField::Provider => persistence::CollectionSortField::Provider,
         }
     }
@@ -217,6 +225,8 @@ pub struct CollectionCard {
     pub quantity: i32,
     #[serde(rename = "foilQuantity")]
     pub foil_quantity: i32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
     #[serde(rename = "collectionId")]
     pub collection_id: String,
     #[serde(rename = "timeAdded")]
@@ -268,6 +278,7 @@ impl From<&CollectionCard> for models::CollectionCard {
             uuid: value.id.to_string(),
             quantity: value.quantity,
             foil_quantity: value.foil_quantity,
+            want_quantity: value.want_quantity,
             collection: value.collection_id.to_string(),
             time_added: value.time_added.to_string(),
             provider: "".to_string(),

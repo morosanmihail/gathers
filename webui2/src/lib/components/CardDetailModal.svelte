@@ -10,9 +10,12 @@
 	interface Props {
 		card: AnyCard | CollectionCard;
 		onclose: () => void;
+		onWantChange?: (delta: number) => void;
 	}
 
-	let { card, onclose }: Props = $props();
+	let { card, onclose, onWantChange }: Props = $props();
+
+	const wantQty = $derived((card as CollectionCard).wantQuantity ?? 0);
 
 	// Duck-type the system from whichever fields are present — cards from search
 	// results and from a collection listing (which merges card detail + entry
@@ -113,6 +116,16 @@
 							{#if (card as CollectionCard).foilQuantity}, {(card as CollectionCard).foilQuantity}✦ foil{/if}
 						</span>
 					</div>
+					{#if onWantChange}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Want</span>
+							<span style="display:flex; align-items:center; gap:6px;">
+								<button class="qty-btn" disabled={wantQty <= 0} onclick={() => onWantChange?.(-1)}>−</button>
+								<span class="qty-val">{wantQty}</span>
+								<button class="qty-btn add" onclick={() => onWantChange?.(1)}>+</button>
+							</span>
+						</div>
+					{/if}
 				{/if}
 
 				{#if isMtg}
