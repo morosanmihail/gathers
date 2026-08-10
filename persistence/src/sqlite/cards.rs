@@ -63,46 +63,6 @@ RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, pr
     Ok(result)
 }
 
-pub(super) fn set_want_quantity(
-    conn: &Connection,
-    collection_id: &CollectionID,
-    card_uuid: &models::CardID,
-    want_quantity: i32,
-    provider: &str,
-    time: &str,
-) -> eyre::Result<CollectionCard> {
-    let want_quantity = want_quantity.max(0);
-    let mut stmt = conn.prepare(
-        "INSERT INTO cards (uuid, collection, quantity, foilquantity, want_quantity, timeadded, timeupdated, provider)
-VALUES (?1, ?2, 0, 0, ?3, ?4, ?4, ?5)
-ON CONFLICT (uuid, collection) DO UPDATE SET
- want_quantity = ?3,
- timeupdated = ?4
-RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, provider",
-    )?;
-    let card = stmt.query_row(
-        rusqlite::params![card_uuid, collection_id, want_quantity, time, provider],
-        |row| {
-            Ok(CollectionCard {
-                uuid: row.get(0)?,
-                collection: row.get(1)?,
-                quantity: row.get(2)?,
-                foil_quantity: row.get(3)?,
-                want_quantity: row.get(4)?,
-                time_added: row.get(5)?,
-                provider: row.get(6)?,
-            })
-        },
-    )?;
-
-    conn.execute(
-        "DELETE FROM cards WHERE quantity = 0 AND foilquantity = 0 AND want_quantity = 0",
-        [],
-    )?;
-
-    Ok(card)
-}
-
 pub(super) fn get_paginated(
     conn: &Connection,
     collection_id: &CollectionID,

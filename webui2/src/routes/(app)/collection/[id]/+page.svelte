@@ -10,7 +10,7 @@
 	import {
 		getCollectionCards, getCollectionCount,
 		searchCollectionCards, searchCollectionCount,
-		addCardToCollection, deleteCardFromCollection, setWantQuantity,
+		addCardToCollection, deleteCardFromCollection, adjustWantQuantity,
 		getMtgPrices, getPokemonPrices, getCollectionValue, PAGE_SIZE
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
@@ -144,9 +144,10 @@
 		}
 	}
 
-	async function handleWantChange(card: CollectionCard, wantQuantity: number) {
+	async function handleWantChange(card: CollectionCard, delta: number) {
 		try {
-			await setWantQuantity(collectionId, card.id, wantQuantity);
+			await adjustWantQuantity(collectionId, card.id, delta);
+			const wantQuantity = Math.max(0, (card.wantQuantity ?? 0) + delta);
 			cards = cards.map(c => c.id === card.id ? { ...c, wantQuantity } : c)
 				.filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);
 			if (detailCard?.id === card.id) detailCard = { ...detailCard, wantQuantity };
@@ -332,6 +333,6 @@
 	<CardDetailModal
 		card={detailCard}
 		onclose={() => detailCard = null}
-		onWantChange={(wantQuantity) => detailCard && handleWantChange(detailCard, wantQuantity)}
+		onWantChange={(delta) => detailCard && handleWantChange(detailCard, delta)}
 	/>
 {/if}

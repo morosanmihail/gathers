@@ -353,11 +353,11 @@ export async function deleteCardFromCollection(collection: string, cardId: strin
 	invalidateCollectionStats(collection);
 }
 
-export async function setWantQuantity(collection: string, cardId: string, wantQuantity: number): Promise<void> {
+export async function adjustWantQuantity(collection: string, cardId: string, delta: number): Promise<void> {
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/want`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id: cardId, wantQuantity })
+		body: JSON.stringify({ id: cardId, delta })
 	});
 	invalidateCollectionStats(collection);
 }

@@ -7,6 +7,7 @@
 	import SetTooltip from './SetTooltip.svelte';
 	import CardImageTooltip from './CardImageTooltip.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
+	import AddDropdown from './AddDropdown.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard;
@@ -17,11 +18,12 @@
 		cardPrices?: CardPrices;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
 		onAddFoil?: (card: AnyCard | CollectionCard) => void;
+		onAddWanted?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAddWanted, onAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -77,20 +79,13 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="card-row-cell" style="display:flex;gap:6px;">
-			{#if onAdd}
-				<button
-					class="btn btn-sm btn-accent"
-					title="Add to collection"
-					onclick={(e) => { e.stopPropagation(); onAdd(card); }}
-				>+</button>
-			{/if}
-			{#if onAddFoil}
-				<button
-					class="btn btn-sm btn-ghost"
-					title="Add as foil"
-					onclick={(e) => { e.stopPropagation(); onAddFoil(card); }}
-				>+✦</button>
+		<div class="card-row-cell" role="presentation" style="display:flex;gap:6px;" onclick={(e) => e.stopPropagation()}>
+			{#if onAdd || onAddFoil || onAddWanted}
+				<AddDropdown
+					onAdd={onAdd ? () => onAdd(card) : undefined}
+					onAddFoil={onAddFoil ? () => onAddFoil(card) : undefined}
+					onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
+				/>
 			{/if}
 		</div>
 	{/if}

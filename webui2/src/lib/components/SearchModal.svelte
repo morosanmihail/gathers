@@ -2,7 +2,7 @@
 	import SearchPanel from './SearchPanel.svelte';
 	import CardResultsList from './CardResultsList.svelte';
 	import CardDetailModal from './CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, adjustWantQuantity, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
@@ -88,6 +88,20 @@
 			onAdded?.();
 		} catch {
 			toast = 'Failed to add card';
+			setTimeout(() => toast = '', 2000);
+		}
+	}
+
+	async function addWanted(card: AnyCard | CollectionCard) {
+		try {
+			await app.withOp(`Adding ${card.name} to wantlist`, () =>
+				adjustWantQuantity(collection, card.id, 1)
+			);
+			toast = `Added ${card.name} (wanted)`;
+			setTimeout(() => toast = '', 2000);
+			onAdded?.();
+		} catch {
+			toast = 'Failed to add to wantlist';
 			setTimeout(() => toast = '', 2000);
 		}
 	}
@@ -191,6 +205,7 @@
 						{prices}
 						onAdd={(c) => addCard(c)}
 						onAddFoil={(c) => addCard(c, true)}
+						onAddWanted={(c) => addWanted(c)}
 						onclick={(c) => detailCard = c as AnyCard}
 						{total}
 						{page}

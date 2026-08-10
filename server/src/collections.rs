@@ -19,11 +19,12 @@ use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
     collections::collections_models::{
-        APICardSearchFilters, CardIdentInner, CardToAdd, CollectionAddResponse, CollectionCard,
-        CollectionCardsQuery, CollectionRemoveResponse, CollectionAllPurchaseHistoryResponse,
-        CollectionPurchaseHistoryEntry, CollectionRenameRequest, CollectionValueBreakdown,
-        CollectionsSearchQuery, PublicCollectionPage, PurchaseHistoryResponse, ResultCard,
-        ResultCardInner, SetWantQuantityRequest, ShareLinkResponse, ShareLinkRevokeResponse,
+        APICardSearchFilters, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
+        CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
+        CollectionAllPurchaseHistoryResponse, CollectionPurchaseHistoryEntry,
+        CollectionRenameRequest, CollectionValueBreakdown, CollectionsSearchQuery,
+        PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
+        ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
 use models::CardTrait as _;
@@ -623,10 +624,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .await
     }
 
-    async fn cards_want_set(
+    async fn cards_want_adjust(
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
-        Json(input): Json<SetWantQuantityRequest>,
+        Json(input): Json<AdjustWantQuantityRequest>,
     ) -> Result<Json<CollectionCard>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
 
@@ -652,7 +653,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         };
 
         match storage
-            .set_want_quantity(&collection_id, &input.id, input.want_quantity, &provider)
+            .adjust_want_quantity(&collection_id, &input.id, input.delta, &provider)
             .await
         {
             Ok(card) => Ok(Json(CollectionCard {
@@ -669,7 +670,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorPayload {
-                    error: format!("Failed to set want quantity. {e}"),
+                    error: format!("Failed to adjust want quantity. {e}"),
                 }),
             )),
         }
@@ -1132,6 +1133,13 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
         drop(storage_guard);
 
+        // Wanted-only entries (nothing owned yet) aren't part of the collection's
+        // value — exclude them so price totals and the priced/total ratio only
+        // ever reflect normal/foil quantities actually owned.
+        let collection_cards = collection_cards
+            .into_iter()
+            .filter(|c| c.quantity > 0 || c.foil_quantity > 0);
+
         // Group by provider for bulk price lookup.
         let mut by_provider: HashMap<String, Vec<models::CollectionCard>> = HashMap::new();
         for card in collection_cards {
@@ -1340,7 +1348,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/search", post(search_temp))
         .api_route("/cards/{id}/add", post(cards_add))
         .api_route("/cards/{id}/delete", post(cards_remove))
-        .api_route("/cards/{id}/want", post(cards_want_set))
+        .api_route("/cards/{id}/want", post(cards_want_adjust))
         .api_route("/cards/{id}/purchase_history/{card_uuid}", get(purchase_history))
         .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
         .api_route("/cards/{id}/purchase_history_entry/{entry_id}", delete(delete_purchase_entry).patch(update_purchase_entry))

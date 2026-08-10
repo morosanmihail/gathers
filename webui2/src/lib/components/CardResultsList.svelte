@@ -21,6 +21,7 @@
 		prices?: Record<string, CardPrices>;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
 		onAddFoil?: (card: AnyCard | CollectionCard) => void;
+		onAddWanted?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 		sortBy?: string;
@@ -36,7 +37,7 @@
 
 	let {
 		cards, viewMode, listHeaders, keyFn, collectionMode = false, selectable = true, collection = '',
-		prices = {}, onAdd, onAddFoil, onAdjust, onclick, sortBy = '', sortOrder = 'Asc',
+		prices = {}, onAdd, onAddFoil, onAddWanted, onAdjust, onclick, sortBy = '', sortOrder = 'Asc',
 		onSortClick, total, page, onPageChange, gridClass = 'card-grid', gridStyle = '', listClass = 'card-list'
 	}: Props = $props();
 </script>
@@ -44,7 +45,7 @@
 {#if viewMode === 'grid'}
 	<div class={gridClass} style={gridStyle}>
 		{#each cards as card (keyFn(card))}
-			<CardTile {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
+			<CardTile {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAddWanted} {onAdjust} {onclick} />
 		{/each}
 	</div>
 {:else}
@@ -72,7 +73,7 @@
 			{/each}
 		</div>
 		{#each cards as card (keyFn(card))}
-			<CardRow {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAdjust} {onclick} />
+			<CardRow {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFoil} {onAddWanted} {onAdjust} {onclick} />
 		{/each}
 	</div>
 {/if}

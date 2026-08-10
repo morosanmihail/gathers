@@ -177,10 +177,9 @@ pub struct CardToAdd {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct SetWantQuantityRequest {
+pub struct AdjustWantQuantityRequest {
     pub id: String,
-    #[serde(rename = "wantQuantity")]
-    pub want_quantity: i32,
+    pub delta: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema, PartialEq)]
