@@ -269,6 +269,12 @@
 								<span class="vb-val">{valueBreakdown.priced_count} / {valueBreakdown.total_count}</span>
 							</div>
 						{/if}
+						{#if valueBreakdown.wanted_value != null && valueBreakdown.wanted_value > 0}
+							<div class="vb-row">
+								<span class="vb-label">Wanted Cards Total Price</span>
+								<span class="vb-val">${valueBreakdown.wanted_value.toFixed(2)}</span>
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</span>

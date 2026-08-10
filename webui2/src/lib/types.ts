@@ -226,6 +226,7 @@ export interface ValueBreakdown {
 	untracked_value?: number;
 	priced_count?: number;
 	total_count?: number;
+	wanted_value?: number;
 	[key: string]: unknown;
 }
 

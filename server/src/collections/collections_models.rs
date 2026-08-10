@@ -332,6 +332,9 @@ pub struct CollectionValueBreakdown {
     pub untracked_value: f64,
     pub priced_count: usize,
     pub total_count: usize,
+    /// Total price of cards on the wishlist (`want_quantity`), independent of
+    /// what's owned. Not included in `total_value`.
+    pub wanted_value: f64,
 }
 
 #[derive(Serialize, JsonSchema)]
