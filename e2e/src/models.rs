@@ -22,6 +22,8 @@ pub struct CollectionCard {
     pub quantity: i32,
     #[serde(rename = "foilQuantity")]
     pub foil_quantity: i32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
     #[serde(rename = "collectionId")]
     pub collection_id: String,
     #[serde(rename = "timeAdded")]
@@ -38,6 +40,12 @@ pub struct CardToAdd {
     pub foil_quantity: i32,
     #[serde(rename = "purchasePrice")]
     pub purchase_price: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdjustWantQuantityRequest {
+    pub id: String,
+    pub delta: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

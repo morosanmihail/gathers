@@ -20,10 +20,11 @@
 		onAddFoil?: (card: AnyCard | CollectionCard) => void;
 		onAddWanted?: (card: AnyCard | CollectionCard) => void;
 		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
+		onWantAdjust?: (card: CollectionCard, delta: number) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAddWanted, onAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAddWanted, onAdjust, onWantAdjust, onclick }: Props = $props();
 
 	const col = $derived(card as CollectionCard);
 	const isSelected = $derived(app.selectedCards.has(card.id));
@@ -76,6 +77,17 @@
 					<span class="card-row-qty">{col.quantity ?? 0}</span>
 					<span class="card-row-qty qty-foil">{col.foilQuantity ?? 0}✦</span>
 				</div>
+			{/if}
+		</div>
+		<div class="card-row-cell" role="presentation" style="padding: 2px 4px;" onclick={(e) => e.stopPropagation()}>
+			{#if onWantAdjust}
+				<div class="qty-row">
+					<button class="qty-btn" disabled={(col.wantQuantity ?? 0) <= 0} onclick={() => onWantAdjust(col, -1)}>−</button>
+					<span class="qty-val">{col.wantQuantity ?? 0}</span>
+					<button class="qty-btn add" onclick={() => onWantAdjust(col, 1)}>+</button>
+				</div>
+			{:else}
+				<span class="card-row-qty">{col.wantQuantity ?? 0}</span>
 			{/if}
 		</div>
 	{:else}

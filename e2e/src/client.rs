@@ -2,9 +2,9 @@ use eyre::{Context, bail};
 use reqwest::StatusCode;
 
 use crate::models::{
-    AllPurchaseHistoryResponse, CardToAdd, Collection, CollectionAddResponse, CollectionCard,
-    CollectionRemoveResponse, PublicCollectionPage, PurchaseHistoryResponse, ShareLink,
-    ShareLinkRevokeResponse,
+    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
+    CollectionAddResponse, CollectionCard, CollectionRemoveResponse, PublicCollectionPage,
+    PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse,
 };
 
 /// HTTP client for the GatheRs server.
@@ -100,6 +100,21 @@ impl GathersClient {
                 foil_quantity,
                 purchase_price: None,
             },
+        )
+        .await
+    }
+
+    /// Adjust (by delta, floored at 0) the quantity of a card the collection
+    /// owner wants to acquire, independent of owned quantity/foil_quantity.
+    pub async fn adjust_want(
+        &self,
+        collection_id: &str,
+        card_id: &str,
+        delta: i32,
+    ) -> eyre::Result<CollectionCard> {
+        self.post(
+            &format!("/api/collection/cards/{}/want", urlenc(collection_id)),
+            &AdjustWantQuantityRequest { id: card_id.to_string(), delta },
         )
         .await
     }

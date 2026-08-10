@@ -453,7 +453,7 @@ label.field-label {
 .card-list-header,
 .card-row {
 	display: grid;
-	grid-template-columns: 32px 1fr 110px 90px 130px 110px 80px 80px;
+	grid-template-columns: 32px 1fr 110px 90px 130px 110px 80px 80px 90px;
 	align-items: center;
 	gap: 0;
 	padding: 0 20px;
