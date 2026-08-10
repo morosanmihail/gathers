@@ -45,6 +45,83 @@ fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
     (normal, foil)
 }
 
+/// Pure computation of a collection's value breakdown, given already-resolved
+/// unit prices (normal, foil) per card uuid. Kept free of I/O so it can be
+/// unit tested without a live retrieval system or database.
+fn compute_value_breakdown(
+    cards: &[models::CollectionCard],
+    unit_prices: &HashMap<String, (f64, f64)>,
+    purchase_totals: &HashMap<String, persistence::PurchaseSummary>,
+) -> collections_models::CollectionValueBreakdown {
+    // Wanted-only entries (nothing owned yet) aren't part of the collection's
+    // owned value — exclude them so price totals and the priced/total ratio
+    // only ever reflect normal/foil quantities actually owned.
+    let total_count = cards
+        .iter()
+        .filter(|c| c.quantity > 0 || c.foil_quantity > 0)
+        .count();
+
+    let mut total_value: f64 = 0.0;
+    let mut profit: f64 = 0.0;
+    let mut untracked_value: f64 = 0.0;
+    let mut priced_count: usize = 0;
+    let mut wanted_value: f64 = 0.0;
+
+    for card in cards {
+        let Some(&(unit_normal, unit_foil)) = unit_prices.get(&card.uuid) else { continue };
+
+        if card.want_quantity > 0 {
+            wanted_value += unit_normal * card.want_quantity as f64;
+        }
+
+        if card.quantity <= 0 && card.foil_quantity <= 0 {
+            continue;
+        }
+
+        let current = unit_normal * card.quantity as f64 + unit_foil * card.foil_quantity as f64;
+        if current <= 0.0 {
+            continue;
+        }
+        total_value += current;
+        priced_count += 1;
+
+        if let Some(summary) = purchase_totals.get(&card.uuid) {
+            let paid_normal = summary.quantity.min(card.quantity);
+            let paid_foil = summary.foil_quantity.min(card.foil_quantity);
+
+            let cost_normal = if summary.quantity > 0 {
+                summary.total_normal_paid * paid_normal as f64 / summary.quantity as f64
+            } else {
+                0.0
+            };
+            let cost_foil = if summary.foil_quantity > 0 {
+                summary.total_foil_paid * paid_foil as f64 / summary.foil_quantity as f64
+            } else {
+                0.0
+            };
+
+            let current_of_paid = unit_normal * paid_normal as f64 + unit_foil * paid_foil as f64;
+            profit += current_of_paid - (cost_normal + cost_foil);
+
+            let unpaid_normal = (card.quantity - paid_normal).max(0);
+            let unpaid_foil = (card.foil_quantity - paid_foil).max(0);
+            untracked_value += unit_normal * unpaid_normal as f64 + unit_foil * unpaid_foil as f64;
+        } else {
+            untracked_value += current;
+        }
+    }
+
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    collections_models::CollectionValueBreakdown {
+        total_value: round2(total_value),
+        profit: round2(profit),
+        untracked_value: round2(untracked_value),
+        priced_count,
+        total_count,
+        wanted_value: round2(wanted_value),
+    }
+}
+
 /// Returns all configured retrieval systems, cloned out of the state lock,
 /// keyed by their provider name.
 async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
@@ -1133,82 +1210,29 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
         drop(storage_guard);
 
-        // Wanted-only entries (nothing owned yet) aren't part of the collection's
-        // value — exclude them so price totals and the priced/total ratio only
-        // ever reflect normal/foil quantities actually owned.
-        let collection_cards = collection_cards
-            .into_iter()
-            .filter(|c| c.quantity > 0 || c.foil_quantity > 0);
-
-        // Group by provider for bulk price lookup.
+        // Group by provider for bulk price lookup. Wanted-only entries (nothing
+        // owned yet) are kept here too, so their wishlist price is still fetched.
         let mut by_provider: HashMap<String, Vec<models::CollectionCard>> = HashMap::new();
         for card in collection_cards {
             by_provider.entry(card.provider.clone()).or_default().push(card);
         }
 
-        let total_count = by_provider.values().map(|v| v.len()).sum::<usize>();
-        let mut total_value: f64 = 0.0;
-        let mut profit: f64 = 0.0;
-        let mut untracked_value: f64 = 0.0;
-        let mut priced_count: usize = 0;
-
+        let mut unit_prices: HashMap<String, (f64, f64)> = HashMap::new();
         for (provider, cards) in &by_provider {
             if let Some(retrieval) = retrieval_systems.get(provider) {
                 let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
                 if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
                     for card in cards {
                         if let Some(card_prices) = prices_map.get(&card.uuid) {
-                            let (unit_normal, unit_foil) = preferred_unit_prices(card_prices);
-                            let current = unit_normal * card.quantity as f64
-                                + unit_foil * card.foil_quantity as f64;
-                            if current <= 0.0 {
-                                continue;
-                            }
-                            total_value += current;
-                            priced_count += 1;
-
-                            if let Some(summary) = purchase_totals.get(&card.uuid) {
-                                let paid_normal = summary.quantity.min(card.quantity);
-                                let paid_foil = summary.foil_quantity.min(card.foil_quantity);
-
-                                let cost_normal = if summary.quantity > 0 {
-                                    summary.total_normal_paid * paid_normal as f64
-                                        / summary.quantity as f64
-                                } else {
-                                    0.0
-                                };
-                                let cost_foil = if summary.foil_quantity > 0 {
-                                    summary.total_foil_paid * paid_foil as f64
-                                        / summary.foil_quantity as f64
-                                } else {
-                                    0.0
-                                };
-
-                                let current_of_paid =
-                                    unit_normal * paid_normal as f64 + unit_foil * paid_foil as f64;
-                                profit += current_of_paid - (cost_normal + cost_foil);
-
-                                let unpaid_normal = (card.quantity - paid_normal).max(0);
-                                let unpaid_foil = (card.foil_quantity - paid_foil).max(0);
-                                untracked_value += unit_normal * unpaid_normal as f64
-                                    + unit_foil * unpaid_foil as f64;
-                            } else {
-                                untracked_value += current;
-                            }
+                            unit_prices.insert(card.uuid.clone(), preferred_unit_prices(card_prices));
                         }
                     }
                 }
             }
         }
 
-        let round2 = |v: f64| (v * 100.0).round() / 100.0;
-        Ok(Json(CollectionValueBreakdown {
-            total_value: round2(total_value),
-            profit: round2(profit),
-            untracked_value: round2(untracked_value),
-            priced_count,
-            total_count,
-        }))
+        let all_cards: Vec<models::CollectionCard> = by_provider.into_values().flatten().collect();
+        Ok(Json(compute_value_breakdown(&all_cards, &unit_prices, &purchase_totals)))
     }
 
     #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -1499,4 +1523,88 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
     }
 
     ApiRouter::new().api_route("/{token}", get(get_public_cards))
+}
+
+#[cfg(test)]
+mod value_breakdown_tests {
+    use super::*;
+
+    fn card(uuid: &str, quantity: i32, foil_quantity: i32, want_quantity: i32) -> models::CollectionCard {
+        models::CollectionCard {
+            uuid: uuid.to_string(),
+            quantity,
+            foil_quantity,
+            want_quantity,
+            time_added: "2024-01-01T00:00:00Z".to_string(),
+            collection: "c1".to_string(),
+            provider: "mtg".to_string(),
+        }
+    }
+
+    #[test]
+    fn wanted_value_sums_price_times_want_quantity() {
+        let cards = vec![card("a", 0, 0, 3)];
+        let unit_prices = HashMap::from([("a".to_string(), (2.5, 4.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.wanted_value, 7.5);
+        // Wanted-only entries aren't owned, so they don't affect owned totals.
+        assert_eq!(breakdown.total_value, 0.0);
+        assert_eq!(breakdown.total_count, 0);
+        assert_eq!(breakdown.priced_count, 0);
+    }
+
+    #[test]
+    fn wanted_value_excluded_from_owned_totals_when_also_owned() {
+        // Owned 2 normal, wants 5 more on top of what's owned.
+        let cards = vec![card("a", 2, 0, 5)];
+        let unit_prices = HashMap::from([("a".to_string(), (1.0, 1.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.total_value, 2.0);
+        assert_eq!(breakdown.wanted_value, 5.0);
+        assert_eq!(breakdown.total_count, 1);
+        assert_eq!(breakdown.priced_count, 1);
+    }
+
+    #[test]
+    fn zero_want_quantity_contributes_nothing() {
+        let cards = vec![card("a", 1, 0, 0)];
+        let unit_prices = HashMap::from([("a".to_string(), (3.0, 3.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.wanted_value, 0.0);
+    }
+
+    #[test]
+    fn missing_price_excludes_card_from_wanted_value() {
+        let cards = vec![card("a", 0, 0, 4)];
+        let unit_prices = HashMap::new();
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.wanted_value, 0.0);
+    }
+
+    #[test]
+    fn multiple_wanted_cards_sum_together() {
+        let cards = vec![card("a", 0, 0, 2), card("b", 1, 0, 1)];
+        let unit_prices = HashMap::from([
+            ("a".to_string(), (10.0, 10.0)),
+            ("b".to_string(), (5.0, 5.0)),
+        ]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        // a: 2 * 10.0 = 20.0, b: 1 * 5.0 = 5.0
+        assert_eq!(breakdown.wanted_value, 25.0);
+    }
 }
