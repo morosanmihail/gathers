@@ -366,6 +366,19 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         Ok(iter.flatten().collect())
     }
 
+    async fn get_random_card(&self) -> eyre::Result<Option<Card>> {
+        let conn = self.connection.lock().await;
+        let base = select_base();
+        // LIMIT to a batch rather than 1: a handful of legacy/malformed rows
+        // fail to parse (same tolerance `search_cards` relies on via
+        // `.flatten()`), so pick the first parseable row out of a
+        // randomly-ordered batch rather than erroring on a single bad draw.
+        let query = format!("{base} ORDER BY RANDOM() LIMIT 50");
+        let mut stmt = conn.prepare(&query)?;
+        let user_iter = stmt.query_map([], SqlCard::from_row)?;
+        Ok(user_iter.flatten().next().map(|c| Card::Magic(c.into())))
+    }
+
     async fn bulk_search_cards(
         &self,
         cards: Vec<(SetCode, CollectorNumber)>,

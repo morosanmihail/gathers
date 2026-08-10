@@ -324,3 +324,38 @@ async fn test_search_by_combined_filters() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+#[ignore]
+async fn test_get_random_card() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem::new()?;
+
+    let card = r.get_random_card().await?;
+    assert!(card.is_some(), "Scryfall should always return a random card");
+    let card = if let Card::Magic(card) = card.unwrap() {
+        card
+    } else {
+        panic!("Not a Magic card")
+    };
+    assert!(!card.name.is_empty());
+    assert!(!card.id.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_get_random_card_varies() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem::new()?;
+
+    let mut names = std::collections::HashSet::new();
+    for _ in 0..5 {
+        let card = r.get_random_card().await?.expect("expected a card");
+        if let Card::Magic(card) = card {
+            names.insert(card.name);
+        }
+    }
+    assert!(names.len() > 1, "expected varying random cards, got {names:?}");
+
+    Ok(())
+}

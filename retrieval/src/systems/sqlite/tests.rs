@@ -173,6 +173,29 @@ async fn test_bulk_search_cards_empty() {
 }
 
 #[tokio::test]
+async fn test_get_random_card() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let result = system.get_random_card().await;
+    assert!(result.is_ok());
+    let card = result.unwrap();
+    assert!(card.is_some());
+    assert!(matches!(card.unwrap(), ::models::Card::Magic(_)));
+}
+
+#[tokio::test]
+async fn test_get_random_card_varies() {
+    // The fixture DB has more than one card; over several draws we should
+    // see at least two distinct names (flaky only if astronomically unlucky).
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let mut names = std::collections::HashSet::new();
+    for _ in 0..20 {
+        let card = system.get_random_card().await.unwrap().unwrap();
+        names.insert(card_name(&card));
+    }
+    assert!(names.len() > 1, "expected varying random cards, got {names:?}");
+}
+
+#[tokio::test]
 async fn test_named_retrieval_system_trait() {
     let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
     let name = system.name();

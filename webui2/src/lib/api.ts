@@ -416,6 +416,18 @@ export async function searchPokemon(filters: SearchFilters, page: number): Promi
 	});
 }
 
+export async function getRandomMtgCard(): Promise<MtgCard> {
+	return fetchJSON('/api/mtg/cards/random');
+}
+
+export async function getRandomRiftboundCard(): Promise<RiftboundCard> {
+	return fetchJSON('/api/riftbound/cards/random');
+}
+
+export async function getRandomPokemonCard(): Promise<PokemonCard> {
+	return fetchJSON('/api/pokemon/cards/random');
+}
+
 export async function getMtgCardSets(): Promise<CardSet[]> {
 	return cachedFetch('mtg-sets', () => fetchJSON<CardSet[]>('/api/mtg/sets'));
 }

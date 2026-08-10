@@ -110,6 +110,9 @@
 				</svg>
 				Search Cards
 			</a>
+			<a href="/random" class="btn">
+				🎲 Random Card
+			</a>
 		</div>
 	{/if}
 </div>

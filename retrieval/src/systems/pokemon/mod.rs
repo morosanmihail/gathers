@@ -231,6 +231,20 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         Ok(iter.flatten().collect())
     }
 
+    async fn get_random_card(&self) -> eyre::Result<Option<Card>> {
+        let conn = self.connection.lock().await;
+        // LIMIT to a batch rather than 1: a handful of rows with missing
+        // fields fail to parse (same tolerance `search_cards` relies on via
+        // `.flatten()`), so pick the first parseable row out of a
+        // randomly-ordered batch rather than erroring on a single bad draw.
+        let query =
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards \
+             ORDER BY RANDOM() LIMIT 50";
+        let mut stmt = conn.prepare(query)?;
+        let iter = stmt.query_map([], SqlPokemonCard::from_row)?;
+        Ok(iter.flatten().next().map(|c| Card::Pokemon(c.into())))
+    }
+
     async fn bulk_search_cards(
         &self,
         cards: Vec<(SetCode, CollectorNumber)>,
