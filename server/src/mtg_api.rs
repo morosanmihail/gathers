@@ -97,6 +97,29 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
             .map(Json)
     }
 
+    async fn random_card(State(state): State<GathersState>) -> Result<Json<APICard>, ApiError> {
+        let guard = state.0.lock().await;
+        let ret = guard.require_mtg()?;
+
+        let card = ret.get_random_card().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to get random card. {e}"),
+                }),
+            )
+        })?;
+        match card {
+            Some(Card::Magic(m)) => Ok(Json(m.into())),
+            _ => Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorPayload {
+                    error: "No cards available".to_string(),
+                }),
+            )),
+        }
+    }
+
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<Set>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_mtg()?;
@@ -175,6 +198,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
 
     ApiRouter::new()
         .api_route("/cards/search", post(search_mtg_cards))
+        .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", get(update))

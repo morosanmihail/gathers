@@ -37,6 +37,11 @@ pub trait RetrievalSystemTrait {
     ) -> eyre::Result<HashMap<String, models::Card>>;
 
     async fn get_sets(&self) -> eyre::Result<Vec<models::Set>>;
+
+    /// Returns a single uniformly-random card from this system's catalog, or
+    /// `None` if the catalog is empty.
+    async fn get_random_card(&self) -> eyre::Result<Option<models::Card>>;
+
     async fn bulk_search_cards(
         &self,
         cards: Vec<(SetCode, CollectorNumber)>,

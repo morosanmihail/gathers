@@ -360,6 +360,29 @@ async fn test_named_retrieval_system_trait() {
 }
 
 #[tokio::test]
+async fn test_get_random_card() {
+    let system = setup_test_db().await;
+    let result = system.get_random_card().await;
+    assert!(result.is_ok());
+    let card = result.unwrap();
+    assert!(card.is_some());
+    assert!(matches!(card.unwrap(), Card::Pokemon(_)));
+}
+
+#[tokio::test]
+async fn test_get_random_card_varies() {
+    let system = setup_test_db().await;
+    let mut names = std::collections::HashSet::new();
+    for _ in 0..20 {
+        let card = system.get_random_card().await.unwrap().unwrap();
+        if let Card::Pokemon(p) = card {
+            names.insert(p.name);
+        }
+    }
+    assert!(names.len() > 1, "expected varying random cards, got {names:?}");
+}
+
+#[tokio::test]
 async fn test_pokedex_is_none_for_trainers() {
     let system = setup_test_db().await;
     let filters = CardSearchFilters {

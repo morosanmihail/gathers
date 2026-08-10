@@ -97,6 +97,31 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
             .map(Json)
     }
 
+    async fn random_card(
+        State(state): State<GathersState>,
+    ) -> Result<Json<APIRiftboundCard>, ApiError> {
+        let guard = state.0.lock().await;
+        let ret = guard.require_riftbound()?;
+
+        let card = ret.get_random_card().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorPayload {
+                    error: format!("Failed to get random card. {e}"),
+                }),
+            )
+        })?;
+        match card {
+            Some(Card::Riftbound(rb)) => Ok(Json(rb.into())),
+            _ => Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorPayload {
+                    error: "No cards available".to_string(),
+                }),
+            )),
+        }
+    }
+
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<String>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_riftbound()?;
@@ -134,6 +159,7 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
 
     ApiRouter::new()
         .api_route("/cards/search", post(search_riftbound_cards))
+        .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_riftbound_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", get(update))
