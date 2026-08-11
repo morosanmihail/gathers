@@ -31,7 +31,7 @@
 	let valueHover = $state(false);
 
 	// Fields the /list endpoint accepts; everything else goes through /search
-	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'FoilQuantity', 'Provider']);
+	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'FoilQuantity', 'WantQuantity', 'Provider']);
 
 	let collectionFilters = $state(defaultFilters());
 	let sortBy = $state('');
@@ -203,6 +203,7 @@
 		{ field: '',           label: 'Price' },
 		{ field: 'Quantity',   label: 'Qty' },
 		{ field: 'FoilQuantity', label: 'Foil' },
+		{ field: 'WantQuantity', label: 'Wanted' },
 	];
 </script>
 
@@ -298,6 +299,7 @@
 			collection={collectionId}
 			{prices}
 			onAdjust={adjustCardQty}
+			onWantAdjust={handleWantChange}
 			onclick={(c) => detailCard = c as CollectionCard}
 			{sortBy}
 			{sortOrder}

@@ -144,6 +144,32 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     )?;
     ok("card A removed from collection");
 
+    // ── 5b. Want-only wishlist entry, then clear it ──────────────────────────
+    step("5b. Adjust want quantity on a card with 0 owned copies");
+
+    // Card A owns 0/0 at this point (fully removed in step 5). Wanting it
+    // should create a wishlist-only row without touching owned quantities.
+    let wanted = client.adjust_want(col_src, CARD_A, 3).await?;
+    eq(wanted.want_quantity, 3, "card A want quantity after +3")?;
+    eq(wanted.quantity, 0, "card A owned quantity unaffected by want")?;
+
+    let cards = client.list_cards(col_src).await?;
+    let a = find_card(&cards, CARD_A)?;
+    eq(a.want_quantity, 3, "card A listed with want_quantity = 3")?;
+    ok("want-only entry appears in collection listing");
+
+    // Delta floors at 0 rather than going negative.
+    let wanted = client.adjust_want(col_src, CARD_A, -10).await?;
+    eq(wanted.want_quantity, 0, "want quantity floored at 0")?;
+    ok("want quantity clamps at 0");
+
+    let cards = client.list_cards(col_src).await?;
+    ensure(
+        !cards.iter().any(|c| c.id == CARD_A),
+        "want-only row purged once want quantity returns to 0",
+    )?;
+    ok("want-only row removed once quantity, foil, and want are all 0");
+
     // ── 6. Re-add card A, then move both cards to dst ─────────────────────────
     step("6. Re-add card A with price, then move both cards to dst");
 
@@ -209,6 +235,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
                 id: a_in_dst.id.clone(),
                 quantity: 1,
                 foil_quantity: 0,
+                want_quantity: 0,
                 collection_id: col_dst.to_string(),
                 time_added: a_in_dst.time_added.clone(),
                 provider: a_in_dst.provider.clone(),
