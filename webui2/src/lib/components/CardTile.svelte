@@ -105,7 +105,7 @@
 	{/if}
 
 	{#if collectionMode && onWantAdjust}
-		<div style="padding: 0 8px 6px; display:flex; align-items:center; gap:6px;">
+		<div style="padding: 0 8px 6px; display:flex; align-items:center; gap:6px;" role="presentation" onclick={(e) => e.stopPropagation()}>
 			<span style="font-size:0.72rem; color:var(--text2);">Wanted</span>
 			<button class="qty-btn" disabled={(col.wantQuantity ?? 0) <= 0} onclick={() => onWantAdjust(col, -1)}>−</button>
 			<span class="qty-val">{col.wantQuantity ?? 0}</span>
