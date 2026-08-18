@@ -1,5 +1,7 @@
 # GatheRs
 
+[Demo](https://demo.gathers.cards)
+
 Collection of Rust crates and binaries to help one search for and manage Magic: the Gathering (TM) cards.
 And Riftbound, apparently.
 And Pokemon, it seems.
