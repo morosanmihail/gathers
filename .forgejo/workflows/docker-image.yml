@@ -1,0 +1,112 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# Runner must map this label to an image with the docker CLI + socket access
+# (e.g. catthehacker/ubuntu:act-latest, or DOOD/DIND configured), not a bare
+# node:lts container.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      mirror: ${{ steps.filter.outputs.mirror }}
+      webui2: ${{ steps.filter.outputs.webui2 }}
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # dorny/paths-filter isn't mirrored on data.forgejo.org, so diff by hand.
+      - name: Detect changed paths
+        id: filter
+        shell: bash
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            CHANGED=$(git ls-files)
+          else
+            CHANGED=$(git diff --name-only "$BASE" "${{ github.sha }}")
+          fi
+          match() { echo "$CHANGED" | grep -Eq "$1" && echo true || echo false; }
+          API=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile)')
+          MIRROR=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile\.mirror)')
+          WEBUI2=$(match '^webui2/')
+          echo "api=$API" >> "$GITHUB_OUTPUT"
+          echo "mirror=$MIRROR" >> "$GITHUB_OUTPUT"
+          echo "webui2=$WEBUI2" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui2 == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            enabled: ${{ needs.changes.outputs.api }}
+            context: .
+            file: ./Dockerfile
+            image: gathers-api
+          - name: mirror
+            enabled: ${{ needs.changes.outputs.mirror }}
+            context: .
+            file: ./Dockerfile.mirror
+            image: gathers-mirror
+          - name: webui2
+            enabled: ${{ needs.changes.outputs.webui2 }}
+            context: ./webui2
+            file: ./webui2/Dockerfile
+            image: gathers-webui2
+
+    steps:
+      - name: Skip unchanged image
+        if: matrix.enabled != 'true'
+        run: echo "No changes for ${{ matrix.name }}, skipping" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        if: matrix.enabled == 'true'
+
+      - name: Set up Docker Buildx
+        if: matrix.enabled == 'true'
+        uses: https://data.forgejo.org/docker/setup-buildx-action@v3
+
+      # Push to our own registry. Creds come from Codeberg (Forgejo) repo secrets,
+      # not secrets.GITHUB_TOKEN (that one's only scoped for codeberg.org).
+      - name: Log in to registry
+        if: matrix.enabled == 'true' && github.event_name == 'push'
+        uses: https://data.forgejo.org/docker/login-action@v3
+        with:
+          registry: docker.genesisdei.com
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push ${{ matrix.name }} image
+        if: matrix.enabled == 'true'
+        uses: https://data.forgejo.org/docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:latest
+            docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+          cache-from: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max
