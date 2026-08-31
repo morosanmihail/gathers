@@ -79,11 +79,42 @@ fn search_results_include_double_faced_cards() {
         .filter_map(|c| c.as_object().and_then(parse_card))
         .collect();
 
-    assert_eq!(
-        cards.len(),
-        1,
+    assert!(
+        !cards.is_empty(),
         "the modal DFC in the search results should not be dropped"
     );
+}
+
+/// Regression test: this fixture was captured with `unique=prints`, so every
+/// distinct printing (khm, prm, pkhm, ...) of Birgi comes back as its own
+/// entry with its own id, rather than being collapsed to one art per name.
+#[test]
+fn search_results_keep_every_printing_as_a_separate_card() {
+    let value: Value = serde_json::from_str(SEARCH_BIRGI).expect("valid JSON");
+    let cards_array = value
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("data array");
+
+    let cards: Vec<models::MagicCard> = cards_array
+        .iter()
+        .filter_map(|c| c.as_object().and_then(parse_card))
+        .map(as_magic)
+        .collect();
+
+    assert!(
+        cards.len() > 1,
+        "expected multiple printings, got {}",
+        cards.len()
+    );
+    let ids: std::collections::HashSet<_> = cards.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(
+        ids.len(),
+        cards.len(),
+        "each printing should have a distinct id"
+    );
+    assert!(cards.iter().any(|c| c.set_code == "khm"));
+    assert!(cards.iter().any(|c| c.set_code == "prm"));
 }
 
 #[test]
@@ -165,7 +196,9 @@ async fn get_basic_card() -> eyre::Result<()> {
         )
         .await?;
 
-    assert_eq!(card.len(), 1);
+    // Every printing/art comes back as its own entry (unique=prints), not
+    // collapsed to a single art per name.
+    assert!(!card.is_empty(), "expected at least one printing");
     let card = card.first().expect("No card?");
     let card = if let Card::Magic(card) = card {
         card
@@ -535,12 +568,53 @@ async fn search_finds_modal_double_faced_card() -> eyre::Result<()> {
         )
         .await?;
 
-    assert_eq!(results.len(), 1, "expected to find Birgi, got {results:?}");
-    let Card::Magic(card) = &results[0] else {
-        panic!("Not a Magic card")
-    };
-    assert!(card.name.starts_with("Birgi, God of Storytelling"));
-    assert!(!card.text.is_empty(), "oracle text should not be empty");
+    assert!(!results.is_empty(), "expected to find Birgi");
+    for result in &results {
+        let Card::Magic(card) = result else {
+            panic!("Not a Magic card")
+        };
+        assert!(card.name.starts_with("Birgi, God of Storytelling"));
+        assert!(!card.text.is_empty(), "oracle text should not be empty");
+    }
+
+    Ok(())
+}
+
+/// Live regression test: each printing/art of a card is returned as its own
+/// search result (distinct id), not collapsed to a single art per name.
+#[tokio::test]
+#[ignore]
+async fn search_returns_every_printing_separately() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem::new()?;
+
+    let results = r
+        .search_cards(
+            CardSearchFilters {
+                name: Some("Birgi, God of Storytelling".to_string()),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .await?;
+
+    assert!(
+        results.len() > 1,
+        "expected multiple printings of Birgi, got {}",
+        results.len()
+    );
+    let ids: std::collections::HashSet<String> = results
+        .iter()
+        .filter_map(|c| match c {
+            Card::Magic(card) => Some(card.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        ids.len(),
+        results.len(),
+        "each printing should have a distinct id"
+    );
 
     Ok(())
 }

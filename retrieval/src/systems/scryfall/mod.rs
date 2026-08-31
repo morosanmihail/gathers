@@ -61,7 +61,10 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let query_string = query::build_query_string(&filters);
         let page = query::scryfall_page(skip);
-        let unique = "cards";
+        // "prints" (not "cards") so every printing/art of a card is its own
+        // search result and collection entry, matching the SQL system (one
+        // row per printing) instead of collapsing to a single art per name.
+        let unique = "prints";
         let order = match &filters.sort_by {
             Some(SortField::Rarity) => "rarity",
             Some(SortField::SetCode) => "set",
