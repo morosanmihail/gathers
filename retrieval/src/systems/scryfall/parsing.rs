@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use models::{Card, CardColour, CardIdentifiers, MagicCard};
+use models::{Card, CardColour, CardID, CardIdentifiers, CollectorNumber, MagicCard, Set, SetCode};
 use serde_json::{Map, Value};
 
 pub fn parse_color_identity(arr: &[Value]) -> Vec<CardColour> {
@@ -59,6 +59,54 @@ pub fn parse_legalities(value: Option<&Value>) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
+/// Cards with multiple faces (`layout` = `transform`, `modal_dfc`, `split`,
+/// `adventure`, etc.) move face-specific fields off the top-level card object
+/// and into `card_faces[0]` / `card_faces[1]` instead. The top level keeps
+/// only combined fields (`name`, `type_line`, and sometimes `mana_cost` /
+/// `colors` for split cards). Falls back to the front face's value whenever
+/// the top-level field is absent.
+fn front_face(card: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    card.get("card_faces")
+        .and_then(Value::as_array)
+        .and_then(|faces| faces.first())
+        .and_then(Value::as_object)
+}
+
+fn field_str<'a>(card: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
+    card.get(field).and_then(Value::as_str).or_else(|| {
+        front_face(card)
+            .and_then(|face| face.get(field))
+            .and_then(Value::as_str)
+    })
+}
+
+fn field_array<'a>(card: &'a Map<String, Value>, field: &str) -> Option<&'a Vec<Value>> {
+    card.get(field).and_then(Value::as_array).or_else(|| {
+        front_face(card)
+            .and_then(|face| face.get(field))
+            .and_then(Value::as_array)
+    })
+}
+
+/// Combines `oracle_text` across all faces (joined with `" // "`) when the
+/// top-level field is absent, so multi-faced cards keep their full text
+/// instead of being dropped for missing a required field.
+fn combined_oracle_text(card: &Map<String, Value>) -> Option<String> {
+    if let Some(text) = card.get("oracle_text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    let faces = card.get("card_faces")?.as_array()?;
+    let texts: Vec<&str> = faces
+        .iter()
+        .filter_map(|face| face.get("oracle_text").and_then(Value::as_str))
+        .collect();
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join(" // "))
+    }
+}
+
 /// Parses a single Scryfall card JSON object into a `Card::Magic`, shared by
 /// both the search-results list mapping and the random-card lookup. Returns
 /// `None` if any field required to construct a `MagicCard` is missing.
@@ -68,7 +116,7 @@ pub fn parse_card(card: &Map<String, Value>) -> Option<Card> {
     let set_code = card.get("set")?.as_str()?;
     let artist = card.get("artist")?.as_str()?;
     let rarity = card.get("rarity")?.as_str()?;
-    let oracle_text = card.get("oracle_text")?.as_str()?;
+    let oracle_text = combined_oracle_text(card)?;
     let collector_number = card.get("collector_number")?.as_str()?;
 
     let color_identity =
@@ -104,7 +152,7 @@ pub fn parse_card(card: &Map<String, Value>) -> Option<Card> {
         color_identity,
         id: card_id.to_string(),
         rarity: rarity.to_string().into(),
-        text: oracle_text.to_string(),
+        text: oracle_text,
         card_identifiers: CardIdentifiers {
             scryfall_id: card_id.to_string(),
             id: card_id.to_string(),
@@ -113,31 +161,18 @@ pub fn parse_card(card: &Map<String, Value>) -> Option<Card> {
         subtypes,
         supertypes,
         types,
-        mana_cost: card
-            .get("mana_cost")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        mana_cost: field_str(card, "mana_cost").unwrap_or_default().to_string(),
         mana_value: card.get("cmc").and_then(Value::as_f64).unwrap_or_default(),
         type_line: type_line.to_string(),
-        power: card.get("power").and_then(Value::as_str).map(String::from),
-        toughness: card
-            .get("toughness")
-            .and_then(Value::as_str)
-            .map(String::from),
-        loyalty: card
-            .get("loyalty")
-            .and_then(Value::as_str)
-            .map(String::from),
-        defense: card
-            .get("defense")
-            .and_then(Value::as_str)
-            .map(String::from),
+        power: field_str(card, "power").map(String::from),
+        toughness: field_str(card, "toughness").map(String::from),
+        loyalty: field_str(card, "loyalty").map(String::from),
+        defense: field_str(card, "defense").map(String::from),
         keywords: parse_string_array(card.get("keywords")),
         colors: parse_color_identity(
-            card.get("colors")
-                .and_then(Value::as_array)
-                .unwrap_or(&vec![]),
+            field_array(card, "colors")
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
         ),
         legalities: parse_legalities(card.get("legalities")),
         finishes: parse_string_array(card.get("finishes")),
@@ -174,4 +209,43 @@ pub fn parse_card(card: &Map<String, Value>) -> Option<Card> {
             .unwrap_or_default()
             .to_string(),
     }))
+}
+
+/// Parses a Scryfall `GET /sets` list response body into `Set`s.
+pub fn parse_sets_response(json: &Value) -> Vec<Set> {
+    json.get("data")
+        .and_then(Value::as_array)
+        .map(|sets| {
+            sets.iter()
+                .filter_map(|s| {
+                    Some(Set {
+                        code: s.get("code")?.as_str()?.to_string(),
+                        name: s.get("name")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parses a Scryfall `POST /cards/collection` response body, returning
+/// `(set_code, collector_number, id)` for every identifier that was found.
+/// Identifiers Scryfall couldn't match (its `not_found` list) are dropped,
+/// same as a SQL query that finds no matching row.
+pub fn parse_collection_response(json: &Value) -> Vec<(SetCode, CollectorNumber, CardID)> {
+    json.get("data")
+        .and_then(Value::as_array)
+        .map(|cards| {
+            cards
+                .iter()
+                .filter_map(|c| {
+                    Some((
+                        c.get("set")?.as_str()?.to_string(),
+                        c.get("collector_number")?.as_str()?.to_string(),
+                        c.get("id")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
