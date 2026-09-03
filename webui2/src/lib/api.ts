@@ -10,8 +10,10 @@ import type {
 	SearchFilters,
 	CardPrices,
 	ValueBreakdown,
-	Settings
+	Settings,
+	PartialBy
 } from './types';
+import type { components } from './generated/api';
 
 const PAGE_SIZE = 24;
 
@@ -324,6 +326,8 @@ export async function searchCollectionCount(
 	});
 }
 
+type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice'>;
+
 export async function addCardToCollection(
 	collection: string,
 	cardId: string,
@@ -331,15 +335,16 @@ export async function addCardToCollection(
 	foilQuantity = 0,
 	purchasePrice?: number | null
 ): Promise<void> {
+	const body: CardToAdd = {
+		id: cardId,
+		quantity,
+		foilQuantity,
+		...(purchasePrice != null ? { purchasePrice } : {})
+	};
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/add`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			id: cardId,
-			quantity,
-			foilQuantity,
-			...(purchasePrice != null ? { purchasePrice } : {})
-		})
+		body: JSON.stringify(body)
 	});
 	invalidateCollectionStats(collection);
 }
@@ -362,9 +367,11 @@ export async function adjustWantQuantity(collection: string, cardId: string, del
 	invalidateCollectionStats(collection);
 }
 
+type MoveCardRequest = PartialBy<components['schemas']['CollectionCard'], 'provider' | 'timeAdded' | 'wantQuantity'>;
+
 export async function moveCards(
 	toCollection: string,
-	cards: Array<{ id: string; quantity: number; foilQuantity: number; collectionId: string; provider: string }>
+	cards: MoveCardRequest[]
 ): Promise<void> {
 	await fetchJSON(`/api/collection/move/${encodeURIComponent(toCollection)}`, {
 		method: 'POST',
@@ -456,18 +463,7 @@ export async function getPokemonPrices(ids: string[]): Promise<Record<string, Ca
 }
 
 // Purchase history
-export interface PurchaseEntry {
-	id: number;
-	card_uuid: string;
-	card_name: string;
-	set_code: string;
-	quantity: number;
-	foil_quantity: number;
-	normal_price_per_unit: number | null;
-	foil_price_per_unit: number | null;
-	provider: string;
-	recorded_at: string;
-}
+export type PurchaseEntry = components['schemas']['CollectionPurchaseHistoryEntry'];
 
 export async function getAllPurchaseHistory(collection: string): Promise<PurchaseEntry[]> {
 	const data = await fetchJSON<{ entries: PurchaseEntry[] }>(

@@ -1,3 +1,8 @@
+import type { components } from './generated/api';
+
+/** Same as T, but the given keys become optional instead of required. */
+export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
 export type Theme = string;
 export type ViewMode = 'grid' | 'list';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
@@ -91,25 +96,10 @@ export interface PokemonCard {
 export type AnyCard = MtgCard | RiftboundCard | PokemonCard;
 
 // Raw response from /api/collection/cards/{id}/list — no card details
-export interface CollectionEntry {
-	id: string;
-	quantity: number;
-	foilQuantity: number;
-	wantQuantity: number;
-	collectionId: string;
-	timeAdded: string;
-	provider: string;
-}
+export type CollectionEntry = components['schemas']['CollectionCard'];
 
 // CollectionEntry merged with card detail fields
-export interface CollectionCard {
-	collectionId: string;
-	id: string;
-	quantity: number;
-	foilQuantity: number;
-	wantQuantity?: number;
-	timeAdded?: string;
-	provider?: string;
+export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' | 'provider' | 'wantQuantity'> {
 	image?: string;
 	name: string;
 	setCode?: string;
