@@ -363,9 +363,8 @@ export async function adjustWantQuantity(collection: string, cardId: string, del
 }
 
 export async function moveCards(
-	fromCollection: string,
 	toCollection: string,
-	cards: Array<{ id: string; quantity: number; foilQuantity: number }>
+	cards: Array<{ id: string; quantity: number; foilQuantity: number; collectionId: string; provider: string }>
 ): Promise<void> {
 	await fetchJSON(`/api/collection/move/${encodeURIComponent(toCollection)}`, {
 		method: 'POST',

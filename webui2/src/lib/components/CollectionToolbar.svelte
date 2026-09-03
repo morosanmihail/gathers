@@ -83,10 +83,12 @@
 		moveError = '';
 		try {
 			await app.withOp(`Moving to ${moveDest}`, () =>
-				moveCards(collection, moveDest, selectedList.map(c => ({
+				moveCards(moveDest, selectedList.map(c => ({
 					id: c.id,
 					quantity: c.quantity,
-					foilQuantity: c.foilQuantity
+					foilQuantity: c.foilQuantity,
+					collectionId: c.collectionId,
+					provider: c.provider ?? ''
 				})))
 			);
 			app.clearSelected();
