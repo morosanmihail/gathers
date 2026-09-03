@@ -43,7 +43,7 @@ const cardDetailCache: Map<string, MtgCard | RiftboundCard | PokemonCard> = new 
 const priceCache: Map<string, CardPrices> = new Map();
 
 // Purchase history cache keyed by `collection:cardId` — invalidated on mutation
-const purchaseHistoryCache: Map<string, PurchaseEntry[]> = new Map();
+const purchaseHistoryCache: Map<string, PurchaseHistoryEntry[]> = new Map();
 
 // Collection stats cache (count + value) — short TTL, invalidated on mutation
 const statsCache = ttlCache(60 * 1000);
@@ -391,9 +391,9 @@ export function exportCollectionUrl(collection: string): string {
 	return `/api/collection/export/${encodeURIComponent(collection)}`;
 }
 
-export async function getCollectionValue(collection: string): Promise<ValueBreakdown> {
+export async function getCollectionValue(collection: string): Promise<ValueBreakdown | null> {
 	return cachedStats(`stats:${collection}:value`, () =>
-		fetchJSON<ValueBreakdown>(`/api/collection/cards/${encodeURIComponent(collection)}/value_breakdown`).catch(() => ({} as ValueBreakdown))
+		fetchJSON<ValueBreakdown>(`/api/collection/cards/${encodeURIComponent(collection)}/value_breakdown`).catch(() => null)
 	);
 }
 
@@ -464,6 +464,7 @@ export async function getPokemonPrices(ids: string[]): Promise<Record<string, Ca
 
 // Purchase history
 export type PurchaseEntry = components['schemas']['CollectionPurchaseHistoryEntry'];
+type PurchaseHistoryEntry = components['schemas']['PurchaseHistoryEntry'];
 
 export async function getAllPurchaseHistory(collection: string): Promise<PurchaseEntry[]> {
 	const data = await fetchJSON<{ entries: PurchaseEntry[] }>(
@@ -496,10 +497,10 @@ export async function updatePurchaseEntry(
 	invalidatePurchaseHistory(collection);
 }
 
-export async function getPurchaseHistory(collection: string, cardId: string): Promise<PurchaseEntry[]> {
+export async function getPurchaseHistory(collection: string, cardId: string): Promise<PurchaseHistoryEntry[]> {
 	const key = `${collection}:${cardId}`;
 	if (purchaseHistoryCache.has(key)) return purchaseHistoryCache.get(key)!;
-	const data = await fetchJSON<{ entries: PurchaseEntry[] }>(
+	const data = await fetchJSON<{ entries: PurchaseHistoryEntry[] }>(
 		`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history/${encodeURIComponent(cardId)}`
 	).catch(() => ({ entries: [] }));
 	purchaseHistoryCache.set(key, data.entries);

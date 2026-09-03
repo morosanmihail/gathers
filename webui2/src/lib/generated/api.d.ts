@@ -46,6 +46,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mtg/cards/random": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APICard"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mtg/cards": {
         parameters: {
             query?: never;
@@ -266,6 +300,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/riftbound/cards/random": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APIRiftboundCard"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/riftbound/cards": {
         parameters: {
             query?: never;
@@ -414,6 +482,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pokemon/cards/random": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APIPokemonCard"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pokemon/cards": {
         parameters: {
             query?: never;
@@ -473,7 +575,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": string[];
+                        "application/json": components["schemas"]["Set"][];
                     };
                 };
             };
@@ -769,6 +871,97 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/share/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLinkResponse"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description A shareable, read-only link granting public access to a collection via
+                 *     its opaque `token`. Owner-managed: created and revoked explicitly through
+                 *     the `/collection/share/{id}` endpoints.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLinkResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/share/{id}/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLinkRevokeResponse"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -1074,6 +1267,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collection/cards/{id}/want": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdjustWantQuantityRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionCard"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/collection/cards/{id}/purchase_history/{card_uuid}": {
         parameters: {
             query?: never;
@@ -1214,6 +1445,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/share/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                    /** @description Single provider inclusion filter (legacy, takes precedence over `providers`). */
+                    provider?: string | null;
+                    /** @description Multiple provider inclusion filter — comma-separated: `?providers=X,Y`. */
+                    providers?: string | null;
+                    sort_by?: components["schemas"]["APICollectionSortField"] | null;
+                    sort_order?: components["schemas"]["APISortOrder"] | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description A page of full card data for a shareable, read-only collection view.
+                 *     Each entry in `cards` merges the collection entry (quantity, provider, ...)
+                 *     with the full card details, so the client needs a single request per page
+                 *     instead of a separate card-detail lookup.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicCollectionPage"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -1310,14 +1590,37 @@ export interface components {
     schemas: {
         APICard: {
             artist: string;
+            borderColor: string;
             cardIdentifiers: components["schemas"]["APICardIdentifiers"];
             collectorNumber: string;
             colorIdentity: components["schemas"]["APICardColour"][];
+            colors: components["schemas"]["APICardColour"][];
+            defense?: string | null;
+            finishes: string[];
+            flavorText?: string | null;
+            frameEffects: string[];
             id: string;
+            isFullArt: boolean;
+            isPromo: boolean;
+            isReprint: boolean;
+            isReserved: boolean;
+            keywords: string[];
+            legalities: {
+                [key: string]: string;
+            };
+            loyalty?: string | null;
+            manaCost: string;
+            /** Format: double */
+            manaValue: number;
             name: string;
+            power?: string | null;
             rarity: components["schemas"]["APIRarity"];
             setCode: string;
+            setName: string;
             text: string;
+            toughness?: string | null;
+            typeLine: string;
+            watermark?: string | null;
         };
         /** @enum {string} */
         APICardColour: "White" | "Blue" | "Black" | "Red" | "Green" | "Colourless" | "Multicoloured";
@@ -1330,11 +1633,28 @@ export interface components {
         /** @description Server-local version of `models::filters::CardSearchFilters` with `JsonSchema`. */
         APICardSearchFilters: {
             artist?: string | null;
+            border_color?: string | null;
             collector_number?: string | null;
             color_identities?: components["schemas"]["APICardColour"][] | null;
+            colors?: components["schemas"]["APICardColour"][] | null;
+            defense?: string | null;
             domains?: components["schemas"]["APICardDomain"][] | null;
             energy_types?: components["schemas"]["APIEnergyType"][] | null;
+            is_full_art?: boolean | null;
+            is_promo?: boolean | null;
+            is_reprint?: boolean | null;
+            is_reserved?: boolean | null;
+            keywords?: string[] | null;
+            legal_in?: string | null;
+            loyalty?: string | null;
+            /** Format: double */
+            mana_value_max?: number | null;
+            /** Format: double */
+            mana_value_min?: number | null;
             name?: string | null;
+            /** Format: int64 */
+            pokedex?: number | null;
+            power?: string | null;
             /** @default null */
             rarity: components["schemas"]["APIRarity"] | null;
             set_code?: string | null;
@@ -1343,21 +1663,27 @@ export interface components {
             subtypes?: string[] | null;
             supertypes?: string | null;
             text?: string | null;
+            toughness?: string | null;
             types?: string[] | null;
         };
         /** @enum {string} */
-        APICollectionSortField: "TimeAdded" | "Quantity" | "FoilQuantity" | "Provider";
+        APICollectionSortField: "TimeAdded" | "Quantity" | "FoilQuantity" | "WantQuantity" | "Provider";
         /** @enum {string} */
         APIEnergyType: "Fire" | "Water" | "Grass" | "Lightning" | "Psychic" | "Fighting" | "Darkness" | "Metal" | "Dragon" | "Fairy" | "Colorless" | "Energy";
         APIPokemonCard: {
             cardType: string;
             collectorNumber: string;
+            description?: string | null;
             energyTypes: components["schemas"]["APIEnergyType"][];
             id: string;
             image: string;
             name: string;
+            /** Format: int64 */
+            pokedex?: number | null;
             rarity: components["schemas"]["APIPokemonRarity"];
+            releaseDate?: string | null;
             setCode: string;
+            setShortCode?: string | null;
         };
         /** @enum {string} */
         APIPokemonRarity: "Common" | "DoubleRare" | "Uncommon" | "Rare" | "RadiantRare" | "UltraRare" | "SecretRare" | "HoloRare" | "Promo" | "ClassicCollection" | "AmazingRare" | "ShinyHoloRare" | "PrismRare" | "RareBreak" | "RareAce" | "SpecialIllustrationRare" | "IllustrationRare" | "HyperRare" | "CodeCard" | "ShinyRare" | "ShinyUltraRare" | "AceSpecRare" | "BlackWhiteRare" | "MegaHyperRare" | "MegaAttackRare";
@@ -1374,10 +1700,14 @@ export interface components {
             setCode: string;
             text: string;
         };
-        /** @enum {string} */
-        APISortField: "Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist";
+        APISortField: ("Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist") | "ReleaseDate";
         /** @enum {string} */
         APISortOrder: "Asc" | "Desc";
+        AdjustWantQuantityRequest: {
+            /** Format: int32 */
+            delta: number;
+            id: string;
+        };
         BulkPricesQuery: {
             /** @default [] */
             ids: string[];
@@ -1432,6 +1762,11 @@ export interface components {
              * @default 1970-01-01T00:00:00Z
              */
             timeAdded: string;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            wantQuantity: number;
         };
         CollectionCardsQuery: {
             /**
@@ -1488,6 +1823,12 @@ export interface components {
             total_value: number;
             /** Format: double */
             untracked_value: number;
+            /**
+             * Format: double
+             * @description Total price of cards on the wishlist (`want_quantity`), independent of
+             *     what's owned. Not included in `total_value`.
+             */
+            wanted_value: number;
         };
         CollectionsSearchQuery: {
             /**
@@ -1539,6 +1880,17 @@ export interface components {
              * @default 0
              */
             skip: number;
+        };
+        /**
+         * @description A page of full card data for a shareable, read-only collection view.
+         *     Each entry in `cards` merges the collection entry (quantity, provider, ...)
+         *     with the full card details, so the client needs a single request per page
+         *     instead of a separate card-detail lookup.
+         */
+        PublicCollectionPage: {
+            cards: unknown[];
+            /** Format: uint */
+            total: number;
         };
         PurchaseHistoryEntry: {
             card_uuid: string;
@@ -1609,6 +1961,19 @@ export interface components {
         Set: {
             code: string;
             name: string;
+        };
+        /**
+         * @description A shareable, read-only link granting public access to a collection via
+         *     its opaque `token`. Owner-managed: created and revoked explicitly through
+         *     the `/collection/share/{id}` endpoints.
+         */
+        ShareLinkResponse: {
+            collectionId: string;
+            createdAt: string;
+            token: string;
+        };
+        ShareLinkRevokeResponse: {
+            revoked: boolean;
         };
         SystemInfo: {
             /** @description Whether collection management is enabled. */

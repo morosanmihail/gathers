@@ -11,87 +11,12 @@ export interface Collection {
 	id: string;
 }
 
-export interface SystemInfo {
-	collections_enabled: boolean;
-	systems: string[];
-	demo_mode?: boolean;
-	downloading?: Record<string, DownloadProgress>;
-	pricing_enabled?: boolean;
-}
-
-export interface DownloadProgress {
-	phase: 'checking' | 'downloading' | 'verifying';
-	downloaded: number;
-	total: number;
-}
-
-export interface CardIdentifiers {
-	scryfallId?: string;
-	mtgjsonId?: string;
-}
-
-export interface MtgCard {
-	id: string;
-	name: string;
-	setCode: string;
-	rarity: string;
-	artist: string;
-	text?: string;
-	colorIdentity: string[];
-	cardIdentifiers?: CardIdentifiers;
-	types: string[];
-	supertypes: string[];
-	subtypes: string[];
-	collectorNumber?: string;
-	manaCost?: string;
-	power?: string;
-	toughness?: string;
-	// Extended fields (mtgjson metadata)
-	manaValue?: number;
-	typeLine?: string;
-	loyalty?: string;
-	defense?: string;
-	keywords?: string[];
-	colors?: string[];
-	legalities?: Record<string, string>;
-	finishes?: string[];
-	isReserved?: boolean;
-	isPromo?: boolean;
-	isReprint?: boolean;
-	borderColor?: string;
-	frameEffects?: string[];
-	isFullArt?: boolean;
-	watermark?: string;
-	flavorText?: string;
-	setName?: string;
-}
-
-export interface RiftboundCard {
-	id: string;
-	name: string;
-	setCode?: string;
-	collectorNumber?: string;
-	rarity?: string;
-	artists?: string[];
-	domains?: unknown[];
-	text?: string;
-	image?: string;
-}
-
-export interface PokemonCard {
-	id: string;
-	name: string;
-	setCode?: string;
-	setShortCode?: string;
-	rarity?: string;
-	energyTypes?: unknown[];
-	cardType?: string;
-	collectorNumber?: string;
-	image?: string;
-	description?: string;
-	releaseDate?: string;
-	pokedex?: number;
-}
+export type SystemInfo = components['schemas']['SystemInfo'];
+export type DownloadProgress = components['schemas']['DownloadProgressInfo'];
+export type CardIdentifiers = components['schemas']['APICardIdentifiers'];
+export type MtgCard = components['schemas']['APICard'];
+export type RiftboundCard = components['schemas']['APIRiftboundCard'];
+export type PokemonCard = components['schemas']['APIPokemonCard'];
 
 export type AnyCard = MtgCard | RiftboundCard | PokemonCard;
 
@@ -118,10 +43,7 @@ export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' |
 	mtGCard?: MtgCard;
 }
 
-export interface CardSet {
-	code: string;
-	name: string;
-}
+export type CardSet = components['schemas']['Set'];
 
 export interface SearchFilters {
 	// Collection views only: restrict to a single card game's provider (e.g.
@@ -160,14 +82,7 @@ export interface SearchFilters {
 // '' = don't filter, 'true'/'false' = require present/absent
 export type TriState = '' | 'true' | 'false';
 
-export interface PriceRetailer {
-	normal?: number;
-	foil?: number;
-}
-
-export interface CardPrices {
-	paper?: Record<string, PriceRetailer>;
-}
+export type CardPrices = components['schemas']['CardPrices'];
 
 // True when a collection card is tracked purely as a wishlist entry — none
 // owned yet, only a desired quantity.
@@ -210,29 +125,9 @@ export function bestPrice(cardPrices: CardPrices): string | null {
 	return `$${Math.min(...vals).toFixed(2)}`;
 }
 
-export interface ValueBreakdown {
-	total_value?: number;
-	profit?: number;
-	untracked_value?: number;
-	priced_count?: number;
-	total_count?: number;
-	wanted_value?: number;
-	[key: string]: unknown;
-}
-
-export interface Settings {
-	system: string[];
-	port: number;
-	collections_enabled?: boolean;
-	pricing_enabled?: boolean;
-	mtg_db_path?: string | null;
-	mtg_prices_path?: string | null;
-	riftbound_db_path?: string | null;
-	pokemon_db_path?: string | null;
-	pokemon_prices_path?: string | null;
-	storage_db_path?: string | null;
-	[key: string]: unknown;
-}
+export type ValueBreakdown = components['schemas']['CollectionValueBreakdown'];
+export type Settings = components['schemas']['ServerConfig'];
+export type System = components['schemas']['Systems'];
 
 export function defaultFilters(): SearchFilters {
 	return {
