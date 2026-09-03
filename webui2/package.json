@@ -7,13 +7,15 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "generate-types": "mkdir -p src/lib/generated && cargo run --manifest-path ../Cargo.toml --bin server -- --print-schema > src/lib/generated/openapi.json && npx openapi-typescript src/lib/generated/openapi.json -o src/lib/generated/api.d.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@types/node": "^26.0.1",
+    "openapi-typescript": "^7.4.4",
     "svelte": "^5.0.0",
     "svelte-check": "^4.1.4",
     "typescript": "^5.7.2",

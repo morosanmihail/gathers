@@ -44,3 +44,7 @@ publicweb/images
 
 # SvelteKit generated output
 .svelte-kit/
+
+# Intermediate OpenAPI schema dump used by `npm run generate-types` in webui2;
+# only the generated api.d.ts it produces is checked in.
+webui2/src/lib/generated/openapi.json
