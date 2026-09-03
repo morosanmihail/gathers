@@ -385,6 +385,10 @@ struct Args {
     /// Port to listen on. Required when no config file exists.
     #[clap(short, long)]
     port: Option<usize>,
+
+    /// Print the OpenAPI schema as JSON to stdout and exit, without starting the server.
+    #[clap(long)]
+    print_schema: bool,
 }
 
 async fn get_system_info(
@@ -398,8 +402,42 @@ async fn serve_api(Extension(api): Extension<OpenApi>) -> impl axum::response::I
     Json(api)
 }
 
+fn openapi_doc() -> OpenApi {
+    OpenApi {
+        info: Info {
+            title: "GatheRs API".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            ..Info::default()
+        },
+        ..OpenApi::default()
+    }
+}
+
+fn api_router(api: &mut OpenApi) -> axum::Router<GathersState> {
+    ApiRouter::new()
+        .nest("/api/mtg", mtg_routes())
+        .nest("/api/riftbound", riftbound_routes())
+        .nest("/api/pokemon", pokemon_routes())
+        .nest("/api/collection", collection_routes())
+        .nest("/api/share", public_collection_routes())
+        .nest("/api/settings", settings_routes())
+        .api_route("/api/system", get(get_system_info))
+        .route("/api.json", axum::routing::get(serve_api))
+        .route("/swagger", Swagger::new("/api.json").axum_route())
+        .finish_api(api)
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    let args = Args::parse();
+
+    if args.print_schema {
+        let mut api = openapi_doc();
+        let _ = api_router(&mut api);
+        println!("{}", serde_json::to_string_pretty(&api)?);
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_timer(tracing_subscriber::fmt::time::SystemTime)
         .with_env_filter(
@@ -409,8 +447,6 @@ async fn main() -> eyre::Result<()> {
         .init();
 
     info!(version = env!("CARGO_PKG_VERSION"), "GatheRs server starting");
-
-    let args = Args::parse();
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let gathers_dir = std::path::Path::new(&home).join(".local/share/gathers");
@@ -675,27 +711,10 @@ async fn main() -> eyre::Result<()> {
     let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path.clone())?));
     info!(path = storage_db_path.as_deref().unwrap_or("(default)"), "Storage DB ready");
 
-    let mut api = OpenApi {
-        info: Info {
-            title: "GatheRs API".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            ..Info::default()
-        },
-        ..OpenApi::default()
-    };
+    let mut api = openapi_doc();
 
     let cors = CorsLayer::permissive();
-    let app = ApiRouter::new()
-        .nest("/api/mtg", mtg_routes())
-        .nest("/api/riftbound", riftbound_routes())
-        .nest("/api/pokemon", pokemon_routes())
-        .nest("/api/collection", collection_routes())
-        .nest("/api/share", public_collection_routes())
-        .nest("/api/settings", settings_routes())
-        .api_route("/api/system", get(get_system_info))
-        .route("/api.json", axum::routing::get(serve_api))
-        .route("/swagger", Swagger::new("/api.json").axum_route())
-        .finish_api(&mut api)
+    let app = api_router(&mut api)
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(|error: BoxError| async move {
