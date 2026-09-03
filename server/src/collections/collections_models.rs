@@ -230,6 +230,7 @@ pub struct CollectionCard {
     #[serde(rename = "collectionId")]
     pub collection_id: String,
     #[serde(rename = "timeAdded", default = "default_time_added")]
+    #[schemars(default = "epoch")]
     pub time_added: DateTime<Utc>,
     #[serde(default)]
     pub provider: String,
@@ -292,6 +293,13 @@ fn default_limit() -> usize {
 
 fn default_time_added() -> DateTime<Utc> {
     Utc::now()
+}
+
+/// Fixed placeholder used only for the schema's documented default (for determinism)
+fn epoch() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
 }
 
 #[derive(Deserialize, JsonSchema)]

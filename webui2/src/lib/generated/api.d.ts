@@ -1429,7 +1429,7 @@ export interface components {
             quantity: number;
             /**
              * Format: date-time
-             * @default 2026-09-03T02:38:41.206281089Z
+             * @default 1970-01-01T00:00:00Z
              */
             timeAdded: string;
         };
