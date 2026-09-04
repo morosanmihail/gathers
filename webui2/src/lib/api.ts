@@ -536,40 +536,42 @@ export async function triggerUpdate(endpoint: string): Promise<string> {
 	return typeof result === 'string' ? result : 'Done';
 }
 
-function buildSearchBody(filters: SearchFilters): Record<string, unknown> {
-	const body: Record<string, unknown> = {};
+type ApiSearchFilters = components['schemas']['APICardSearchFilters'];
+
+function buildSearchBody(filters: SearchFilters): Partial<ApiSearchFilters> {
+	const body: Partial<ApiSearchFilters> = {};
 	if (filters.name) body.name = filters.name;
-	if (filters.setCode) body.setCode = filters.setCode;
-	if (filters.rarity) body.rarity = filters.rarity;
+	if (filters.setCode) body.set_code = filters.setCode;
+	if (filters.rarity) body.rarity = filters.rarity as ApiSearchFilters['rarity'];
 	if (filters.artist) body.artist = filters.artist;
 	if (filters.text) body.text = filters.text;
-	if (filters.collectorNumber) body.collectorNumber = filters.collectorNumber;
-	if (filters.colorIdentities.length) body.colorIdentities = filters.colorIdentities;
-	if (filters.domains.length) body.domains = filters.domains;
-	if (filters.energyTypes.length) body.energyTypes = filters.energyTypes;
+	if (filters.collectorNumber) body.collector_number = filters.collectorNumber;
+	if (filters.colorIdentities.length) body.color_identities = filters.colorIdentities as ApiSearchFilters['color_identities'];
+	if (filters.domains.length) body.domains = filters.domains as ApiSearchFilters['domains'];
+	if (filters.energyTypes.length) body.energy_types = filters.energyTypes as ApiSearchFilters['energy_types'];
 	const pokedex = parseInt(filters.pokedex, 10);
 	if (!isNaN(pokedex)) body.pokedex = pokedex;
-	if (filters.sortBy) body.sortBy = filters.sortBy;
-	if (filters.sortOrder) body.sortOrder = filters.sortOrder;
+	if (filters.sortBy) body.sort_by = filters.sortBy as ApiSearchFilters['sort_by'];
+	if (filters.sortOrder) body.sort_order = filters.sortOrder as ApiSearchFilters['sort_order'];
 
 	// MTG-only advanced filters
 	const manaMin = parseFloat(filters.manaValueMin);
-	if (!isNaN(manaMin)) body.manaValueMin = manaMin;
+	if (!isNaN(manaMin)) body.mana_value_min = manaMin;
 	const manaMax = parseFloat(filters.manaValueMax);
-	if (!isNaN(manaMax)) body.manaValueMax = manaMax;
-	if (filters.colors.length) body.colors = filters.colors;
+	if (!isNaN(manaMax)) body.mana_value_max = manaMax;
+	if (filters.colors.length) body.colors = filters.colors as ApiSearchFilters['colors'];
 	const keywords = filters.keywords.split(',').map(k => k.trim()).filter(Boolean);
 	if (keywords.length) body.keywords = keywords;
 	if (filters.power) body.power = filters.power;
 	if (filters.toughness) body.toughness = filters.toughness;
 	if (filters.loyalty) body.loyalty = filters.loyalty;
 	if (filters.defense) body.defense = filters.defense;
-	if (filters.isReserved) body.isReserved = filters.isReserved === 'true';
-	if (filters.isPromo) body.isPromo = filters.isPromo === 'true';
-	if (filters.isReprint) body.isReprint = filters.isReprint === 'true';
-	if (filters.isFullArt) body.isFullArt = filters.isFullArt === 'true';
-	if (filters.borderColor) body.borderColor = filters.borderColor;
-	if (filters.legalIn) body.legalIn = filters.legalIn;
+	if (filters.isReserved) body.is_reserved = filters.isReserved === 'true';
+	if (filters.isPromo) body.is_promo = filters.isPromo === 'true';
+	if (filters.isReprint) body.is_reprint = filters.isReprint === 'true';
+	if (filters.isFullArt) body.is_full_art = filters.isFullArt === 'true';
+	if (filters.borderColor) body.border_color = filters.borderColor;
+	if (filters.legalIn) body.legal_in = filters.legalIn;
 	return body;
 }
 
