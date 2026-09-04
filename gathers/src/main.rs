@@ -258,9 +258,9 @@ async fn main() -> eyre::Result<()> {
                         color_str,
                         card.artist,
                         card.collector_number,
+                        card.subtypes.join(","),
                         card.supertypes.join(","),
                         card.types.join(","),
-                        card.subtypes.join(","),
                         normal,
                         foil,
                     );
@@ -273,9 +273,9 @@ async fn main() -> eyre::Result<()> {
                         color_str,
                         card.artist,
                         card.collector_number,
+                        card.subtypes.join(","),
                         card.supertypes.join(","),
                         card.types.join(","),
-                        card.subtypes.join(","),
                     );
                 }
             }

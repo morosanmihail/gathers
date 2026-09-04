@@ -1,0 +1,69 @@
+name: Rust
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "models/**"
+      - "retrieval/**"
+      - "gathers/**"
+      - "server/**"
+      - "persistence/**"
+      - "benches/**"
+      - "e2e/**"
+      - "mirror/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".forgejo/workflows/rust.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "models/**"
+      - "retrieval/**"
+      - "gathers/**"
+      - "server/**"
+      - "persistence/**"
+      - "benches/**"
+      - "e2e/**"
+      - "mirror/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".forgejo/workflows/rust.yml"
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+
+      # dtolnay/rust-toolchain isn't mirrored on data.forgejo.org, so install via rustup directly.
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # Swatinem/rust-cache isn't mirrored either; cache the cargo dirs by hand.
+      - name: Cache cargo
+        uses: https://data.forgejo.org/actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
