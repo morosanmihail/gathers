@@ -90,8 +90,10 @@ jobs:
 
       # Push to our own registry. Creds come from Codeberg (Forgejo) repo secrets,
       # not secrets.GITHUB_TOKEN (that one's only scoped for codeberg.org).
+      # Log in on every run, not just push: the registry cache importer does an
+      # authenticated HEAD on the buildcache manifest even on PR builds.
       - name: Log in to registry
-        if: matrix.enabled == 'true' && github.event_name == 'push'
+        if: matrix.enabled == 'true'
         uses: https://data.forgejo.org/docker/login-action@v3
         with:
           registry: docker.genesisdei.com
