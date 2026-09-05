@@ -706,8 +706,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<AdjustWantQuantityRequest>,
     ) -> Result<Json<CollectionCard>, ApiError> {
-        if demo_mode() { return Err(demo_err()); }
-
         // Identify the provider by finding which configured system has this card.
         // Only used if the card doesn't already have a row in the collection;
         // an existing row keeps its own provider regardless.

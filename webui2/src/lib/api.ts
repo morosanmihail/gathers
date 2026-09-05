@@ -14,6 +14,7 @@ import type {
 	PartialBy
 } from './types';
 import type { components } from './generated/api';
+import { demoAlert } from './demoAlert.svelte';
 
 const PAGE_SIZE = 24;
 
@@ -70,6 +71,9 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 	if (!res.ok) {
 		// Try to extract a human-readable error message from the response body
 		const body = await res.json().catch(() => null) as { error?: string } | null;
+		if (res.status === 403 && body?.error === 'Disabled in demo mode') {
+			demoAlert.show();
+		}
 		throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
 	}
 	// 204 No Content — return undefined cast to T
@@ -384,7 +388,14 @@ export async function importCards(collection: string, file: File): Promise<void>
 	const form = new FormData();
 	form.append('file', file);
 	form.append('collection', collection);
-	await fetch('/api/collection/import', { method: 'POST', body: form });
+	const res = await fetch('/api/collection/import', { method: 'POST', body: form });
+	if (!res.ok) {
+		const body = await res.json().catch(() => null) as { error?: string } | null;
+		if (res.status === 403 && body?.error === 'Disabled in demo mode') {
+			demoAlert.show();
+		}
+		throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
+	}
 }
 
 export function exportCollectionUrl(collection: string): string {
@@ -474,7 +485,7 @@ export async function getAllPurchaseHistory(collection: string): Promise<Purchas
 }
 
 export async function deletePurchaseEntry(collection: string, entryId: number): Promise<void> {
-	await fetch(
+	await fetchJSON(
 		`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`,
 		{ method: 'DELETE' }
 	);
