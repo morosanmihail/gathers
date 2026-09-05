@@ -67,6 +67,14 @@
                 src = ./webui2;
                 npmDeps = importNpmLock {npmRoot = ./webui2;};
                 inherit (importNpmLock) npmConfigHook;
+
+                # `build/` is gitignored, so npmInstallHook's default `npm pack`-based
+                # install would skip the very output `npm run build` just produced.
+                installPhase = ''
+                  runHook preInstall
+                  cp -r build $out
+                  runHook postInstall
+                '';
               }
           ) {};
         };
