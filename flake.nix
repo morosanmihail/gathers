@@ -8,88 +8,30 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+      flake-utils,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
-        };
-      in {
-        devShells.default = pkgs.mkShell {
-          buildInputs = [
-            rustToolchain
-            pkgs.cargo-watch
-            pkgs.cargo-edit
-            pkgs.openssl
-            pkgs.pkg-config
-            pkgs.pnpm
-            pkgs.tilt
-            pkgs.sqlite
-          ];
-
-          RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/src";
-        };
-
-        packages = rec {
-          default = gathers-api;
-          gathers-api = pkgs.callPackage (
-            {
-              sqlite,
-              rustPlatform,
-              cacert,
-            }:
-              rustPlatform.buildRustPackage {
-                name = "gathers-api";
-                src = ./.;
-                cargoLock = {lockFile = ./Cargo.lock;};
-
-                buildInputs = [
-                  cacert
-                  sqlite
-                ];
-
-                checkFlags = [
-                  # Scryfall API not reachable in nix sandbox
-                  "--skip=systems::scryfall::tests"
-                ];
-              }
-          ) {};
-
-          gathers-webui2 = pkgs.callPackage (
-            {
-              importNpmLock,
-              buildNpmPackage,
-            }:
-              buildNpmPackage {
-                name = "gathers-webui2";
-                src = ./webui2;
-                npmDeps = importNpmLock {npmRoot = ./webui2;};
-                inherit (importNpmLock) npmConfigHook;
-
-                # `build/` is gitignored, so npmInstallHook's default `npm pack`-based
-                # install would skip the very output `npm run build` just produced.
-                installPhase = ''
-                  runHook preInstall
-                  cp -r build $out
-                  runHook postInstall
-                '';
-              }
-          ) {};
-        };
-
-        apps = rec {
-          default = gathers-cli;
-          gathers-api = flake-utils.lib.mkApp {
-            drv = self.packages.${system}.gathers-api;
-            exePath = "/bin/server";
-          };
-
-          gathers-cli = flake-utils.lib.mkApp {
-            drv = self.packages.${system}.gathers-api;
-            exePath = "/bin/gathers";
-          };
-        };
-      });
+      in
+      {
+        devShells.default = import ./nix/shell.nix { inherit pkgs; };
+        packages = import ./nix/packages.nix { inherit pkgs; };
+        apps = import ./nix/apps.nix { inherit self system flake-utils; };
+      }
+    )
+    // {
+      nixosModules = {
+        gathers = import ./nix/gathers.nix { inherit self; };
+        default = self.nixosModules.gathers;
+      };
+    };
 }
