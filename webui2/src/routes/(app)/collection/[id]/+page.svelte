@@ -99,7 +99,7 @@
 						prices = { ...prices, ...Object.assign({}, ...results) };
 					});
 				}
-				valuePromise.then(v => { collectionValue = v.total_value ?? null; valueBreakdown = v; });
+				valuePromise.then(v => { collectionValue = v?.total_value ?? null; valueBreakdown = v; });
 			}
 		} finally {
 			loading = false;
@@ -119,7 +119,7 @@
 
 	function refreshValue() {
 		if (app.pricingEnabled) {
-			getCollectionValue(collectionId).then(v => { collectionValue = v.total_value ?? null; valueBreakdown = v; });
+			getCollectionValue(collectionId).then(v => { collectionValue = v?.total_value ?? null; valueBreakdown = v; });
 		}
 	}
 

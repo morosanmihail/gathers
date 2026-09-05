@@ -229,7 +229,8 @@ pub struct CollectionCard {
     pub want_quantity: i32,
     #[serde(rename = "collectionId")]
     pub collection_id: String,
-    #[serde(rename = "timeAdded")]
+    #[serde(rename = "timeAdded", default = "default_time_added")]
+    #[schemars(default = "epoch")]
     pub time_added: DateTime<Utc>,
     #[serde(default)]
     pub provider: String,
@@ -281,13 +282,24 @@ impl From<&CollectionCard> for models::CollectionCard {
             want_quantity: value.want_quantity,
             collection: value.collection_id.to_string(),
             time_added: value.time_added.to_string(),
-            provider: "".to_string(),
+            provider: value.provider.clone(),
         }
     }
 }
 
 fn default_limit() -> usize {
     24
+}
+
+fn default_time_added() -> DateTime<Utc> {
+    Utc::now()
+}
+
+/// Fixed placeholder used only for the schema's documented default (for determinism)
+fn epoch() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
 }
 
 #[derive(Deserialize, JsonSchema)]

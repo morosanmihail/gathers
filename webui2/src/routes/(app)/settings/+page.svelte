@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getSettings, saveSettings, triggerUpdate, invalidateSystemInfo } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import type { Settings } from '$lib/types';
+	import type { Settings, System } from '$lib/types';
 
 	let config = $state<Settings | null>(null);
 	let error = $state('');
@@ -17,7 +17,7 @@
 		PokemonSql: 'Pokémon (SQLite)',
 	};
 
-	const ALL_SYSTEMS = ['Sql', 'Scryfall', 'RiftboundSql', 'PokemonSql'];
+	const ALL_SYSTEMS: System[] = ['Sql', 'Scryfall', 'RiftboundSql', 'PokemonSql'];
 
 	const SYSTEM_ACTIONS: Record<string, Array<{ label: string; endpoint: string }>> = {
 		Sql: [
@@ -56,7 +56,7 @@
 		}
 	});
 
-	function toggleSystem(sys: string) {
+	function toggleSystem(sys: System) {
 		if (!config) return;
 		const has = config.system.includes(sys);
 		config = { ...config, system: has ? config.system.filter(s => s !== sys) : [...config.system, sys] };
