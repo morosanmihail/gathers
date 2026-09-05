@@ -178,7 +178,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let mut conn = self.connection.lock().await;
         let tx = conn.transaction()?;
         for c in input_cards {
-            if c.quantity == 0 && c.foil_quantity == 0 {
+            if c.quantity == 0 && c.foil_quantity == 0 && c.want_quantity == 0 {
                 continue;
             }
             if c.collection == to_collection_id {
@@ -192,7 +192,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     collection: c.collection.clone(),
                     quantity: -c.quantity,
                     foil_quantity: -c.foil_quantity,
-                    want_quantity: 0,
+                    want_quantity: -c.want_quantity,
                     time_added: c.time_added.clone(),
                     provider: c.provider.clone(),
                 }],
@@ -222,7 +222,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     collection: to_collection_id.clone(),
                     quantity: c.quantity,
                     foil_quantity: c.foil_quantity,
-                    want_quantity: 0,
+                    want_quantity: c.want_quantity,
                     time_added: c.time_added.clone(),
                     provider,
                 }],

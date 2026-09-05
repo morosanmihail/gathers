@@ -85,6 +85,47 @@ async fn test_move_all_copies_preserves_provider() {
 }
 
 #[tokio::test]
+async fn test_move_wanted_only_card() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    p.adjust_want_quantity(&col_a, &"card1".to_string(), 4, "mtg").await.unwrap();
+
+    p.move_cards_between_collections(
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 0, foil_quantity: 0, want_quantity: 4, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        col_b.clone(),
+    ).await.unwrap();
+
+    let src = p.get_cards_in_collection_paginated(&col_a, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(src.len(), 0, "wanted-only row purged from source once moved out");
+
+    let dst = p.get_cards_in_collection_paginated(&col_b, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(dst[0].want_quantity, 4);
+    assert_eq!(dst[0].quantity, 0);
+}
+
+#[tokio::test]
+async fn test_move_card_with_owned_and_wanted_quantities() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    p.add_card_to_collection(&col_a, &"card1".to_string(), 3, 0, OLD_TIME, "mtg").await.unwrap();
+    p.adjust_want_quantity(&col_a, &"card1".to_string(), 2, "mtg").await.unwrap();
+
+    p.move_cards_between_collections(
+        &[CollectionCard { uuid: "card1".to_string(), quantity: 3, foil_quantity: 0, want_quantity: 2, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        col_b.clone(),
+    ).await.unwrap();
+
+    let src = p.get_cards_in_collection_paginated(&col_a, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(src.len(), 0, "source row fully purged: owned and wanted both moved out");
+
+    let dst = p.get_cards_in_collection_paginated(&col_b, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(dst[0].quantity, 3);
+    assert_eq!(dst[0].want_quantity, 2);
+}
+
+#[tokio::test]
 async fn test_move_same_collection_is_noop() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("My Collection".to_string()).await.unwrap();

@@ -257,6 +257,82 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     eq(qty_a_src, 1, "src: received 1 history entry from move")?;
     ok("1 history entry transferred back to src");
 
+    // ── 10. Moving want_quantity between collections ──────────────────────────
+    step("10. Move a wanted-only card (0 owned copies)");
+
+    // Card B isn't in col_src at all right now; wanting it creates a
+    // wishlist-only row with nothing owned.
+    client.adjust_want(col_src, CARD_B, 4).await?;
+    let src_cards = client.list_cards(col_src).await?;
+    let b_src = find_card(&src_cards, CARD_B)?.clone();
+    eq(b_src.want_quantity, 4, "src: card B want quantity = 4")?;
+    eq(b_src.quantity, 0, "src: card B owned quantity = 0")?;
+
+    client
+        .move_cards(
+            col_dst,
+            &[CollectionCard {
+                id: b_src.id.clone(),
+                quantity: 0,
+                foil_quantity: 0,
+                want_quantity: 4,
+                collection_id: col_src.to_string(),
+                time_added: b_src.time_added.clone(),
+                provider: b_src.provider.clone(),
+            }],
+        )
+        .await?;
+
+    let src_cards = client.list_cards(col_src).await?;
+    ensure(
+        !src_cards.iter().any(|c| c.id == CARD_B),
+        "src: wanted-only card B row purged after move",
+    )?;
+    ok("wanted-only card moved out of source");
+
+    let dst_cards = client.list_cards(col_dst).await?;
+    let b_dst = find_card(&dst_cards, CARD_B)?;
+    eq(b_dst.want_quantity, 4, "dst: card B want quantity = 4 after move")?;
+    eq(b_dst.foil_quantity, 2, "dst: card B foil quantity untouched by want move")?;
+    ok("wanted-only card's want_quantity arrived at destination");
+
+    step("11. Move a card with both owned copies and a want quantity");
+
+    // Card A currently sits in col_src with quantity=1 (from step 9) and no want.
+    client.adjust_want(col_src, CARD_A, 2).await?;
+    let src_cards = client.list_cards(col_src).await?;
+    let a_src = find_card(&src_cards, CARD_A)?.clone();
+    eq(a_src.quantity, 1, "src: card A quantity = 1 before combined move")?;
+    eq(a_src.want_quantity, 2, "src: card A want quantity = 2 before combined move")?;
+
+    client
+        .move_cards(
+            col_dst,
+            &[CollectionCard {
+                id: a_src.id.clone(),
+                quantity: 1,
+                foil_quantity: 0,
+                want_quantity: 2,
+                collection_id: col_src.to_string(),
+                time_added: a_src.time_added.clone(),
+                provider: a_src.provider.clone(),
+            }],
+        )
+        .await?;
+
+    let src_cards = client.list_cards(col_src).await?;
+    ensure(
+        !src_cards.iter().any(|c| c.id == CARD_A),
+        "src: card A row purged after combined move (owned + want both moved out)",
+    )?;
+    ok("combined owned+want card fully vacated source");
+
+    let dst_cards = client.list_cards(col_dst).await?;
+    let a_dst = find_card(&dst_cards, CARD_A)?;
+    eq(a_dst.quantity, 3, "dst: card A quantity = 3 after combined move")?;
+    eq(a_dst.want_quantity, 2, "dst: card A want quantity = 2 after combined move")?;
+    ok("combined owned+want quantities both arrived at destination");
+
     println!("\n✓ All assertions passed");
     Ok(())
 }
