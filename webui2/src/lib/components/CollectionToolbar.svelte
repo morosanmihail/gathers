@@ -87,6 +87,7 @@
 					id: c.id,
 					quantity: c.quantity,
 					foilQuantity: c.foilQuantity,
+					wantQuantity: c.wantQuantity ?? 0,
 					collectionId: c.collectionId,
 					provider: c.provider ?? ''
 				})))
