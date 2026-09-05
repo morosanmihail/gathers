@@ -1,0 +1,36 @@
+name: webui2 API types
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  check-generated-types:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+
+      # dtolnay/rust-toolchain isn't mirrored on data.forgejo.org, so install via rustup directly.
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: https://data.forgejo.org/actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui2/package-lock.json
+      - name: Install webui2 dependencies
+        working-directory: webui2
+        run: npm ci
+      - name: Regenerate API types
+        working-directory: webui2
+        run: npm run generate-types
+      - name: Fail if generated types are out of date
+        run: git diff --exit-code -- webui2/src/lib/generated/api.d.ts
