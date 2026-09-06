@@ -3,8 +3,6 @@ name: Docker Image CI
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
 
 # Runner must map this label to an image with the docker CLI + socket access
 # (e.g. catthehacker/ubuntu:act-latest, or DOOD/DIND configured), not a bare
@@ -35,11 +33,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-          fi
+          BASE="${{ github.event.before }}"
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
             CHANGED=$(git ls-files)
           else
@@ -90,8 +84,6 @@ jobs:
 
       # Push to our own registry. Creds come from Codeberg (Forgejo) repo secrets,
       # not secrets.GITHUB_TOKEN (that one's only scoped for codeberg.org).
-      # Log in on every run, not just push: the registry cache importer does an
-      # authenticated HEAD on the buildcache manifest even on PR builds.
       - name: Log in to registry
         if: matrix.enabled == 'true'
         uses: https://data.forgejo.org/docker/login-action@v3
@@ -106,7 +98,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
-          push: ${{ github.event_name == 'push' }}
+          push: true
           tags: |
             docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:latest
             docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
