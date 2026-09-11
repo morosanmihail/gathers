@@ -114,8 +114,8 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="modal-overlay" onclick={onOverlayClick} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" aria-modal="true" tabindex="-1">
-	<div class="modal">
-		<div class="modal-header">
+	<div class="modal search-modal">
+		<div class="modal-header search-modal-header">
 			<h3>Search & Add to "{collection}"</h3>
 				<div class="view-toggle" title="Toggle view">
 					<button
@@ -148,7 +148,7 @@
 			<button class="btn btn-ghost btn-icon" onclick={onclose} title="Close">✕</button>
 		</div>
 		<!-- Purchase price bar -->
-		<div style="padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; gap:8px;">
+		<div style="padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
 			<span style="font-size:0.82rem; color:var(--text2);">Purchase price for next add:</span>
 			<span style="color:var(--text2);">$</span>
 			<input
@@ -160,7 +160,7 @@
 				<button class="btn btn-ghost btn-sm" onclick={() => addPrice = ''}>Clear</button>
 			{/if}
 		</div>
-		<div class="modal-body" style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start;">
+		<div class="modal-body search-modal-body">
 			<SearchPanel
 				{filters}
 				onfilters={(f) => filters = f}
@@ -210,7 +210,7 @@
 						{total}
 						{page}
 						onPageChange={(p) => doSearch(p)}
-						gridStyle="padding: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;"
+						gridClass="card-grid search-modal-grid"
 						listClass="card-list card-list-search"
 					/>
 				{/if}
@@ -222,3 +222,40 @@
 {#if detailCard}
 	<CardDetailModal card={detailCard} onclose={() => detailCard = null} />
 {/if}
+
+<style>
+	.search-modal-header {
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	.search-modal-header h3 {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.search-modal-body {
+		display: grid;
+		grid-template-columns: 280px 1fr;
+		gap: 20px;
+		align-items: start;
+	}
+
+	.search-modal-grid {
+		padding: 0;
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		gap: 10px;
+	}
+
+	@media (max-width: 720px) {
+		.search-modal { max-width: 100%; }
+		.search-modal-body { grid-template-columns: 1fr; gap: 12px; }
+	}
+
+	@media (max-width: 768px) {
+		.search-modal-grid { grid-template-columns: repeat(2, 1fr); }
+	}
+</style>

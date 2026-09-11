@@ -102,7 +102,7 @@
 			</div>
 		{/if}
 
-		<div style="padding: 24px 20px 0; display: flex; gap: 12px;">
+		<div style="padding: 24px 20px 0; display: flex; gap: 12px; flex-wrap: wrap;">
 			<a href="/search" class="btn btn-accent">
 				<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
 					<circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5"/>
