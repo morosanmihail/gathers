@@ -585,6 +585,24 @@ label.field-label {
 	border-radius: 12px;
 }
 
+/* ─── Search page layout ───────────────────────────────── */
+.search-layout {
+	display: grid;
+	grid-template-columns: 280px 1fr;
+	gap: 0;
+	align-items: start;
+	min-height: calc(100vh - 94px);
+}
+
+.search-sidebar {
+	padding: 20px;
+	border-right: 1px solid var(--border);
+	position: sticky;
+	top: 94px;
+	max-height: calc(100vh - 94px);
+	overflow-y: auto;
+}
+
 /* ─── Search panel ─────────────────────────────────────── */
 .search-panel {
 	background: var(--surface);
@@ -1254,13 +1272,85 @@ label.field-label {
 .rarity-M { color: #c06060; }
 
 /* ─── Responsive ───────────────────────────────────────── */
-@media (max-width: 768px) {
-	.card-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; padding: 12px; }
-	.card-list-header, .card-row {
-		grid-template-columns: 24px 1fr 60px 60px;
+@media (max-width: 860px) {
+	.search-layout { grid-template-columns: 1fr; min-height: 0; }
+	.search-sidebar {
+		position: static;
+		max-height: none;
+		overflow-y: visible;
+		border-right: none;
+		border-bottom: 1px solid var(--border);
 	}
-	.card-list-col:nth-child(n+5),
-	.card-row-cell:nth-child(n+5) { display: none; }
-	.stats-grid { grid-template-columns: 1fr 1fr; }
-	.toolbar { padding: 8px 12px; }
+}
+
+@media (max-width: 768px) {
+	.header-top { gap: 8px; padding: 0 12px; }
+	.header-logo span { display: none; }
+	.header-logo { font-size: 1rem; }
+	.external-link { display: none; }
+
+	.tab-item { padding: 0 10px; font-size: 0.82rem; }
+	.tab-bar { padding: 0 12px; }
+
+	.card-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 12px; }
+
+	/* List view has more fixed-width columns than a phone is wide — scroll the
+	   whole table horizontally instead of squeezing or hiding columns. The name
+	   column gets a floor so it doesn't collapse to nothing in the scroller.
+	   The header can't stay position:sticky here: turning .card-list into a
+	   horizontal scroll container makes it the sticky containing block too,
+	   which breaks the top offset (the header ends up permanently shifted
+	   down by `top`, overlapping the second row) instead of tracking page
+	   scroll. So on mobile it scrolls away with the rows instead of floating. */
+	.card-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+	.card-list-header { position: static; }
+
+	/* The name column is `1fr` on desktop — with a scrollable container that
+	   stretches to fit a long, unbroken name, dragging every column after it
+	   further right. Give it a fixed width instead and let the name wrap. */
+	.card-list-header, .card-row { grid-template-columns: 32px 160px 110px 90px 130px 110px 100px 100px 90px; }
+	.card-list-search .card-list-header, .card-list-search .card-row,
+	.card-list-results .card-list-header, .card-list-results .card-row {
+		grid-template-columns: 32px 160px 110px 90px 110px 140px;
+	}
+	.card-list-header, .card-row { min-width: max-content; }
+	.card-row-name, .card-row-artist { min-width: 90px; }
+	.card-row-name { white-space: normal; overflow-wrap: break-word; line-height: 1.25; }
+
+	.stats-grid { grid-template-columns: 1fr 1fr; padding: 16px 12px 8px; }
+	.collections-overview { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); padding: 12px; gap: 10px; }
+
+	.toolbar { padding: 8px 12px; gap: 6px; }
+	.page-header { padding: 16px 12px 10px; flex-wrap: wrap; }
+
+	.modal-overlay { padding: 16px 8px; }
+	.modal-header { padding: 12px 14px; }
+	.modal-body { padding: 14px; }
+	.confirm-box { padding: 18px; }
+
+	.value-breakdown-tooltip { min-width: 0; width: max-content; max-width: calc(100vw - 32px); right: 0; }
+
+	/* Bigger touch targets */
+	.qty-btn { width: 26px; height: 26px; }
+	.page-btn { min-width: 38px; height: 38px; }
+	.view-toggle-btn { padding: 7px 11px; }
+
+	/* Floating toasts — clamp to viewport instead of a fixed max-width */
+	.toast-stack { left: 12px; right: 12px; bottom: 12px; }
+	.toast { max-width: none; }
+	.demo-toast-stack { left: 12px; right: 12px; transform: none; top: 12px; }
+	.demo-toast { max-width: none; }
+}
+
+@media (max-width: 480px) {
+	.header-top { gap: 6px; padding: 0 8px; height: 48px; }
+	.header-logo { font-size: 0.92rem; letter-spacing: 0.04em; }
+	.ops-tracker { display: none; }
+
+	.tab-bar { padding: 0 8px; }
+	.tab-item { padding: 0 8px; }
+
+	.card-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 8px; }
+	.stats-grid { grid-template-columns: 1fr; }
+	.collections-overview { grid-template-columns: 1fr 1fr; }
 }

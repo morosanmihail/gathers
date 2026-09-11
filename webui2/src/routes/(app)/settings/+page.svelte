@@ -135,7 +135,7 @@
 				<div style="padding: 16px;">
 					{#each ALL_SYSTEMS as sys}
 						{@const actions = SYSTEM_ACTIONS[sys]}
-						<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+						<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
 							<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1;">
 								<input type="checkbox" checked={config.system.includes(sys)} onchange={() => toggleSystem(sys)} style="width: 16px; height: 16px; accent-color: var(--accent);" />
 								<span>{SYSTEM_LABELS[sys] ?? sys}</span>

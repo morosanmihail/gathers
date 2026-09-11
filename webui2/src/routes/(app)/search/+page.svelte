@@ -205,9 +205,9 @@
 </svelte:head>
 
 <div>
-	<div style="display: grid; grid-template-columns: 280px 1fr; gap: 0; align-items: start; min-height: calc(100vh - 94px);">
+	<div class="search-layout">
 		<!-- Left: search form -->
-		<div style="padding: 20px; border-right: 1px solid var(--border); position: sticky; top: 94px; max-height: calc(100vh - 94px); overflow-y: auto;">
+		<div class="search-sidebar">
 			<SearchPanel
 				{filters}
 				onfilters={(f) => filters = f}

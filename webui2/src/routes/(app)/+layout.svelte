@@ -142,7 +142,7 @@
 					</svg>
 				</a>
 			{/if}
-			<a href="https://gathers.cards" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" style="font-size: 0.8rem;" title="gathers.cards">
+			<a href="https://gathers.cards" target="_blank" rel="noopener noreferrer" class="btn btn-ghost external-link" style="font-size: 0.8rem;" title="gathers.cards">
 				gathers.cards
 			</a>
 		</div>

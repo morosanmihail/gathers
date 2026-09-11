@@ -101,12 +101,12 @@
 			{:else}
 				<div style="display: flex; flex-direction: column; gap: 8px;">
 					{#each links as link (link.token)}
-						<div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;">
+						<div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap;">
 							<input
 								class="input"
 								readonly
 								value={shareUrl(link.token)}
-								style="flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; height: 32px; padding: 4px 8px;"
+								style="flex: 1; min-width: 160px; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; height: 32px; padding: 4px 8px;"
 								onclick={(e) => (e.target as HTMLInputElement).select()}
 							/>
 							<span style="color: var(--text2); font-size: 0.75rem; white-space: nowrap;">
