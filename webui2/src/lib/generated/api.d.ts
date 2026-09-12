@@ -1944,6 +1944,17 @@ export interface components {
             skip: number;
         };
         ServerConfig: {
+            /**
+             * @description Periodically re-download card and price databases for all active systems.
+             * @default false
+             */
+            auto_download_enabled: boolean;
+            /**
+             * Format: uint64
+             * @description How often to run the auto-download, in hours. Takes effect on server restart.
+             * @default 24
+             */
+            auto_download_interval_hours: number;
             /** @default true */
             collections_enabled: boolean;
             mtg_db_path?: string | null;

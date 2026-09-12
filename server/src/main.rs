@@ -21,6 +21,7 @@ use crate::pokemon_api::pokemon_routes;
 use crate::riftbound_api::riftbound_routes;
 use crate::settings_api::settings_routes;
 
+mod auto_download;
 mod collections;
 mod mtg_api;
 mod pokemon_api;
@@ -101,6 +102,7 @@ pub struct StorageState {
 }
 
 impl RetrievalState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         systems: Vec<Systems>,
         mtg_db_path: Option<String>,
@@ -360,6 +362,12 @@ pub struct ServerConfig {
     pub pricing_enabled: bool,
     #[serde(default = "default_collections_enabled")]
     pub collections_enabled: bool,
+    /// Periodically re-download card and price databases for all active systems.
+    #[serde(default = "auto_download::default_enabled")]
+    pub auto_download_enabled: bool,
+    /// How often to run the auto-download, in hours. Takes effect on server restart.
+    #[serde(default = "auto_download::default_interval_hours")]
+    pub auto_download_interval_hours: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtg_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -474,6 +482,8 @@ async fn main() -> eyre::Result<()> {
             port,
             pricing_enabled: true,
             collections_enabled: true,
+            auto_download_enabled: false,
+            auto_download_interval_hours: 24,
             mtg_db_path: Some(
                 db_dir
                     .join("AllPrintings.db")
@@ -708,6 +718,10 @@ async fn main() -> eyre::Result<()> {
             }
         }
     }
+    if config.auto_download_enabled {
+        auto_download::spawn(retrieval.clone(), gathers_dir.clone(), config.auto_download_interval_hours);
+    }
+
     let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path.clone())?));
     info!(path = storage_db_path.as_deref().unwrap_or("(default)"), "Storage DB ready");
 

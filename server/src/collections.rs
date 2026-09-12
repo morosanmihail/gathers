@@ -639,7 +639,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         // Record purchase history only when a positive price is supplied.
         if result.is_ok()
             && (input.quantity > 0 || input.foil_quantity > 0)
-            && input.purchase_price.map_or(false, |p| p > 0.0)
+            && input.purchase_price.is_some_and(|p| p > 0.0)
         {
             let now = chrono::Utc::now().to_rfc3339();
             let normal_price = if input.quantity > 0 { input.purchase_price } else { None };
@@ -1326,10 +1326,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
         let mut card_info: HashMap<String, models::Card> = HashMap::new();
         for (provider, uuids) in &uuids_by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider) {
-                if let Ok(data) = retrieval.get_cards_by_ids(uuids.clone()).await {
-                    card_info.extend(data);
-                }
+            if let Some(retrieval) = retrieval_systems.get(provider)
+                && let Ok(data) = retrieval.get_cards_by_ids(uuids.clone()).await
+            {
+                card_info.extend(data);
             }
         }
 

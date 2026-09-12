@@ -210,6 +210,37 @@
 				</div>
 			</div>
 
+			<!-- Auto-download -->
+			<div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 20px; overflow: hidden;">
+				<div style="padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text2);">
+					Auto-Download
+				</div>
+				<div style="padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+					<label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+						<input type="checkbox" checked={config.auto_download_enabled ?? false}
+							onchange={() => { if (config) { config = { ...config, auto_download_enabled: !(config.auto_download_enabled ?? false) }; saved = false; } }}
+							style="width: 16px; height: 16px; accent-color: var(--accent);" />
+						<div>
+							<div style="font-weight: 600;">Enable periodic auto-download</div>
+							<div style="font-size: 0.8rem; color: var(--text2);">Automatically re-download card and price databases for all active systems on a schedule</div>
+						</div>
+					</label>
+					<div>
+						<label class="field-label" for="settings-auto-download-interval">Interval (hours)</label>
+						<input
+							id="settings-auto-download-interval"
+							type="number"
+							min="1"
+							class="input"
+							style="max-width: 120px;"
+							value={config.auto_download_interval_hours ?? 24}
+							onchange={(e) => { if (config) { const v = parseInt((e.target as HTMLInputElement).value); config = { ...config, auto_download_interval_hours: v > 0 ? v : config.auto_download_interval_hours }; saved = false; } }}
+						/>
+					</div>
+					<div style="font-size: 0.8rem; color: var(--text2);">Changes to auto-download settings require a server restart.</div>
+				</div>
+			</div>
+
 			<!-- File paths -->
 			<div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 24px; overflow: hidden;">
 				<div style="padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text2);">
