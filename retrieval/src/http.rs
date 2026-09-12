@@ -49,6 +49,10 @@ async fn stream_to_file_once(
     phase: &str,
 ) -> eyre::Result<()> {
     let response = reqwest::Client::new().get(url).send().await?;
+    // Without this, an error/redirect page (a short 2xx-unrelated body, or
+    // one whose own Content-Length matches its small size) gets written to
+    // `path` and reported as a successful download.
+    let response = response.error_for_status()?;
     let total_size = response.content_length().unwrap_or(0);
 
     if let Some(p) = progress {
@@ -67,16 +71,26 @@ async fn stream_to_file_once(
 
     let mut file = std::fs::File::create(path)?;
     let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk)?;
         let len = chunk.len() as u64;
+        downloaded += len;
         pb.inc(len);
         if let Some(p) = progress {
             let mut p = p.lock().await;
             p.downloaded += len;
         }
     }
+
+    if total_size > 0 && downloaded != total_size {
+        let _ = std::fs::remove_file(path);
+        eyre::bail!(
+            "{label}: incomplete download — expected {total_size} bytes, got {downloaded}"
+        );
+    }
+
     pb.finish_with_message(label.to_string());
     Ok(())
 }

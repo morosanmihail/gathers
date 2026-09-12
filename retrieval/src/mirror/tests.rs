@@ -261,6 +261,60 @@ fn test_write_with_sha256_writes_sidecar() {
 }
 
 #[test]
+fn test_reseed_state_from_published_restores_lost_state() {
+    let dir = TempDir::new().unwrap();
+    let src = dir.path().join("input.txt");
+    fs::write(&src, b"previously scraped cards").unwrap();
+    let bz2 = dir.path().join("staged.bz2");
+    compress_bz2(&src, &bz2).unwrap();
+    write_with_sha256(&bz2, dir.path(), "pokemon.sqlite").unwrap();
+
+    // Simulates a fresh, wiped state dir (e.g. after a container restart).
+    let state_subdir = dir.path().join("state");
+    fs::create_dir_all(&state_subdir).unwrap();
+    let state_db = state_subdir.join("pokemon.sqlite");
+    reseed_state_from_published(dir.path(), "pokemon.sqlite", &state_db).unwrap();
+
+    assert_eq!(
+        fs::read(&state_db).unwrap(),
+        b"previously scraped cards",
+        "reseed must restore prior work from the last published snapshot"
+    );
+}
+
+#[test]
+fn test_reseed_state_from_published_leaves_existing_state_untouched() {
+    let dir = TempDir::new().unwrap();
+    let state_db = dir.path().join("pokemon.sqlite");
+    fs::write(&state_db, b"current working state").unwrap();
+
+    // Even if a (stale) published snapshot exists, an already-present
+    // working db must never be clobbered.
+    let src = dir.path().join("input.txt");
+    fs::write(&src, b"old published content").unwrap();
+    let bz2 = dir.path().join("staged.bz2");
+    compress_bz2(&src, &bz2).unwrap();
+    write_with_sha256(&bz2, dir.path(), "pokemon.sqlite").unwrap();
+
+    reseed_state_from_published(dir.path(), "pokemon.sqlite", &state_db).unwrap();
+
+    assert_eq!(fs::read(&state_db).unwrap(), b"current working state");
+}
+
+#[test]
+fn test_reseed_state_from_published_no_prior_publish_is_noop() {
+    let dir = TempDir::new().unwrap();
+    let state_db = dir.path().join("state").join("pokemon.sqlite");
+
+    reseed_state_from_published(dir.path(), "pokemon.sqlite", &state_db).unwrap();
+
+    assert!(
+        !state_db.exists(),
+        "must not create a state db out of nothing on a true first run"
+    );
+}
+
+#[test]
 fn test_load_mirror_urls_missing_file_returns_empty() {
     // SAFETY: test runs in its own process slot; no other test in this
     // crate reads GATHERS_MIRRORS_PATH concurrently.

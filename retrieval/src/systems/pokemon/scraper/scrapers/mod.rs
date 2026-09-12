@@ -28,14 +28,32 @@ pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Re
     });
 
     info!("Fetching normal sets");
-    let normal_sets = serebii::scrape_normal_sets(client, opts.recent)
-        .await
-        .unwrap_or_default();
+    let normal_result = serebii::scrape_normal_sets(client, opts.recent).await;
+    let normal_failed = normal_result.is_err();
+    let normal_sets = normal_result.unwrap_or_else(|e| {
+        warn!("Failed to fetch normal sets: {e}");
+        vec![]
+    });
 
     info!("Fetching promo sets");
-    let promo_sets = serebii::scrape_promo_sets(client, opts.recent)
-        .await
-        .unwrap_or_default();
+    let promo_result = serebii::scrape_promo_sets(client, opts.recent).await;
+    let promo_failed = promo_result.is_err();
+    let promo_sets = promo_result.unwrap_or_else(|e| {
+        warn!("Failed to fetch promo sets: {e}");
+        vec![]
+    });
+
+    // Both index fetches failing means the upstream is unreachable or its
+    // layout changed — not "nothing new to scrape". Returning `Ok(())` here
+    // would let the mirror publish/lock in whatever's already in `db`
+    // (or an empty db) as if this cycle succeeded. Only one failing is
+    // still treated as partial-but-fine, matching the per-set resilience
+    // below.
+    if normal_failed && promo_failed {
+        eyre::bail!(
+            "Both normal and promo set index fetches failed — upstream unreachable or layout changed"
+        );
+    }
 
     let all_sets: Vec<_> = normal_sets.into_iter().chain(promo_sets).collect();
 
