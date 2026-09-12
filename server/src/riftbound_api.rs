@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -8,9 +9,11 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::Card;
-use retrieval::RetrievalSystemTrait;
+use retrieval::{DownloadProgress, RetrievalSystemTrait};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::Mutex;
+use tracing::{error, info};
 
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
@@ -139,22 +142,30 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
             .map(|s| Json(s.iter().map(|s| s.code.clone()).collect()))
     }
 
+    // Backgrounded so a slow card fetch/build isn't cancelled by the
+    // server's global 10s request timeout (see the identical comment on
+    // pokemon_api's `update`).
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
-        let mut ret = state.0.lock().await;
-        let result = {
-            let riftbound = ret.require_riftbound()?;
-            riftbound.update_backend().await
+        let riftbound = {
+            let ret = state.0.lock().await;
+            ret.require_riftbound()?.clone()
         };
-        match result.and_then(|_| ret.reload_riftbound()) {
-            Ok(()) => Ok(Json("Update successful".to_string())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Oof. {e}"),
-                }),
-            )),
-        }
+        let retrieval = state.0.clone();
+        retrieval.lock().await.downloading.insert(
+            "RiftboundSql".to_string(),
+            Arc::new(Mutex::new(DownloadProgress::default())),
+        );
+        tokio::spawn(async move {
+            let result = riftbound.update_backend().await;
+            let mut ret = retrieval.lock().await;
+            ret.downloading.remove("RiftboundSql");
+            match result.and_then(|_| ret.reload_riftbound()) {
+                Ok(()) => info!("Riftbound DB updated"),
+                Err(e) => error!(error = %e, "Failed to update Riftbound DB"),
+            }
+        });
+        Ok(Json("Update started in background".to_string()))
     }
 
     ApiRouter::new()

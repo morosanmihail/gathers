@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -8,9 +9,11 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::{Card, CardPrices, Set};
-use retrieval::RetrievalSystemTrait as _;
+use retrieval::{DownloadProgress, RetrievalSystemTrait as _};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::Mutex;
+use tracing::{error, info};
 
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
@@ -137,38 +140,56 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
             .map(Json)
     }
 
+    // Backgrounded so a large/slow AllPrintings.db download isn't cancelled
+    // by the server's global 10s request timeout (see the identical
+    // comment on pokemon_api's `update`).
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
-        let mut ret = state.0.lock().await;
-        let result = {
-            let mtg = ret.require_mtg()?;
-            mtg.update_backend().await
+        let mtg = {
+            let ret = state.0.lock().await;
+            ret.require_mtg()?.clone()
         };
-        match result.and_then(|_| ret.reload_mtg()) {
-            Ok(()) => Ok(Json("Update successful".to_string())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Oof. {e}"),
-                }),
-            )),
-        }
+        let retrieval = state.0.clone();
+        retrieval
+            .lock()
+            .await
+            .downloading
+            .insert("Sql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
+        tokio::spawn(async move {
+            let result = mtg.update_backend().await;
+            let mut ret = retrieval.lock().await;
+            ret.downloading.remove("Sql");
+            match result.and_then(|_| ret.reload_mtg()) {
+                Ok(()) => info!("MTG DB updated"),
+                Err(e) => error!(error = %e, "Failed to update MTG DB"),
+            }
+        });
+        Ok(Json("Update started in background".to_string()))
     }
 
+    // Backgrounded for the same reason as `update` above — a slow prices
+    // download shouldn't be cancelled by the global 10s request timeout.
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
-        let guard = state.0.lock().await;
-        let mtg = guard.require_mtg()?;
-        match mtg.update_prices().await {
-            Ok(true) => Ok(Json("Price update started".to_string())),
-            Ok(false) => Ok(Json("No price database configured".to_string())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to update prices. {e}"),
-                }),
-            )),
-        }
+        let mtg = {
+            let ret = state.0.lock().await;
+            ret.require_mtg()?.clone()
+        };
+        let retrieval = state.0.clone();
+        retrieval.lock().await.downloading.insert(
+            "Sql-prices".to_string(),
+            Arc::new(Mutex::new(DownloadProgress::default())),
+        );
+        tokio::spawn(async move {
+            let result = mtg.update_prices().await;
+            retrieval.lock().await.downloading.remove("Sql-prices");
+            match result {
+                Ok(true) => info!("MTG prices updated"),
+                Ok(false) => info!("No MTG price database configured"),
+                Err(e) => error!(error = %e, "Failed to update MTG prices"),
+            }
+        });
+        Ok(Json("Price update started".to_string()))
     }
 
     #[derive(Deserialize, JsonSchema)]

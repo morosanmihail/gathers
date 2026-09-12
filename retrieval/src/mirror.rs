@@ -1,5 +1,6 @@
 use std::{
     fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -174,6 +175,17 @@ pub fn calculate_sha256(path: &Path) -> eyre::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// `NamedTempFile` always creates its backing file mode `0600` regardless of
+/// umask (see `tempfile`'s unix impl), and `persist()` is just a `rename()`
+/// that carries that mode over unchanged — so anything written via the
+/// staging-tempfile-then-persist pattern ends up owner-only unless fixed up
+/// here. Published mirror artifacts need to be readable by whatever other
+/// process/uid reads the shared volume.
+fn loosen_permissions(path: &Path) -> eyre::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+    Ok(())
+}
+
 pub fn decompress_bz2(src: &Path, dst: &Path) -> eyre::Result<()> {
     let parent = dst.parent().unwrap_or(Path::new("."));
     let file = fs::File::open(src)?;
@@ -181,6 +193,7 @@ pub fn decompress_bz2(src: &Path, dst: &Path) -> eyre::Result<()> {
     let mut staging = tempfile::NamedTempFile::new_in(parent)?;
     std::io::copy(&mut decoder, &mut staging)?;
     staging.persist(dst).map_err(|e| e.error)?;
+    loosen_permissions(dst)?;
     Ok(())
 }
 
@@ -232,6 +245,7 @@ pub async fn cache_upstream_bz2(
     let mut staging = tempfile::NamedTempFile::new_in(data_dir)?;
     std::io::copy(&mut fs::File::open(&bz2_path)?, &mut staging)?;
     staging.persist(&bz2_target).map_err(|e| e.error)?;
+    loosen_permissions(&bz2_target)?;
     fs::write(&sidecar, &downloaded_crc)?;
     info!(stem, crc = %downloaded_crc, "Mirror cached upstream bz2");
     Ok(())
@@ -248,6 +262,7 @@ pub fn write_with_sha256(bz2_path: &Path, data_dir: &Path, stem: &str) -> eyre::
     let mut staging = tempfile::NamedTempFile::new_in(data_dir)?;
     std::io::copy(&mut fs::File::open(bz2_path)?, &mut staging)?;
     staging.persist(&bz2_target).map_err(|e| e.error)?;
+    loosen_permissions(&bz2_target)?;
     fs::write(&sidecar, &crc)?;
     info!(stem, crc = %crc, "Mirror cached compressed snapshot");
     Ok(())
