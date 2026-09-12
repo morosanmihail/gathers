@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -8,9 +9,11 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::{Card, Set};
-use retrieval::RetrievalSystemTrait;
+use retrieval::{DownloadProgress, RetrievalSystemTrait};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::Mutex;
+use tracing::{error, info};
 
 use models::CardPrices;
 
@@ -141,38 +144,58 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
             .map(Json)
     }
 
+    // Runs in the background instead of blocking on `update_backend()`
+    // inline: the Pokemon scraper walks every set sequentially (with
+    // deliberate rate-limit sleeps) and routinely takes far longer than the
+    // server's global 10s request timeout, which would otherwise cancel
+    // the scrape after just a few sets — every single call — leaving a
+    // near-empty db that still reports "Update successful".
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
-        let mut ret = state.0.lock().await;
-        let result = {
-            let pokemon = ret.require_pokemon()?;
-            pokemon.update_backend().await
+        let pokemon = {
+            let ret = state.0.lock().await;
+            ret.require_pokemon()?.clone()
         };
-        match result.and_then(|_| ret.reload_pokemon()) {
-            Ok(()) => Ok(Json("Update successful".to_string())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to update Pokemon DB. {e}"),
-                }),
-            )),
-        }
+        let retrieval = state.0.clone();
+        retrieval.lock().await.downloading.insert(
+            "PokemonSql".to_string(),
+            Arc::new(Mutex::new(DownloadProgress::default())),
+        );
+        tokio::spawn(async move {
+            let result = pokemon.update_backend().await;
+            let mut ret = retrieval.lock().await;
+            ret.downloading.remove("PokemonSql");
+            match result.and_then(|_| ret.reload_pokemon()) {
+                Ok(()) => info!("Pokemon DB updated"),
+                Err(e) => error!(error = %e, "Failed to update Pokemon DB"),
+            }
+        });
+        Ok(Json("Update started in background".to_string()))
     }
 
+    // Backgrounded for the same reason as `update` above — a slow prices
+    // download shouldn't be cancelled by the global 10s request timeout.
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
-        let guard = state.0.lock().await;
-        let pokemon = guard.require_pokemon()?;
-        match pokemon.update_prices().await {
-            Ok(true) => Ok(Json("Price update started".to_string())),
-            Ok(false) => Ok(Json("No price database configured".to_string())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to update prices. {e}"),
-                }),
-            )),
-        }
+        let pokemon = {
+            let ret = state.0.lock().await;
+            ret.require_pokemon()?.clone()
+        };
+        let retrieval = state.0.clone();
+        retrieval.lock().await.downloading.insert(
+            "PokemonSql-prices".to_string(),
+            Arc::new(Mutex::new(DownloadProgress::default())),
+        );
+        tokio::spawn(async move {
+            let result = pokemon.update_prices().await;
+            retrieval.lock().await.downloading.remove("PokemonSql-prices");
+            match result {
+                Ok(true) => info!("Pokemon prices updated"),
+                Ok(false) => info!("No Pokemon price database configured"),
+                Err(e) => error!(error = %e, "Failed to update Pokemon prices"),
+            }
+        });
+        Ok(Json("Price update started".to_string()))
     }
 
     #[derive(Deserialize, JsonSchema)]
