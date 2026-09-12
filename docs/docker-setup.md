@@ -88,6 +88,9 @@ This file is stored inside the `gathers-data` named volume, so it persists acros
 system = ["riftbound-sql"]
 port = 5234
 pricing_enabled = true
+collections_enabled = true
+auto_download_enabled = false
+auto_download_interval_hours = 24
 
 mtg_db_path = "/home/app/.local/share/gathers/DB/AllPrintings.db"
 mtg_prices_path = "/home/app/.local/share/gathers/DB/AllPricesToday.sqlite"
@@ -117,9 +120,9 @@ Then restart the container for changes to take effect:
 docker-compose restart gathers-api
 ```
 
-> **Note:** `pricing_enabled` can be toggled live via the Settings page in the web UI without a restart.
+> **Note:** `pricing_enabled` and `collections_enabled` can be toggled live via the Settings page in the web UI without a restart. `auto_download_enabled` and `auto_download_interval_hours` can also be edited there, but take effect on the next restart.
 
-**Priority order** (highest wins): environment variables → `server.toml`.
+**Priority order** (highest wins): environment variables → `server.toml`. `auto_download_enabled`/`auto_download_interval_hours` have no environment variable override — set them in `server.toml` (directly or via the Settings page).
 
 The `system` field controls which card databases are active. Supported values: `scryfall`, `sql`, `riftbound-sql`, `pokemon-sql`. Multiple systems can be listed.
 

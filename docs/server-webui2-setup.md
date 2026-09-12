@@ -52,13 +52,16 @@ The `server.toml` config supports these keys beyond `system` and `port`:
 | Key | Default | Description |
 |---|---|---|
 | `pricing_enabled` | `true` | Show market prices, purchase price inputs, and purchase history in the UI |
+| `collections_enabled` | `true` | Enable collection management |
+| `auto_download_enabled` | `false` | Periodically re-download card and price databases for all active systems |
+| `auto_download_interval_hours` | `24` | How often to run the auto-download, in hours |
 | `mtg_db_path` | see env var default | Path to `AllPrintings.db` |
 | `mtg_prices_path` | see env var default | Path to `AllPricesToday.sqlite` |
 | `riftbound_db_path` | see env var default | Path to `riftbound.db` |
 | `pokemon_db_path` | see env var default | Path to `pokemon.db` |
 | `storage_db_path` | see env var default | Path to `storage.db` |
 
-All config options can also be changed at runtime via the Settings page in the web UI (`/settings`). Changes to `pricing_enabled` take effect immediately; other changes (paths, port, systems) require a server restart.
+All config options can also be changed at runtime via the Settings page in the web UI (`/settings`). Changes to `pricing_enabled` and `collections_enabled` take effect immediately; other changes (paths, port, systems, `auto_download_enabled`, `auto_download_interval_hours`) require a server restart.
 
 ## Retrieval Database
 
