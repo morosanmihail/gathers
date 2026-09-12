@@ -268,6 +268,27 @@ fn state_dir(data_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// The working state dir (`{data_dir}-state`) lives outside the mounted
+/// data volume, so it's wiped on every container recreation. Without this,
+/// a restart would silently drop everything scraped/merged so far and
+/// start the incremental build over from empty — the one place the mirror
+/// itself has already published a snapshot (`data_dir/{stem}.bz2`, which
+/// *is* on the persisted volume) is the only record of that prior work.
+/// Reseeding the fresh state db from it before scraping/building resumes
+/// means a lost state dir never loses data, only the (idempotent) work of
+/// re-decompressing it.
+fn reseed_state_from_published(data_dir: &Path, stem: &str, state_db: &Path) -> eyre::Result<()> {
+    if state_db.exists() {
+        return Ok(());
+    }
+    let published = data_dir.join(format!("{stem}.bz2"));
+    if !published.exists() {
+        return Ok(());
+    }
+    info!(stem, "Working state missing, reseeding from last published snapshot");
+    decompress_bz2(&published, state_db)
+}
+
 /// Refreshes all five mirrored components into `data_dir`. Each component
 /// is independent — one failing (e.g. a scraper target changing layout)
 /// doesn't block the others. A component refreshed successfully within
@@ -349,6 +370,7 @@ async fn refresh_riftbound_cards(data_dir: &Path) -> eyre::Result<()> {
     let state_dir = state_dir(data_dir);
     fs::create_dir_all(&state_dir)?;
     let raw = state_dir.join("riftbound.sqlite");
+    reseed_state_from_published(data_dir, "riftbound.sqlite", &raw)?;
     crate::systems::riftsqlite::build_riftbound_db(raw.to_str().unwrap()).await?;
 
     let temp_dir = tempfile::tempdir()?;
@@ -367,6 +389,7 @@ async fn refresh_pokemon_cards(data_dir: &Path) -> eyre::Result<()> {
     let state_dir = state_dir(data_dir);
     fs::create_dir_all(&state_dir)?;
     let raw = state_dir.join("pokemon.sqlite");
+    reseed_state_from_published(data_dir, "pokemon.sqlite", &raw)?;
     crate::systems::pokemon::scrape_to_path(raw.to_str().unwrap()).await?;
 
     let temp_dir = tempfile::tempdir()?;
