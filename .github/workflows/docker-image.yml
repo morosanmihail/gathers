@@ -3,6 +3,7 @@ name: Docker Image CI
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
 
@@ -52,23 +53,25 @@ jobs:
 
   build-and-push:
     needs: changes
-    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui2 == 'true'
+    # A version tag is an explicit release: build and push every image
+    # regardless of what changed, so all images carry the new version tag.
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.mirror == 'true' || needs.changes.outputs.webui2 == 'true' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - name: api
-            enabled: ${{ needs.changes.outputs.api }}
+            enabled: ${{ needs.changes.outputs.api == 'true' || github.ref_type == 'tag' }}
             context: .
             file: ./Dockerfile
             image: gathers-api
           - name: mirror
-            enabled: ${{ needs.changes.outputs.mirror }}
+            enabled: ${{ needs.changes.outputs.mirror == 'true' || github.ref_type == 'tag' }}
             context: .
             file: ./Dockerfile.mirror
             image: gathers-mirror
           - name: webui2
-            enabled: ${{ needs.changes.outputs.webui2 }}
+            enabled: ${{ needs.changes.outputs.webui2 == 'true' || github.ref_type == 'tag' }}
             context: ./webui2
             file: ./webui2/Dockerfile
             image: gathers-webui2
@@ -93,6 +96,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image tags
+        if: matrix.enabled == 'true'
+        id: tags
+        shell: bash
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/morosanmihail/${{ matrix.image }}:latest"
+            echo "ghcr.io/morosanmihail/${{ matrix.image }}:sha-${{ github.sha }}"
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "ghcr.io/morosanmihail/${{ matrix.image }}:${{ github.ref_name }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.name }} image
         if: matrix.enabled == 'true'
         uses: docker/build-push-action@v6
@@ -101,8 +119,6 @@ jobs:
           file: ${{ matrix.file }}
           push: ${{ github.event_name == 'push' }}
           build-args: ${{ matrix.build-args }}
-          tags: |
-            ghcr.io/morosanmihail/${{ matrix.image }}:latest
-            ghcr.io/morosanmihail/${{ matrix.image }}:sha-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
