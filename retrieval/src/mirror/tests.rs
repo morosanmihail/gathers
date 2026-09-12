@@ -261,6 +261,45 @@ fn test_write_with_sha256_writes_sidecar() {
 }
 
 #[test]
+fn test_write_with_sha256_published_file_is_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let src = dir.path().join("input.txt");
+    fs::write(&src, b"some data").unwrap();
+    let bz2 = dir.path().join("staged.bz2");
+    compress_bz2(&src, &bz2).unwrap();
+
+    write_with_sha256(&bz2, dir.path(), "thing.sqlite").unwrap();
+
+    let target = dir.path().join("thing.sqlite.bz2");
+    let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o644,
+        "NamedTempFile defaults to 0600 and persist() doesn't change that — \
+         published artifacts must be chmod'd after persisting or other \
+         processes/uids can't read them"
+    );
+}
+
+#[test]
+fn test_decompress_bz2_output_is_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let src = dir.path().join("input.txt");
+    fs::write(&src, b"hello mirror world").unwrap();
+    let bz2 = dir.path().join("input.txt.bz2");
+    compress_bz2(&src, &bz2).unwrap();
+
+    let restored = dir.path().join("restored.txt");
+    decompress_bz2(&bz2, &restored).unwrap();
+
+    let mode = fs::metadata(&restored).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644);
+}
+
+#[test]
 fn test_reseed_state_from_published_restores_lost_state() {
     let dir = TempDir::new().unwrap();
     let src = dir.path().join("input.txt");
