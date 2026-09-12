@@ -3,6 +3,7 @@ name: Docker Image CI
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
 
 # Runner must map this label to an image with the docker CLI + socket access
 # (e.g. catthehacker/ubuntu:act-latest, or DOOD/DIND configured), not a bare
@@ -28,21 +29,29 @@ jobs:
           fetch-depth: 0
 
       # dorny/paths-filter isn't mirrored on data.forgejo.org, so diff by hand.
+      # A version tag is an explicit release: build and push every image
+      # regardless of what changed, so all images carry the new version tag.
       - name: Detect changed paths
         id: filter
         shell: bash
         run: |
           set -e
-          BASE="${{ github.event.before }}"
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
-            CHANGED=$(git ls-files)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            API=true
+            MIRROR=true
+            WEBUI2=true
           else
-            CHANGED=$(git diff --name-only "$BASE" "${{ github.sha }}")
+            BASE="${{ github.event.before }}"
+            if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+              CHANGED=$(git ls-files)
+            else
+              CHANGED=$(git diff --name-only "$BASE" "${{ github.sha }}")
+            fi
+            match() { echo "$CHANGED" | grep -Eq "$1" && echo true || echo false; }
+            API=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile)')
+            MIRROR=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile\.mirror)')
+            WEBUI2=$(match '^webui2/')
           fi
-          match() { echo "$CHANGED" | grep -Eq "$1" && echo true || echo false; }
-          API=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile)')
-          MIRROR=$(match '^(models/|retrieval/|gathers/|server/|persistence/|mirror/|Cargo\.toml|Cargo\.lock|Dockerfile\.mirror)')
-          WEBUI2=$(match '^webui2/')
           echo "api=$API" >> "$GITHUB_OUTPUT"
           echo "mirror=$MIRROR" >> "$GITHUB_OUTPUT"
           echo "webui2=$WEBUI2" >> "$GITHUB_OUTPUT"
@@ -92,6 +101,21 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: Compute image tags
+        if: matrix.enabled == 'true'
+        id: tags
+        shell: bash
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:latest"
+            echo "docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}"
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.ref_name }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.name }} image
         if: matrix.enabled == 'true'
         uses: https://data.forgejo.org/docker/build-push-action@v6
@@ -99,8 +123,6 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
-          tags: |
-            docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:latest
-            docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
           cache-to: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max
