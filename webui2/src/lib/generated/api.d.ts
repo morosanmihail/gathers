@@ -1550,6 +1550,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PluginSummary"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/{name}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SearchRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PluginCard"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/{name}/cards/by-ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": string[];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["PluginCard"];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/{name}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": string;
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system": {
         parameters: {
             query?: never;
@@ -1865,6 +2011,56 @@ export interface components {
              */
             skip: number;
         };
+        /**
+         * @description A card-shaped item returned by a plugin. Fields beyond `id`/`name` are
+         *     deliberately loose (empty string / `None` / empty map are all valid) so
+         *     a plugin author only has to fill in what makes sense for their domain.
+         */
+        PluginCard: {
+            /** @default  */
+            collector_number: string;
+            /** @default null */
+            description: string | null;
+            /**
+             * @description Freeform, domain-specific fields (e.g. "author" for a books plugin),
+             *     opaque to gathers itself.
+             * @default {}
+             */
+            extra: {
+                [key: string]: string;
+            };
+            id: string;
+            /** @default null */
+            image_url: string | null;
+            name: string;
+            /** @default  */
+            set_code: string;
+            /** @default  */
+            set_name: string;
+        };
+        /**
+         * @description A third-party retrieval plugin — a separate HTTP service implementing
+         *     the gathers plugin contract (see `retrieval::systems::plugin`). Any
+         *     number may be configured.
+         */
+        PluginConfig: {
+            /** @description Base URL the plugin's HTTP service is reachable at. */
+            base_url: string;
+            /** @default true */
+            enabled: boolean;
+            /** @description Unique name this plugin is addressed by, e.g. `/api/plugins/{name}/...`. */
+            name: string;
+        };
+        PluginSearchFilters: {
+            /** @default null */
+            set_code: string | null;
+            /** @default null */
+            text: string | null;
+        };
+        PluginSummary: {
+            base_url: string;
+            name: string;
+        };
         PokemonRetrieveQuery: {
             /** @default [] */
             ids: string[];
@@ -1943,6 +2139,25 @@ export interface components {
              */
             skip: number;
         };
+        SearchRequest: {
+            /**
+             * @default {
+             *       "set_code": null,
+             *       "text": null
+             *     }
+             */
+            filters: components["schemas"]["PluginSearchFilters"];
+            /**
+             * Format: uint
+             * @default null
+             */
+            limit: number | null;
+            /**
+             * Format: uint
+             * @default null
+             */
+            skip: number | null;
+        };
         ServerConfig: {
             /**
              * @description Periodically re-download card and price databases for all active systems.
@@ -1959,6 +2174,8 @@ export interface components {
             collections_enabled: boolean;
             mtg_db_path?: string | null;
             mtg_prices_path?: string | null;
+            /** @default [] */
+            plugins: components["schemas"]["PluginConfig"][];
             pokemon_db_path?: string | null;
             pokemon_prices_path?: string | null;
             /** Format: uint */
@@ -1995,6 +2212,12 @@ export interface components {
             downloading: {
                 [key: string]: components["schemas"]["DownloadProgressInfo"];
             };
+            /**
+             * @description Names of configured third-party plugins (see `PluginConfig`). Kept
+             *     separate from `systems` — a plugin isn't a `provider` collections can
+             *     store cards under, and doesn't support the same search filters.
+             */
+            plugins: string[];
             /** @description Whether pricing support is enabled (market prices, purchase history, etc.). */
             pricing_enabled: boolean;
             /** @description Primary active system, identified by NamedRetrievalSystem::name(). */

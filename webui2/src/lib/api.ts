@@ -6,6 +6,8 @@ import type {
 	MtgCard,
 	RiftboundCard,
 	PokemonCard,
+	PluginCardWire,
+	PluginResultCard,
 	CardSet,
 	SearchFilters,
 	CardPrices,
@@ -38,7 +40,7 @@ function ttlCache(ttlMs: number) {
 const cache = ttlCache(5 * 60 * 1000);
 
 // Long-lived card detail cache (cards don't change)
-const cardDetailCache: Map<string, MtgCard | RiftboundCard | PokemonCard> = new Map();
+const cardDetailCache: Map<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = new Map();
 
 // Per-card price cache keyed by `provider:id` — prices change rarely within a session
 const priceCache: Map<string, CardPrices> = new Map();
@@ -169,28 +171,43 @@ async function getRawSearchEntries(
 async function fetchCardDetails(
 	ids: string[],
 	provider: string
-): Promise<Record<string, MtgCard | RiftboundCard | PokemonCard>> {
+): Promise<Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard>> {
 	const missing = ids.filter(id => !cardDetailCache.has(`${provider}:${id}`));
 	if (missing.length > 0) {
-		const endpoint = provider === 'RiftboundSQLite'
-			? '/api/riftbound/cards'
-			: provider === 'PokemonSQLite'
-			? '/api/pokemon/cards'
-			: '/api/mtg/cards';
-		// Build ?ids=x&ids=y query
-		const params = missing.map(id => `ids=${encodeURIComponent(id)}`).join('&');
 		try {
-			const results = await fetchJSON<Record<string, MtgCard | RiftboundCard | PokemonCard>>(
-				`${endpoint}?${params}`
-			);
-			for (const [id, detail] of Object.entries(results)) {
-				cardDetailCache.set(`${provider}:${id}`, detail);
+			if (provider.startsWith('plugin-')) {
+				const name = provider.slice('plugin-'.length);
+				const raw = await fetchJSON<Record<string, PluginCardWire>>(
+					`/api/plugins/${encodeURIComponent(name)}/cards/by-ids`,
+					{
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify(missing)
+					}
+				);
+				for (const [id, wire] of Object.entries(raw)) {
+					cardDetailCache.set(`${provider}:${id}`, mapPluginCard(name, wire));
+				}
+			} else {
+				const endpoint = provider === 'RiftboundSQLite'
+					? '/api/riftbound/cards'
+					: provider === 'PokemonSQLite'
+					? '/api/pokemon/cards'
+					: '/api/mtg/cards';
+				// Build ?ids=x&ids=y query
+				const params = missing.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+				const results = await fetchJSON<Record<string, MtgCard | RiftboundCard | PokemonCard>>(
+					`${endpoint}?${params}`
+				);
+				for (const [id, detail] of Object.entries(results)) {
+					cardDetailCache.set(`${provider}:${id}`, detail);
+				}
 			}
 		} catch (err) {
 			console.error(`[gathers] fetchCardDetails failed for provider=${provider}:`, err);
 		}
 	}
-	const out: Record<string, MtgCard | RiftboundCard | PokemonCard> = {};
+	const out: Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = {};
 	for (const id of ids) {
 		const detail = cardDetailCache.get(`${provider}:${id}`);
 		if (detail) out[id] = detail;
@@ -216,25 +233,35 @@ async function enrichEntries(entries: CollectionEntry[]): Promise<CollectionCard
 	);
 
 	// Merge into a flat map
-	const allDetails: Record<string, MtgCard | RiftboundCard | PokemonCard> = {};
+	const allDetails: Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = {};
 	for (const { details } of detailMaps) {
 		Object.assign(allDetails, details);
 	}
 
-	// Merge entry + details
-	return entries.map(entry => {
-		const detail = allDetails[entry.id] ?? {};
-		return {
-			...detail,
-			id: entry.id,
-			quantity: entry.quantity,
-			foilQuantity: entry.foilQuantity,
-			wantQuantity: entry.wantQuantity ?? 0,
-			collectionId: entry.collectionId,
-			timeAdded: entry.timeAdded,
-			provider: entry.provider || 'MagicSQLite',
-		} as CollectionCard;
-	});
+	// Merge entry + details. A plugin provider that's been disabled (or
+	// removed) since the card was added can't be hydrated — such a phantom
+	// entry would render with no name/image, so hide it instead of showing
+	// a blank row. Real systems keep the existing graceful-degradation
+	// behavior (blank row, not hidden) since a hydration miss there is far
+	// rarer and likely transient rather than "this provider is gone."
+	return entries
+		.filter(entry => {
+			const p = entry.provider || 'MagicSQLite';
+			return !(p.startsWith('plugin-') && allDetails[entry.id] === undefined);
+		})
+		.map(entry => {
+			const detail = allDetails[entry.id] ?? {};
+			return {
+				...detail,
+				id: entry.id,
+				quantity: entry.quantity,
+				foilQuantity: entry.foilQuantity,
+				wantQuantity: entry.wantQuantity ?? 0,
+				collectionId: entry.collectionId,
+				timeAdded: entry.timeAdded,
+				provider: entry.provider || 'MagicSQLite',
+			} as CollectionCard;
+		});
 }
 
 export async function getCollectionCards(
@@ -431,6 +458,42 @@ export async function searchPokemon(filters: SearchFilters, page: number): Promi
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(buildSearchBody(filters))
 	});
+}
+
+// A plugin-sourced card's `provider` is stored/returned by the server as
+// `plugin-{name}` (see `cards_add` in collections.rs) — matched here so a
+// search result and the same card once added to a collection carry the
+// same provider string.
+function mapPluginCard(name: string, c: PluginCardWire): PluginResultCard {
+	return {
+		id: c.id,
+		name: c.name,
+		setCode: c.set_code || undefined,
+		setName: c.set_name || undefined,
+		collectorNumber: c.collector_number || undefined,
+		description: c.description ?? undefined,
+		image: c.image_url ?? undefined,
+		provider: `plugin-${name}`
+	};
+}
+
+// Plugin search — the wire contract (retrieval::systems::plugin) only knows
+// `text`/`set_code`, nothing like mana cost or rarity, so most of `filters`
+// is intentionally left unmapped.
+export async function searchPlugin(name: string, filters: SearchFilters, page: number): Promise<PluginResultCard[]> {
+	const raw: PluginCardWire[] = await fetchJSON(`/api/plugins/${encodeURIComponent(name)}/search`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			filters: {
+				text: filters.name || filters.text || null,
+				set_code: filters.setCode || null
+			},
+			skip: (page - 1) * PAGE_SIZE,
+			limit: PAGE_SIZE
+		})
+	});
+	return raw.map(c => mapPluginCard(name, c));
 }
 
 export async function getRandomMtgCard(): Promise<MtgCard> {

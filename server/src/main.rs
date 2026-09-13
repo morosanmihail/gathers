@@ -17,6 +17,7 @@ use tracing::{error, info, warn};
 
 use crate::collections::{collection_routes, public_collection_routes};
 use crate::mtg_api::mtg_routes;
+use crate::plugin_api::plugin_routes;
 use crate::pokemon_api::pokemon_routes;
 use crate::riftbound_api::riftbound_routes;
 use crate::settings_api::settings_routes;
@@ -24,6 +25,7 @@ use crate::settings_api::settings_routes;
 mod auto_download;
 mod collections;
 mod mtg_api;
+mod plugin_api;
 mod pokemon_api;
 mod riftbound_api;
 mod settings_api;
@@ -63,6 +65,10 @@ pub struct SystemInfo {
     /// All active systems, identified by NamedRetrievalSystem::name().
     /// These strings also match the `provider` field stored on collection cards.
     pub systems: Vec<String>,
+    /// Names of configured third-party plugins (see `PluginConfig`). Kept
+    /// separate from `systems` — a plugin isn't a `provider` collections can
+    /// store cards under, and doesn't support the same search filters.
+    pub plugins: Vec<String>,
     /// Systems whose databases are currently being downloaded, with progress info.
     pub downloading: HashMap<String, DownloadProgressInfo>,
     /// Whether the server is running in demo mode (settings endpoints disabled).
@@ -93,6 +99,9 @@ pub struct RetrievalState {
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
     pub pricing_enabled: bool,
     pub collections_enabled: bool,
+    /// Third-party plugin proxies, keyed by name. Set after construction —
+    /// see `PluginConfig` and the wiring in `main()`.
+    pub plugins: HashMap<String, retrieval::PluginRetrievalSystem>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +137,7 @@ impl RetrievalState {
             downloading: HashMap::new(),
             pricing_enabled,
             collections_enabled,
+            plugins: HashMap::new(),
         };
 
         for system in systems {
@@ -219,6 +229,7 @@ impl RetrievalState {
         .flatten()
         .map(|s| s.name().to_string())
         .collect();
+        let plugins: Vec<String> = self.plugins.keys().cloned().collect();
         let system = systems.first().cloned().unwrap_or_default();
         let mut downloading = HashMap::new();
         for (key, progress) in &self.downloading {
@@ -230,7 +241,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled }
+        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -261,6 +272,17 @@ impl RetrievalState {
                 StatusCode::NOT_FOUND,
                 Json(ErrorPayload {
                     error: "Pokemon system not configured".into(),
+                }),
+            )
+        })
+    }
+
+    pub fn require_plugin(&self, name: &str) -> Result<&retrieval::PluginRetrievalSystem, ApiError> {
+        self.plugins.get(name).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorPayload {
+                    error: format!("No plugin named '{name}'"),
                 }),
             )
         })
@@ -353,6 +375,20 @@ pub enum Systems {
 
 fn default_pricing_enabled() -> bool { true }
 fn default_collections_enabled() -> bool { true }
+fn default_plugin_enabled() -> bool { true }
+
+/// A third-party retrieval plugin — a separate HTTP service implementing
+/// the gathers plugin contract (see `retrieval::systems::plugin`). Any
+/// number may be configured.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
+pub struct PluginConfig {
+    /// Unique name this plugin is addressed by, e.g. `/api/plugins/{name}/...`.
+    pub name: String,
+    /// Base URL the plugin's HTTP service is reachable at.
+    pub base_url: String,
+    #[serde(default = "default_plugin_enabled")]
+    pub enabled: bool,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct ServerConfig {
@@ -380,6 +416,8 @@ pub struct ServerConfig {
     pokemon_prices_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     storage_db_path: Option<String>,
+    #[serde(default)]
+    pub plugins: Vec<PluginConfig>,
 }
 
 #[derive(Parser, Debug)]
@@ -429,6 +467,7 @@ fn api_router(api: &mut OpenApi) -> axum::Router<GathersState> {
         .nest("/api/collection", collection_routes())
         .nest("/api/share", public_collection_routes())
         .nest("/api/settings", settings_routes())
+        .nest("/api/plugins", plugin_routes())
         .api_route("/api/system", get(get_system_info))
         .route("/api.json", axum::routing::get(serve_api))
         .route("/swagger", Swagger::new("/api.json").axum_route())
@@ -500,6 +539,7 @@ async fn main() -> eyre::Result<()> {
             pokemon_db_path: Some(db_dir.join("pokemon.db").to_string_lossy().into_owned()),
             pokemon_prices_path: Some(db_dir.join("pokemon_prices.sqlite").to_string_lossy().into_owned()),
             storage_db_path: Some(db_dir.join("storage.db").to_string_lossy().into_owned()),
+            plugins: Vec::new(),
         };
         if let Err(e) = std::fs::create_dir_all(&gathers_dir) {
             eprintln!(
@@ -605,7 +645,7 @@ async fn main() -> eyre::Result<()> {
     if let Some(ref p) = pokemon_db_path { info!(path = %p, "Pokemon DB path"); }
     if let Some(ref p) = storage_db_path { info!(path = %p, "Storage DB path"); }
 
-    let retrieval = Arc::new(Mutex::new(RetrievalState::new(
+    let mut retrieval_state = RetrievalState::new(
         config.system.clone(),
         mtg_db_path.clone(),
         mtg_prices_path.clone(),
@@ -615,7 +655,27 @@ async fn main() -> eyre::Result<()> {
         config_path.clone(),
         config.pricing_enabled,
         config.collections_enabled,
-    )?));
+    )?;
+
+    retrieval_state.plugins = config
+        .plugins
+        .iter()
+        .filter(|p| p.enabled)
+        .map(|p| {
+            (
+                p.name.clone(),
+                retrieval::PluginRetrievalSystem::new(p.name.clone(), p.base_url.clone()),
+            )
+        })
+        .collect();
+    if !retrieval_state.plugins.is_empty() {
+        info!(
+            plugins = ?retrieval_state.plugins.keys().collect::<Vec<_>>(),
+            "Plugins configured"
+        );
+    }
+
+    let retrieval = Arc::new(Mutex::new(retrieval_state));
 
     if std::env::var("GATHERS_NO_AUTO_UPDATE").is_err() {
         for system in &config.system {

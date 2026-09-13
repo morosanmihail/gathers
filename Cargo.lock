@@ -654,6 +654,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dummy-plugin"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1987,6 +1998,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rusqlite",
+ "schemars",
  "scraper",
  "serde",
  "serde_json",

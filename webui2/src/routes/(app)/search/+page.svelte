@@ -5,7 +5,7 @@
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
 	import CardResultsList from '$lib/components/CardResultsList.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
@@ -142,7 +142,9 @@
 		page = p;
 		try {
 			let data: AnyCard[];
-			if (activeSystem === 'RiftboundSQLite') {
+			if (activeSystem.startsWith('plugin:')) {
+				data = await searchPlugin(activeSystem.slice('plugin:'.length), filters, p);
+			} else if (activeSystem === 'RiftboundSQLite') {
 				data = await searchRiftbound(filters, p);
 			} else if (activeSystem === 'PokemonSQLite') {
 				data = await searchPokemon(filters, p);
@@ -163,7 +165,7 @@
 			total = data.length < PAGE_SIZE ? (p - 1) * PAGE_SIZE + data.length : p * PAGE_SIZE + 1;
 			searched = true;
 
-			if (app.pricingEnabled && activeSystem !== 'RiftboundSQLite' && data.length) {
+			if (app.pricingEnabled && activeSystem !== 'RiftboundSQLite' && !activeSystem.startsWith('plugin:') && data.length) {
 				const ids = data.map(c => c.id);
 				const fetchPrices = activeSystem === 'PokemonSQLite' ? getPokemonPrices : getMtgPrices;
 				fetchPrices(ids).then(result => { prices = { ...prices, ...result }; });
@@ -213,6 +215,7 @@
 				onfilters={(f) => filters = f}
 				onsubmit={() => doSearch(1)}
 				systems={app.systems}
+				plugins={app.plugins}
 				{activeSystem}
 				onSystemChange={handleSystemChange}
 			/>

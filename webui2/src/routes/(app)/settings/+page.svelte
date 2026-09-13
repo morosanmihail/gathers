@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getSettings, saveSettings, triggerUpdate, invalidateSystemInfo } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import type { Settings, System } from '$lib/types';
+	import type { PluginConfig, Settings, System } from '$lib/types';
 
 	let config = $state<Settings | null>(null);
 	let error = $state('');
@@ -66,6 +66,27 @@
 	function setPath(key: string, val: string) {
 		if (!config) return;
 		config = { ...config, [key]: val || null };
+		saved = false;
+	}
+
+	function addPlugin() {
+		if (!config) return;
+		const plugins: PluginConfig[] = [...(config.plugins ?? []), { name: '', base_url: '', enabled: true }];
+		config = { ...config, plugins };
+		saved = false;
+	}
+
+	function updatePlugin(index: number, patch: Partial<PluginConfig>) {
+		if (!config) return;
+		const plugins = [...(config.plugins ?? [])];
+		plugins[index] = { ...plugins[index], ...patch };
+		config = { ...config, plugins };
+		saved = false;
+	}
+
+	function removePlugin(index: number) {
+		if (!config) return;
+		config = { ...config, plugins: (config.plugins ?? []).filter((_, i) => i !== index) };
 		saved = false;
 	}
 
@@ -162,6 +183,56 @@
 							{/if}
 						</div>
 					{/each}
+				</div>
+			</div>
+
+			<!-- Plugins -->
+			<div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 20px; overflow: hidden;">
+				<div style="padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text2);">
+					Plugins
+				</div>
+				<div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+					{#if (config.plugins ?? []).length === 0}
+						<div style="font-size: 0.85rem; color: var(--text2);">No plugins configured.</div>
+					{/if}
+					{#each config.plugins ?? [] as plugin, i}
+						<div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius);">
+							<div style="flex: 1; min-width: 140px;">
+								<label class="field-label" for="plugin-name-{i}">Name</label>
+								<input
+									id="plugin-name-{i}"
+									type="text"
+									class="input"
+									value={plugin.name}
+									oninput={(e) => updatePlugin(i, { name: (e.target as HTMLInputElement).value })}
+									placeholder="my-plugin"
+								/>
+							</div>
+							<div style="flex: 2; min-width: 220px;">
+								<label class="field-label" for="plugin-url-{i}">Base URL</label>
+								<input
+									id="plugin-url-{i}"
+									type="text"
+									class="input mono"
+									value={plugin.base_url}
+									oninput={(e) => updatePlugin(i, { base_url: (e.target as HTMLInputElement).value })}
+									placeholder="http://localhost:5236"
+								/>
+							</div>
+							<label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding-bottom: 8px;">
+								<input
+									type="checkbox"
+									checked={plugin.enabled}
+									onchange={() => updatePlugin(i, { enabled: !plugin.enabled })}
+									style="width: 16px; height: 16px; accent-color: var(--accent);"
+								/>
+								Enabled
+							</label>
+							<button class="btn btn-sm" onclick={() => removePlugin(i)}>Remove</button>
+						</div>
+					{/each}
+					<button class="btn btn-sm" style="align-self: flex-start;" onclick={addPlugin}>+ Add plugin</button>
+					<div style="font-size: 0.8rem; color: var(--text2);">Changes to plugins require a server restart.</div>
 				</div>
 			</div>
 

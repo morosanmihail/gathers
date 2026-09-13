@@ -137,7 +137,92 @@ async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String
     .collect()
 }
 
-fn matches_card_filters(card: &Card, filters: &APICardSearchFilters) -> bool {
+async fn clone_plugins_by_name(state: &GathersState) -> HashMap<String, retrieval::PluginRetrievalSystem> {
+    state.0.lock().await.plugins.clone()
+}
+
+/// A stored collection entry's provider is either a real system's
+/// `NamedRetrievalSystem::name()`, or `plugin-{name}` for a third-party
+/// plugin — see `cards_add`. This is the corresponding hydrated card data,
+/// used everywhere collections needs to display/filter/sort by card detail
+/// (`models::Card` can't represent a plugin card — see
+/// `retrieval::systems::plugin`'s module doc for why).
+#[allow(clippy::large_enum_variant)]
+enum AnyCollectible {
+    Known(Card),
+    Plugin(retrieval::PluginCard),
+}
+
+/// Fetches card detail for every uuid in `by_provider`, dispatching each
+/// provider group to the matching real system or, for a `plugin-{name}`
+/// provider, to that plugin. Providers that don't resolve to anything
+/// configured are silently skipped, same as the pre-plugin behavior for an
+/// unrecognized provider.
+async fn hydrate_collectibles(
+    state: &GathersState,
+    by_provider: &HashMap<String, Vec<String>>,
+) -> HashMap<String, AnyCollectible> {
+    let retrieval_systems = clone_retrieval_systems_by_name(state).await;
+    let plugins = clone_plugins_by_name(state).await;
+    let mut out = HashMap::new();
+    for (provider, ids) in by_provider {
+        if let Some(name) = provider.strip_prefix("plugin-") {
+            if let Some(plugin) = plugins.get(name)
+                && let Ok(data) = plugin.cards_by_ids(ids.clone()).await
+            {
+                out.extend(data.into_iter().map(|(k, v)| (k, AnyCollectible::Plugin(v))));
+            }
+        } else if let Some(retrieval) = retrieval_systems.get(provider)
+            && let Ok(data) = retrieval.get_cards_by_ids(ids.clone()).await
+        {
+            out.extend(data.into_iter().map(|(k, v)| (k, AnyCollectible::Known(v))));
+        }
+    }
+    out
+}
+
+fn matches_card_filters(card: &AnyCollectible, filters: &APICardSearchFilters) -> bool {
+    match card {
+        AnyCollectible::Known(card) => matches_known_card_filters(card, filters),
+        AnyCollectible::Plugin(card) => matches_plugin_card_filters(card, filters),
+    }
+}
+
+/// Plugin cards don't carry rarity/colors/mana/etc — a filter expressing one
+/// of those constraints is treated as "not applicable" rather than
+/// excluding the card. Only the fields `PluginCard` actually has
+/// (name/set_code/collector_number/text) are checked.
+fn matches_plugin_card_filters(card: &retrieval::PluginCard, filters: &APICardSearchFilters) -> bool {
+    if let Some(ref v) = filters.name
+        && !v.is_empty() && !card.name.to_lowercase().contains(&v.to_lowercase()) {
+            return false;
+        }
+    if let Some(ref v) = filters.set_code
+        && !v.is_empty() && !card.set_code.to_lowercase().contains(&v.to_lowercase()) {
+            return false;
+        }
+    if let Some(ref v) = filters.collector_number
+        && !v.is_empty() && card.collector_number != *v {
+            return false;
+        }
+    if let Some(ref v) = filters.text
+        && !v.is_empty() {
+            let needle = v.to_lowercase();
+            let in_name = card.name.to_lowercase().contains(&needle);
+            let in_description = card
+                .description
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains(&needle);
+            if !in_name && !in_description {
+                return false;
+            }
+        }
+    true
+}
+
+fn matches_known_card_filters(card: &Card, filters: &APICardSearchFilters) -> bool {
 
     let name_lower: String;
     let set_lower: String;
@@ -237,17 +322,18 @@ fn matches_card_filters(card: &Card, filters: &APICardSearchFilters) -> bool {
 /// Serializes a card's full detail (whichever provider it belongs to) into a
 /// flat JSON object matching the shape the webui2 client already expects for
 /// a merged "collection card" (see `PublicCollectionPage`).
-fn card_to_public_json(card: &Card) -> serde_json::Map<String, serde_json::Value> {
+fn card_to_public_json(card: &AnyCollectible) -> serde_json::Map<String, serde_json::Value> {
     let value = match card {
-        Card::Magic(m) => {
+        AnyCollectible::Known(Card::Magic(m)) => {
             serde_json::to_value(crate::mtg_api::mtg_api_models::APICard::from(m.clone()))
         }
-        Card::Riftbound(r) => serde_json::to_value(
+        AnyCollectible::Known(Card::Riftbound(r)) => serde_json::to_value(
             crate::riftbound_api::riftbound_api_models::APIRiftboundCard::from(r.clone()),
         ),
-        Card::Pokemon(p) => serde_json::to_value(
+        AnyCollectible::Known(Card::Pokemon(p)) => serde_json::to_value(
             crate::pokemon_api::pokemon_api_models::APIPokemonCard::from(p.clone()),
         ),
+        AnyCollectible::Plugin(p) => Ok(serde_json::Value::Object(plugin_card_to_public_json(p))),
     };
     match value {
         Ok(serde_json::Value::Object(map)) => map,
@@ -255,11 +341,55 @@ fn card_to_public_json(card: &Card) -> serde_json::Map<String, serde_json::Value
     }
 }
 
+/// `PluginCard`'s own (snake_case) `Serialize` isn't used here — the merged
+/// public collection JSON is camelCase everywhere else, and the webui2
+/// client's generic card rendering expects an `image` field, not
+/// `image_url` (matching the convention `AnyCard`/`cardImageUrl` already use
+/// for Riftbound/Pokemon).
+fn plugin_card_to_public_json(card: &retrieval::PluginCard) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    map.insert("name".to_string(), serde_json::Value::String(card.name.clone()));
+    map.insert("setCode".to_string(), serde_json::Value::String(card.set_code.clone()));
+    map.insert("setName".to_string(), serde_json::Value::String(card.set_name.clone()));
+    map.insert(
+        "collectorNumber".to_string(),
+        serde_json::Value::String(card.collector_number.clone()),
+    );
+    if let Some(ref d) = card.description {
+        map.insert("description".to_string(), serde_json::Value::String(d.clone()));
+    }
+    if let Some(ref img) = card.image_url {
+        map.insert("image".to_string(), serde_json::Value::String(img.clone()));
+    }
+    map
+}
+
 fn card_name(card: &Card) -> &str {
     match card {
         Card::Magic(m) => &m.name,
         Card::Riftbound(r) => &r.name,
         Card::Pokemon(p) => &p.name,
+    }
+}
+
+fn collectible_name(card: &AnyCollectible) -> &str {
+    match card {
+        AnyCollectible::Known(c) => card_name(c),
+        AnyCollectible::Plugin(p) => &p.name,
+    }
+}
+
+fn collectible_set(card: &AnyCollectible) -> String {
+    match card {
+        AnyCollectible::Known(c) => c.get_set(),
+        AnyCollectible::Plugin(p) => p.set_code.clone(),
+    }
+}
+
+fn collectible_collector_number(card: &AnyCollectible) -> String {
+    match card {
+        AnyCollectible::Known(c) => c.get_collector_number(),
+        AnyCollectible::Plugin(p) => p.collector_number.clone(),
     }
 }
 
@@ -288,9 +418,17 @@ fn card_rarity_order(card: &Card) -> u8 {
     }
 }
 
+fn collectible_rarity_order(card: &AnyCollectible) -> u8 {
+    match card {
+        AnyCollectible::Known(c) => card_rarity_order(c),
+        // No rarity concept for a plugin card — sort it to the bottom.
+        AnyCollectible::Plugin(_) => 5,
+    }
+}
+
 fn sort_collection_cards(
     cards: &mut Vec<&models::CollectionCard>,
-    card_data: &HashMap<String, Card>,
+    card_data: &HashMap<String, AnyCollectible>,
     sort_by: &Option<crate::collections::collections_models::APISortField>,
     sort_order: &Option<crate::collections::collections_models::APISortOrder>,
 ) {
@@ -302,43 +440,43 @@ fn sort_collection_cards(
         let card_b = card_data.get(&b.uuid);
         let ord = match sort_by.as_ref().unwrap_or(&APISortField::Name) {
             APISortField::Name => {
-                let na = card_a.map(card_name).unwrap_or("");
-                let nb = card_b.map(card_name).unwrap_or("");
+                let na = card_a.map(collectible_name).unwrap_or("");
+                let nb = card_b.map(collectible_name).unwrap_or("");
                 na.cmp(nb)
             }
             APISortField::SetCode => {
-                let sa = card_a.map(|c| c.get_set()).unwrap_or_default();
-                let sb = card_b.map(|c| c.get_set()).unwrap_or_default();
+                let sa = card_a.map(collectible_set).unwrap_or_default();
+                let sb = card_b.map(collectible_set).unwrap_or_default();
                 sa.cmp(&sb)
             }
             APISortField::CollectorNumber => {
-                let ca = card_a.map(|c| c.get_collector_number()).unwrap_or_default();
-                let cb = card_b.map(|c| c.get_collector_number()).unwrap_or_default();
+                let ca = card_a.map(collectible_collector_number).unwrap_or_default();
+                let cb = card_b.map(collectible_collector_number).unwrap_or_default();
                 ca.cmp(&cb)
             }
             APISortField::Rarity => {
-                let ra = card_a.map(card_rarity_order).unwrap_or(0);
-                let rb = card_b.map(card_rarity_order).unwrap_or(0);
+                let ra = card_a.map(collectible_rarity_order).unwrap_or(0);
+                let rb = card_b.map(collectible_rarity_order).unwrap_or(0);
                 ra.cmp(&rb)
             }
             APISortField::Artist => {
                 let aa = match card_a {
-                    Some(Card::Magic(m)) => m.artist.as_str(),
+                    Some(AnyCollectible::Known(Card::Magic(m))) => m.artist.as_str(),
                     _ => "",
                 };
                 let ab = match card_b {
-                    Some(Card::Magic(m)) => m.artist.as_str(),
+                    Some(AnyCollectible::Known(Card::Magic(m))) => m.artist.as_str(),
                     _ => "",
                 };
                 aa.cmp(ab)
             }
             APISortField::ReleaseDate => {
                 let da = match card_a {
-                    Some(Card::Pokemon(p)) => p.release_date.as_deref().unwrap_or(""),
+                    Some(AnyCollectible::Known(Card::Pokemon(p))) => p.release_date.as_deref().unwrap_or(""),
                     _ => "",
                 };
                 let db = match card_b {
-                    Some(Card::Pokemon(p)) => p.release_date.as_deref().unwrap_or(""),
+                    Some(AnyCollectible::Known(Card::Pokemon(p))) => p.release_date.as_deref().unwrap_or(""),
                     _ => "",
                 };
                 da.cmp(db)
@@ -617,6 +755,17 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             {
                 provider = name.clone();
                 break;
+            }
+        }
+        if provider.is_empty() {
+            let plugins = clone_plugins_by_name(&state).await;
+            for (name, plugin) in &plugins {
+                if let Ok(found) = plugin.cards_by_ids(card_ids.clone()).await
+                    && !found.is_empty()
+                {
+                    provider = format!("plugin-{name}");
+                    break;
+                }
             }
         }
 
@@ -1017,8 +1166,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Query(query): Query<CollectionCardsQuery>,
         Json(filters): Json<APICardSearchFilters>,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-
         let all_params = CollectionCardsParams {
             offset: 0,
             limit: i64::MAX as usize,
@@ -1049,15 +1196,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             by_provider.entry(card.provider.clone()).or_default().push(card);
         }
 
-        let mut card_data: HashMap<String, Card> = HashMap::new();
-        for (provider, cards) in &by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider) {
-                let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
-                if let Ok(data) = retrieval.get_cards_by_ids(ids).await {
-                    card_data.extend(data);
-                }
-            }
-        }
+        let ids_by_provider: HashMap<String, Vec<String>> = by_provider
+            .iter()
+            .map(|(provider, cards)| (provider.clone(), cards.iter().map(|c| c.uuid.clone()).collect()))
+            .collect();
+        let card_data = hydrate_collectibles(&state, &ids_by_provider).await;
 
         let mut matched: Vec<&models::CollectionCard> = by_provider
             .values()
@@ -1098,8 +1241,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Query(query): Query<CollectionCardsQuery>,
         Json(filters): Json<APICardSearchFilters>,
     ) -> Result<Json<usize>, ApiError> {
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-
         let all_params = CollectionCardsParams {
             offset: 0,
             limit: i64::MAX as usize,
@@ -1130,15 +1271,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             by_provider.entry(card.provider.clone()).or_default().push(card);
         }
 
-        let mut card_data: HashMap<String, Card> = HashMap::new();
-        for (provider, cards) in &by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider) {
-                let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
-                if let Ok(data) = retrieval.get_cards_by_ids(ids).await {
-                    card_data.extend(data);
-                }
-            }
-        }
+        let ids_by_provider: HashMap<String, Vec<String>> = by_provider
+            .iter()
+            .map(|(provider, cards)| (provider.clone(), cards.iter().map(|c| c.uuid.clone()).collect()))
+            .collect();
+        let card_data = hydrate_collectibles(&state, &ids_by_provider).await;
 
         let count = by_provider
             .values()
@@ -1298,8 +1435,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
     ) -> Result<Json<CollectionAllPurchaseHistoryResponse>, ApiError> {
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-
         let entries = state
             .1
             .lock()
@@ -1324,14 +1459,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             ids.dedup();
         }
 
-        let mut card_info: HashMap<String, models::Card> = HashMap::new();
-        for (provider, uuids) in &uuids_by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider)
-                && let Ok(data) = retrieval.get_cards_by_ids(uuids.clone()).await
-            {
-                card_info.extend(data);
-            }
-        }
+        let card_info = hydrate_collectibles(&state, &uuids_by_provider).await;
 
         let result = entries
             .into_iter()
@@ -1339,8 +1467,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 let card = card_info.get(&e.card_uuid);
                 CollectionPurchaseHistoryEntry {
                     id: e.id,
-                    card_name: card.map(|c| card_name(c).to_string()),
-                    set_code: card.map(|c| c.get_set()),
+                    card_name: card.map(|c| collectible_name(c).to_string()),
+                    set_code: card.map(collectible_set),
                     card_uuid: e.card_uuid,
                     quantity: e.quantity,
                     foil_quantity: e.foil_quantity,
@@ -1474,24 +1602,21 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                 )
             })?;
 
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-
         let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
         for entry in &entries {
             ids_by_provider.entry(entry.provider.clone()).or_default().push(entry.uuid.clone());
         }
 
-        let mut card_data: HashMap<String, Card> = HashMap::new();
-        for (provider, ids) in &ids_by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider)
-                && let Ok(data) = retrieval.get_cards_by_ids(ids.clone()).await
-            {
-                card_data.extend(data);
-            }
-        }
+        let card_data = hydrate_collectibles(&state, &ids_by_provider).await;
 
+        // A plugin provider that's since been disabled/removed can't be
+        // hydrated — such a card shouldn't show up on a shared page any
+        // more than in the owner's own collection view.
         let cards = entries
             .into_iter()
+            .filter(|entry| {
+                !entry.provider.starts_with("plugin-") || card_data.contains_key(&entry.uuid)
+            })
             .map(|entry| {
                 let mut obj = card_data
                     .get(&entry.uuid)
