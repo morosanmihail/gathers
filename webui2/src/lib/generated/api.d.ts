@@ -1669,9 +1669,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        post: {
+        get: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -1690,6 +1688,8 @@ export interface paths {
                 };
             };
         };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1853,6 +1853,11 @@ export interface components {
             /** Format: int32 */
             delta: number;
             id: string;
+            /**
+             * @description See `CardToAdd::provider`.
+             * @default null
+             */
+            provider: string | null;
         };
         BulkPricesQuery: {
             /** @default [] */
@@ -1876,6 +1881,16 @@ export interface components {
             /** Format: int32 */
             foilQuantity: number;
             id: string;
+            /**
+             * @description Which system/plugin this card came from, e.g. `RiftboundSQLite` or
+             *     `plugin-dummy-books`. Optional so older callers keep working: when
+             *     omitted, the server falls back to probing every configured system
+             *     and plugin for the id — which is only safe when ids are unique
+             *     across all of them. A client that knows the provider (the search UI
+             *     always does, via whichever tab is active) should always send it.
+             * @default null
+             */
+            provider: string | null;
             /**
              * Format: double
              * @default null

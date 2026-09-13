@@ -5,7 +5,7 @@
 	import SearchPanel from '$lib/components/SearchPanel.svelte';
 	import CardResultsList from '$lib/components/CardResultsList.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, providerFromActiveSystem, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
@@ -17,6 +17,7 @@
 	let page = $state(1);
 	let total = $state(0);
 	let searched = $state(false);
+	let searchError = $state('');
 	let activeSystem = $state('');
 	let appliedQS = $state('');
 
@@ -139,6 +140,7 @@
 		appliedQS = qIdx >= 0 ? url.slice(qIdx) : '';
 		replaceState(url, {});
 		loading = true;
+		searchError = '';
 		page = p;
 		try {
 			let data: AnyCard[];
@@ -172,6 +174,9 @@
 			}
 		} catch (e) {
 			console.error(e);
+			searchError = e instanceof Error ? e.message : String(e);
+			results = [];
+			searched = true;
 		} finally {
 			loading = false;
 		}
@@ -189,7 +194,7 @@
 		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id, 1, 0, purchasePrice)
+				addCardToCollection(addCollection, addTarget!.id, 1, 0, purchasePrice, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added "${addTarget.name}" to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);
@@ -229,6 +234,12 @@
 				</div>
 			{/if}
 
+			{#if searchError}
+				<div style="background: color-mix(in srgb, var(--danger) 15%, transparent); border: 1px solid var(--danger); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px; color: var(--danger);">
+					Search failed: {searchError}
+				</div>
+			{/if}
+
 			{#if loading}
 				<div class="loading-row"><div class="spinner"></div> Searching…</div>
 			{:else if !searched}
@@ -236,12 +247,12 @@
 					<div class="empty-state-icon">🔍</div>
 					<div class="empty-state-text">Enter search terms and press Search</div>
 				</div>
-			{:else if results.length === 0}
+			{:else if results.length === 0 && !searchError}
 				<div class="empty-state" style="padding: 80px 20px;">
 					<div class="empty-state-icon">📭</div>
 					<div class="empty-state-text">No cards found. Try adjusting your search.</div>
 				</div>
-			{:else}
+			{:else if results.length > 0}
 				<div style="display:flex;align-items:center;justify-content:space-between;padding: 12px 20px 4px;">
 					<span style="font-size:0.8rem;color:var(--text2);">{results.length} result{results.length !== 1 ? 's' : ''}</span>
 				</div>

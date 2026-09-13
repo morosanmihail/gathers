@@ -357,20 +357,31 @@ export async function searchCollectionCount(
 	});
 }
 
-type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice'>;
+type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' | 'provider'>;
+
+// A search result's `activeSystem` tab value is either a real system's
+// provider name as-is (e.g. "RiftboundSQLite"), or `plugin:{name}` — the
+// colon is just this UI's internal sentinel for "show the plugin filter
+// fields," and needs translating to the `plugin-{name}` (dash) convention
+// the server actually stores/expects as a provider string.
+export function providerFromActiveSystem(activeSystem: string): string {
+	return activeSystem.startsWith('plugin:') ? `plugin-${activeSystem.slice('plugin:'.length)}` : activeSystem;
+}
 
 export async function addCardToCollection(
 	collection: string,
 	cardId: string,
 	quantity = 1,
 	foilQuantity = 0,
-	purchasePrice?: number | null
+	purchasePrice?: number | null,
+	provider?: string
 ): Promise<void> {
 	const body: CardToAdd = {
 		id: cardId,
 		quantity,
 		foilQuantity,
-		...(purchasePrice != null ? { purchasePrice } : {})
+		...(purchasePrice != null ? { purchasePrice } : {}),
+		...(provider ? { provider } : {})
 	};
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/add`, {
 		method: 'POST',
@@ -389,11 +400,11 @@ export async function deleteCardFromCollection(collection: string, cardId: strin
 	invalidateCollectionStats(collection);
 }
 
-export async function adjustWantQuantity(collection: string, cardId: string, delta: number): Promise<void> {
+export async function adjustWantQuantity(collection: string, cardId: string, delta: number, provider?: string): Promise<void> {
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/want`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id: cardId, delta })
+		body: JSON.stringify({ id: cardId, delta, ...(provider ? { provider } : {}) })
 	});
 	invalidateCollectionStats(collection);
 }

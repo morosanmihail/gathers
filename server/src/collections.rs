@@ -141,6 +141,67 @@ async fn clone_plugins_by_name(state: &GathersState) -> HashMap<String, retrieva
     state.0.lock().await.plugins.clone()
 }
 
+/// Checks whether `provider` (a real system's name, or `plugin-{name}`)
+/// actually has `card_id`. Used both to trust-but-verify a client-supplied
+/// provider and, when none is given, as part of the probe-everything
+/// fallback below.
+async fn provider_has_card(
+    systems: &HashMap<String, RetrievalSystem>,
+    plugins: &HashMap<String, retrieval::PluginRetrievalSystem>,
+    provider: &str,
+    card_id: &str,
+) -> bool {
+    let ids = vec![card_id.to_string()];
+    if let Some(name) = provider.strip_prefix("plugin-") {
+        let Some(plugin) = plugins.get(name) else {
+            return false;
+        };
+        matches!(plugin.cards_by_ids(ids).await, Ok(found) if !found.is_empty())
+    } else {
+        let Some(system) = systems.get(provider) else {
+            return false;
+        };
+        matches!(system.get_cards_by_ids(ids).await, Ok(found) if !found.is_empty())
+    }
+}
+
+/// Determines which configured system or plugin owns `card_id`.
+///
+/// A client that knows the provider (the search UI always does — it's
+/// whichever tab is active) should send it via `explicit`; it's verified
+/// against that provider specifically rather than trusted blindly. Without
+/// one — an older client, or a caller that genuinely doesn't know — this
+/// falls back to probing every configured system and plugin in turn and
+/// taking the first match, which is only correct when ids are unique
+/// across all of them (two plugins both minting an id like `book-1` would
+/// otherwise let the wrong one "win" the card).
+async fn resolve_provider(state: &GathersState, card_id: &str, explicit: Option<&str>) -> String {
+    let systems = clone_retrieval_systems_by_name(state).await;
+    let plugins = clone_plugins_by_name(state).await;
+
+    if let Some(explicit) = explicit.filter(|p| !p.is_empty())
+        && provider_has_card(&systems, &plugins, explicit, card_id).await
+    {
+        return explicit.to_string();
+    }
+
+    for (name, system) in &systems {
+        if let Ok(found) = system.get_cards_by_ids(vec![card_id.to_string()]).await
+            && !found.is_empty()
+        {
+            return name.clone();
+        }
+    }
+    for (name, plugin) in &plugins {
+        if let Ok(found) = plugin.cards_by_ids(vec![card_id.to_string()]).await
+            && !found.is_empty()
+        {
+            return format!("plugin-{name}");
+        }
+    }
+    String::new()
+}
+
 /// A stored collection entry's provider is either a real system's
 /// `NamedRetrievalSystem::name()`, or `plugin-{name}` for a third-party
 /// plugin — see `cards_add`. This is the corresponding hydrated card data,
@@ -745,29 +806,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<CardToAdd>,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
-        // Identify the provider by finding which configured system has this card.
-        let systems = clone_retrieval_systems_by_name(&state).await;
-        let card_ids = vec![input.id.clone()];
-        let mut provider = String::new();
-        for (name, system) in &systems {
-            if let Ok(found) = system.get_cards_by_ids(card_ids.clone()).await
-                && !found.is_empty()
-            {
-                provider = name.clone();
-                break;
-            }
-        }
-        if provider.is_empty() {
-            let plugins = clone_plugins_by_name(&state).await;
-            for (name, plugin) in &plugins {
-                if let Ok(found) = plugin.cards_by_ids(card_ids.clone()).await
-                    && !found.is_empty()
-                {
-                    provider = format!("plugin-{name}");
-                    break;
-                }
-            }
-        }
+        let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
 
         let storage = &mut state.1.lock().await.storage;
 
@@ -855,20 +894,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<AdjustWantQuantityRequest>,
     ) -> Result<Json<CollectionCard>, ApiError> {
-        // Identify the provider by finding which configured system has this card.
         // Only used if the card doesn't already have a row in the collection;
         // an existing row keeps its own provider regardless.
-        let systems = clone_retrieval_systems_by_name(&state).await;
-        let card_ids = vec![input.id.clone()];
-        let mut provider = String::new();
-        for (name, system) in &systems {
-            if let Ok(found) = system.get_cards_by_ids(card_ids.clone()).await
-                && !found.is_empty()
-            {
-                provider = name.clone();
-                break;
-            }
-        }
+        let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
 
         let storage = &mut state.1.lock().await.storage;
 

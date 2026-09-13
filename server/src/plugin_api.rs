@@ -115,5 +115,5 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
         .api_route("/", get(list_plugins))
         .api_route("/{name}/search", post(search))
         .api_route("/{name}/cards/by-ids", post(cards_by_ids))
-        .api_route("/{name}/update", post(update))
+        .api_route("/{name}/update", get(update))
 }

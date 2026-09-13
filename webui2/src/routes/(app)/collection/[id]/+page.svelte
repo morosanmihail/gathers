@@ -126,7 +126,7 @@
 	async function adjustCardQty(card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) {
 		try {
 			if (delta > 0) {
-				await addCardToCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice);
+				await addCardToCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice, card.provider);
 			} else {
 				await deleteCardFromCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0);
 			}
@@ -146,7 +146,7 @@
 
 	async function handleWantChange(card: CollectionCard, delta: number) {
 		try {
-			await adjustWantQuantity(collectionId, card.id, delta);
+			await adjustWantQuantity(collectionId, card.id, delta, card.provider);
 			const wantQuantity = Math.max(0, (card.wantQuantity ?? 0) + delta);
 			cards = cards.map(c => c.id === card.id ? { ...c, wantQuantity } : c)
 				.filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);

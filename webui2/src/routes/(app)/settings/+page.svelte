@@ -90,8 +90,30 @@
 		saved = false;
 	}
 
+	// Two plugins sharing a name would collide on `/api/plugins/{name}/...`
+	// and on the `plugin-{name}` provider string used when a card is added
+	// to a collection — block saving a config with duplicates from here,
+	// rather than let the web UI itself create the ambiguity. (A duplicate
+	// hand-edited directly into server.toml is a different case — the
+	// server logs a warning and keeps only the last one.)
+	const duplicatePluginNames = $derived.by(() => {
+		const seen = new Set<string>();
+		const dupes = new Set<string>();
+		for (const p of config?.plugins ?? []) {
+			const name = p.name.trim();
+			if (!name) continue;
+			if (seen.has(name)) dupes.add(name);
+			seen.add(name);
+		}
+		return dupes;
+	});
+
 	async function handleSave() {
 		if (!config) return;
+		if (duplicatePluginNames.size > 0) {
+			error = `Duplicate plugin name(s): ${[...duplicatePluginNames].join(', ')}. Names must be unique.`;
+			return;
+		}
 		saving = true; saved = false; error = '';
 		try {
 			config = await saveSettings(config);
@@ -207,6 +229,9 @@
 									oninput={(e) => updatePlugin(i, { name: (e.target as HTMLInputElement).value })}
 									placeholder="my-plugin"
 								/>
+								{#if duplicatePluginNames.has(plugin.name.trim())}
+									<div style="font-size: 0.75rem; color: var(--danger); margin-top: 4px;">Duplicate name</div>
+								{/if}
 							</div>
 							<div style="flex: 2; min-width: 220px;">
 								<label class="field-label" for="plugin-url-{i}">Base URL</label>
@@ -228,6 +253,22 @@
 								/>
 								Enabled
 							</label>
+							{#if plugin.name && plugin.enabled}
+								{@const key = 'plugin:' + plugin.name}
+								{@const st = updateStates[key]}
+								<button
+									class="btn btn-sm"
+									disabled={st?.running}
+									onclick={() => runUpdate(key, `/api/plugins/${encodeURIComponent(plugin.name)}/update`)}
+								>
+									{st?.running ? '…' : 'Update'}
+								</button>
+								{#if st && !st.running}
+									<span style="font-size: 0.75rem; color: {st.ok ? 'var(--success)' : 'var(--danger)'};">
+										{st.msg}
+									</span>
+								{/if}
+							{/if}
 							<button class="btn btn-sm" onclick={() => removePlugin(i)}>Remove</button>
 						</div>
 					{/each}

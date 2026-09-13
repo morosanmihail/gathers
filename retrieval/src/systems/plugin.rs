@@ -95,10 +95,20 @@ pub struct PluginRetrievalSystem {
     client: reqwest::Client,
 }
 
+/// Deliberately shorter than the server's global 10s request timeout
+/// (`server/src/main.rs`'s `.timeout(Duration::from_secs(10))` layer, which
+/// wraps every route including `/api/plugins/{name}/search`). If this were
+/// longer, a slow or dead plugin would get its call silently cut by that
+/// outer layer first — the caller would just see an opaque 408 with no
+/// indication which plugin failed or why. Timing out here instead means the
+/// failure comes back as a real `reqwest` error, which `plugin_api.rs`
+/// turns into a specific "Plugin search failed: ..." message.
+const PLUGIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+
 impl PluginRetrievalSystem {
     pub fn new(name: String, base_url: String) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(PLUGIN_REQUEST_TIMEOUT)
             .build()
             .unwrap_or_default();
         Self {

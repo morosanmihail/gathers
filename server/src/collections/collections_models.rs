@@ -174,12 +174,23 @@ pub struct CardToAdd {
     pub foil_quantity: i32,
     #[serde(rename = "purchasePrice", default)]
     pub purchase_price: Option<f64>,
+    /// Which system/plugin this card came from, e.g. `RiftboundSQLite` or
+    /// `plugin-dummy-books`. Optional so older callers keep working: when
+    /// omitted, the server falls back to probing every configured system
+    /// and plugin for the id — which is only safe when ids are unique
+    /// across all of them. A client that knows the provider (the search UI
+    /// always does, via whichever tab is active) should always send it.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct AdjustWantQuantityRequest {
     pub id: String,
     pub delta: i32,
+    /// See `CardToAdd::provider`.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema, PartialEq)]

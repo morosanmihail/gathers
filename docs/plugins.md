@@ -85,7 +85,8 @@ enabled = true
 
 - `name` is how the plugin is addressed everywhere: `/api/plugins/{name}/...`, and the provider string `plugin-{name}` used when one of its cards is stored in a collection.
 - Config changes take effect on server restart, same as `system`/`auto_download_*`.
-- You can also add/remove `[[plugins]]` entries from the web UI's Settings page (under the Systems panel) instead of hand-editing the file.
+- You can also add/remove `[[plugins]]` entries from the web UI's Settings page (under the Systems panel) instead of hand-editing the file. That page also has an **Update** button per enabled plugin, which calls your `/gathers-plugin/v1/update` — so implement it, even as a no-op, rather than leaving it unreachable.
+- Two plugins can't share a `name`: the Settings page blocks saving a config with a duplicate, and the server also logs a warning (keeping only the last one) if it finds duplicates in a hand-edited `server.toml`.
 
 ## What plugins get for free
 

@@ -7,6 +7,7 @@
 
 	let selectedSystems = $state<string[]>([]);
 	let card = $state<AnyCard | null>(null);
+	let cardProvider = $state('');
 	let loading = $state(false);
 	let error = $state('');
 	let detailCard = $state<AnyCard | null>(null);
@@ -49,6 +50,7 @@
 				: pick === 'PokemonSQLite'
 				? await getRandomPokemonCard()
 				: await getRandomMtgCard();
+			cardProvider = pick;
 		} catch (e) {
 			error = String(e);
 			card = null;
@@ -66,7 +68,7 @@
 		if (!addTarget || !addCollection) return;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id, 1, 0, null)
+				addCardToCollection(addCollection, addTarget!.id, 1, 0, null, cardProvider)
 			);
 			toast = `Added "${addTarget.name}" to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);

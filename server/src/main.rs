@@ -657,6 +657,14 @@ async fn main() -> eyre::Result<()> {
         config.collections_enabled,
     )?;
 
+    {
+        let mut seen = std::collections::HashSet::new();
+        for p in config.plugins.iter().filter(|p| p.enabled) {
+            if !seen.insert(p.name.as_str()) {
+                warn!(name = %p.name, "Duplicate plugin name in config — only the last one will be used");
+            }
+        }
+    }
     retrieval_state.plugins = config
         .plugins
         .iter()
