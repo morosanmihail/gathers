@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -34,11 +35,10 @@ pub fn last_update_for(data_dir: &Path, stem: &str) -> Option<SystemTime> {
 
 fn write_last_update_for(data_dir: &Path, stem: &str) -> eyre::Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    fs::write(
-        data_dir.join(format!("{stem}.last_update")),
-        now.to_string(),
-    )?;
-    Ok(())
+    publish_sidecar(
+        &data_dir.join(format!("{stem}.last_update")),
+        &now.to_string(),
+    )
 }
 
 fn is_fresh(data_dir: &Path, stem: &str, interval: Duration) -> bool {
@@ -163,7 +163,7 @@ pub async fn download_bz2_verified(
         p.lock().await.phase = "decompressing".to_string();
     }
     decompress_bz2(&bz2_path, target)?;
-    fs::write(&sidecar_path, &downloaded_crc)?;
+    publish_sidecar(&sidecar_path, &downloaded_crc)?;
     info!(file = bz2_filename, crc = %downloaded_crc, "Downloaded, verified, and decompressed");
     Ok(())
 }
@@ -183,6 +183,24 @@ pub fn calculate_sha256(path: &Path) -> eyre::Result<String> {
 /// process/uid reads the shared volume.
 fn loosen_permissions(path: &Path) -> eyre::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+    Ok(())
+}
+
+/// Writes a sidecar checksum via the same staging-tempfile-then-`rename`
+/// pattern as the `.bz2` it describes, instead of overwriting the existing
+/// sidecar in place. An in-place write needs write permission on whatever
+/// inode is already there — if that file is left over from a previous
+/// owner/uid, the write fails, the `.bz2` (which *did* get replaced, since
+/// `rename` only needs permission on the containing directory) ends up
+/// paired with a stale, mismatched sidecar, and nothing notices. Renaming a
+/// fresh file over it sidesteps the old inode's permissions entirely, same
+/// as the `.bz2` publish already does.
+fn publish_sidecar(path: &Path, crc: &str) -> eyre::Result<()> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut staging = tempfile::NamedTempFile::new_in(parent)?;
+    staging.write_all(crc.as_bytes())?;
+    staging.persist(path).map_err(|e| e.error)?;
+    loosen_permissions(path)?;
     Ok(())
 }
 
@@ -246,7 +264,7 @@ pub async fn cache_upstream_bz2(
     std::io::copy(&mut fs::File::open(&bz2_path)?, &mut staging)?;
     staging.persist(&bz2_target).map_err(|e| e.error)?;
     loosen_permissions(&bz2_target)?;
-    fs::write(&sidecar, &downloaded_crc)?;
+    publish_sidecar(&sidecar, &downloaded_crc)?;
     info!(stem, crc = %downloaded_crc, "Mirror cached upstream bz2");
     Ok(())
 }
@@ -263,7 +281,7 @@ pub fn write_with_sha256(bz2_path: &Path, data_dir: &Path, stem: &str) -> eyre::
     std::io::copy(&mut fs::File::open(bz2_path)?, &mut staging)?;
     staging.persist(&bz2_target).map_err(|e| e.error)?;
     loosen_permissions(&bz2_target)?;
-    fs::write(&sidecar, &crc)?;
+    publish_sidecar(&sidecar, &crc)?;
     info!(stem, crc = %crc, "Mirror cached compressed snapshot");
     Ok(())
 }
