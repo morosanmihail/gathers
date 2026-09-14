@@ -1,0 +1,15 @@
+[package]
+name = "dummy-plugin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "dummy-plugin"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

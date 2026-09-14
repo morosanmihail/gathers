@@ -1,5 +1,5 @@
 [workspace]
-members = ["models", "retrieval", "gathers", "server", "persistence", "benches", "e2e", "mirror"]
+members = ["models", "retrieval", "gathers", "server", "persistence", "benches", "e2e", "mirror", "dummy-plugin"]
 resolver = "2"
 
 [workspace.package]

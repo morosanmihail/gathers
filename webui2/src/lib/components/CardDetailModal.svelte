@@ -26,6 +26,13 @@
 	const isMtg = $derived('colorIdentity' in card);
 	const isRift = $derived('domains' in card);
 	const isPoke = $derived('energyTypes' in card && !isMtg);
+	// A plugin card (or anything else not shaped like one of the three known
+	// systems) has none of the fields those branches key on — show just the
+	// name and image rather than a "Set"/"Collector #" row that's either
+	// blank or, worse, shows a value the fallback happened to duck-type its
+	// way into (e.g. a plugin's own `collectorNumber` meaning isn't a real
+	// collector number — see docs/plugins.md).
+	const isKnownSystem = $derived(isMtg || isRift || isPoke);
 
 	const setName = $derived(
 		mtg.setName ||
@@ -93,15 +100,18 @@
 			</div>
 
 			<div class="card-detail-info">
-				<!-- Common meta -->
-				<div class="card-detail-row">
-					<span class="card-detail-label">Set</span>
-					<span>{setName || '—'} {setDisplayCode ? `(${setDisplayCode.toUpperCase()})` : ''}</span>
-				</div>
-				<div class="card-detail-row">
-					<span class="card-detail-label">Collector #</span>
-					<span>{card.collectorNumber ?? '—'}</span>
-				</div>
+				<!-- Common meta — only meaningful for a recognized system; a
+				     plugin card's fallback is just the name (see isKnownSystem). -->
+				{#if isKnownSystem}
+					<div class="card-detail-row">
+						<span class="card-detail-label">Set</span>
+						<span>{setName || '—'} {setDisplayCode ? `(${setDisplayCode.toUpperCase()})` : ''}</span>
+					</div>
+					<div class="card-detail-row">
+						<span class="card-detail-label">Collector #</span>
+						<span>{card.collectorNumber ?? '—'}</span>
+					</div>
+				{/if}
 				{#if card.rarity}
 					<div class="card-detail-row">
 						<span class="card-detail-label">Rarity</span>

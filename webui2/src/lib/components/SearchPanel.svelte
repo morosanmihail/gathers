@@ -9,6 +9,10 @@
 		onfilters: (f: SearchFilters) => void;
 		onsubmit: () => void;
 		systems?: string[];
+		/** Third-party plugin names. Rendered as extra chips, prefixed `plugin:` in
+		 *  `activeSystem` so they can't collide with a real system name and so the
+		 *  MTG/Riftbound/Pokemon-specific field blocks below stay hidden for them. */
+		plugins?: string[];
 		activeSystem?: string;
 		onSystemChange?: (s: string) => void;
 		compact?: boolean;
@@ -19,6 +23,7 @@
 		onfilters,
 		onsubmit,
 		systems = [],
+		plugins = [],
 		activeSystem = '',
 		onSystemChange,
 		compact = false
@@ -40,6 +45,7 @@
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 
+	const isPlugin = $derived(activeSystem?.startsWith('plugin:') ?? false);
 	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
 	const showRift = $derived(activeSystem?.includes('Riftbound') ?? false);
 	const showPoke = $derived(activeSystem?.includes('Pokemon') ?? false);
@@ -72,13 +78,21 @@
 	{#if !compact}<h2>Search</h2>{/if}
 
 	<!-- System selector -->
-	{#if systems.length > 1}
+	{#if systems.length > 1 || plugins.length > 0}
 		<div class="checkbox-group">
 			{#each systems as sys}
 				<label class="chip-checkbox" class:checked={activeSystem === sys}>
 					<input type="radio" name="system" value={sys} checked={activeSystem === sys}
 						onchange={() => onSystemChange?.(sys)} />
 					{sys.replace('SQLite','').replace('Sql','')}
+				</label>
+			{/each}
+			{#each plugins as name}
+				{@const value = `plugin:${name}`}
+				<label class="chip-checkbox" class:checked={activeSystem === value}>
+					<input type="radio" name="system" value={value} checked={activeSystem === value}
+						onchange={() => onSystemChange?.(value)} />
+					{name}
 				</label>
 			{/each}
 		</div>
@@ -119,9 +133,9 @@
 				style="max-width: 130px" />
 		</div>
 
-		<!-- Rules text — all systems (Pokemon: matches card description) -->
+		<!-- Rules text — all systems (Pokemon: card description, plugins: freeform text) -->
 		<div class="field">
-			<input class="input" placeholder={showPoke ? 'Card description…' : 'Rules text…'} value={filters.text}
+			<input class="input" placeholder={isPlugin ? 'Search text…' : showPoke ? 'Card description…' : 'Rules text…'} value={filters.text}
 				oninput={(e) => set('text', (e.target as HTMLInputElement).value)} />
 		</div>
 

@@ -1,3 +1,4 @@
+pub mod plugin;
 pub mod pokemon;
 pub mod riftsqlite;
 pub mod scryfall;

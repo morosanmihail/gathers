@@ -7,6 +7,10 @@ use std::collections::HashMap;
 use enum_dispatch::enum_dispatch;
 use models::{CardID, CardPrices, CollectorNumber, SetCode};
 pub use http::DownloadProgress;
+pub use systems::plugin::{
+    PluginCard, PluginInfo, PluginRetrievalSystem, PluginSearchFilters, PluginSearchRequest,
+    PluginUpdateResponse,
+};
 pub use systems::pokemon::{PokemonSQLiteRetrievalSystem, download_pokemon_prices};
 pub use systems::riftsqlite::RiftboundSQLiteRetrievalSystem;
 pub use systems::scryfall::ScryfallRetrievalSystem;

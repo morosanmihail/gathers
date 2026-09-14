@@ -17,8 +17,26 @@ export type CardIdentifiers = components['schemas']['APICardIdentifiers'];
 export type MtgCard = components['schemas']['APICard'];
 export type RiftboundCard = components['schemas']['APIRiftboundCard'];
 export type PokemonCard = components['schemas']['APIPokemonCard'];
+export type PluginCardWire = components['schemas']['PluginCard'];
 
-export type AnyCard = MtgCard | RiftboundCard | PokemonCard;
+/** Search-result shape for a third-party plugin card (see retrieval::systems::plugin
+ *  and the `dummy-plugin` example crate). Not addable to a collection — collections
+ *  are built around the closed Magic/Riftbound/Pokemon `Card` enum on the server,
+ *  so a plugin-sourced card has nowhere to be stored yet. */
+export type PluginResultCard = {
+	id: string;
+	name: string;
+	setCode?: string;
+	setName?: string;
+	collectorNumber?: string;
+	description?: string;
+	image?: string;
+	rarity?: string;
+	/** Name of the plugin this card came from — distinguishes it from a real system. */
+	provider: string;
+};
+
+export type AnyCard = MtgCard | RiftboundCard | PokemonCard | PluginResultCard;
 
 // Raw response from /api/collection/cards/{id}/list — no card details
 export type CollectionEntry = components['schemas']['CollectionCard'];
@@ -127,6 +145,7 @@ export function bestPrice(cardPrices: CardPrices): string | null {
 
 export type ValueBreakdown = components['schemas']['CollectionValueBreakdown'];
 export type Settings = components['schemas']['ServerConfig'];
+export type PluginConfig = components['schemas']['PluginConfig'];
 export type System = components['schemas']['Systems'];
 
 export function defaultFilters(): SearchFilters {
@@ -190,9 +209,9 @@ export const legalityFormats: { value: string; label: string }[] = [
 // Known mtgjson `borderColor` values.
 export const borderColors = ['black', 'white', 'borderless', 'silver', 'gold', 'yellow'];
 
-export function cardImageUrl(card: CollectionCard | MtgCard | RiftboundCard | PokemonCard): string {
-	// Riftbound and Pokemon store image URL directly
-	const directImage = (card as CollectionCard | RiftboundCard | PokemonCard).image;
+export function cardImageUrl(card: CollectionCard | MtgCard | RiftboundCard | PokemonCard | PluginResultCard): string {
+	// Riftbound, Pokemon, and plugin cards store image URL directly
+	const directImage = (card as CollectionCard | RiftboundCard | PokemonCard | PluginResultCard).image;
 	if (directImage) return directImage;
 	// MTG cards use Scryfall identifiers
 	const ids = (card as CollectionCard).cardIdentifiers ?? (card as MtgCard).cardIdentifiers;

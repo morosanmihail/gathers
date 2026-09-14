@@ -2,7 +2,7 @@
 	import SearchPanel from './SearchPanel.svelte';
 	import CardResultsList from './CardResultsList.svelte';
 	import CardDetailModal from './CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, addCardToCollection, adjustWantQuantity, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustWantQuantity, providerFromActiveSystem, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
@@ -21,6 +21,7 @@
 	let page = $state(1);
 	let total = $state(0);
 	let searched = $state(false);
+	let searchError = $state('');
 	let toast = $state('');
 	let addPrice = $state('');
 	let activeSystem = $state('');
@@ -42,10 +43,13 @@
 
 	async function doSearch(p = 1) {
 		loading = true;
+		searchError = '';
 		page = p;
 		try {
 			let data: AnyCard[];
-			if (activeSystem === 'RiftboundSQLite') {
+			if (activeSystem.startsWith('plugin:')) {
+				data = await searchPlugin(activeSystem.slice('plugin:'.length), filters, p);
+			} else if (activeSystem === 'RiftboundSQLite') {
 				data = await searchRiftbound(filters, p);
 			} else if (activeSystem === 'PokemonSQLite') {
 				data = await searchPokemon(filters, p);
@@ -63,13 +67,18 @@
 			total = data.length < PAGE_SIZE ? (p - 1) * PAGE_SIZE + data.length : p * PAGE_SIZE + 1;
 			searched = true;
 
-			if (app.pricingEnabled) {
+			if (app.pricingEnabled && !activeSystem.startsWith('plugin:')) {
 				const ids = data.map(c => c.id);
 				const fetch = activeSystem === 'PokemonSQLite' ? getPokemonPrices
 					: activeSystem === 'RiftboundSQLite' ? null
 					: getMtgPrices;
 				fetch?.(ids).then(result => { prices = { ...prices, ...result }; });
 			}
+		} catch (e) {
+			console.error(e);
+			searchError = e instanceof Error ? e.message : String(e);
+			results = [];
+			searched = true;
 		} finally {
 			loading = false;
 		}
@@ -81,7 +90,7 @@
 		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice)
+				addCardToCollection(collection, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added ${card.name}${foil ? ' (foil)' : ''}`;
 			setTimeout(() => toast = '', 2000);
@@ -95,7 +104,7 @@
 	async function addWanted(card: AnyCard | CollectionCard) {
 		try {
 			await app.withOp(`Adding ${card.name} to wantlist`, () =>
-				adjustWantQuantity(collection, card.id, 1)
+				adjustWantQuantity(collection, card.id, 1, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added ${card.name} (wanted)`;
 			setTimeout(() => toast = '', 2000);
@@ -166,6 +175,7 @@
 				onfilters={(f) => filters = f}
 				onsubmit={() => doSearch(1)}
 				systems={app.systems}
+				plugins={app.plugins}
 				{activeSystem}
 				onSystemChange={handleSystemChange}
 				compact
@@ -176,6 +186,12 @@
 					<div class="toast success" style="margin-bottom: 12px;">{toast}</div>
 				{/if}
 
+				{#if searchError}
+					<div style="background: color-mix(in srgb, var(--danger) 15%, transparent); border: 1px solid var(--danger); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; color: var(--danger);">
+						Search failed: {searchError}
+					</div>
+				{/if}
+
 				{#if loading}
 					<div class="loading-row"><div class="spinner"></div> Searching…</div>
 				{:else if !searched}
@@ -183,12 +199,12 @@
 						<div class="empty-state-icon">🔍</div>
 						<div class="empty-state-text">Enter search terms and press Search</div>
 					</div>
-				{:else if results.length === 0}
+				{:else if results.length === 0 && !searchError}
 					<div class="empty-state">
 						<div class="empty-state-icon">📭</div>
 						<div class="empty-state-text">No cards found</div>
 					</div>
-				{:else}
+				{:else if results.length > 0}
 					<CardResultsList
 						cards={results}
 						{viewMode}

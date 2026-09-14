@@ -72,6 +72,24 @@ impl GathersClient {
         foil_quantity: i32,
         purchase_price: Option<f64>,
     ) -> eyre::Result<Vec<CollectionCard>> {
+        self.add_cards_with_provider(collection_id, card_id, quantity, foil_quantity, purchase_price, None)
+            .await
+    }
+
+    /// Like `add_cards`, but names which system/plugin the card came from
+    /// instead of letting the server guess by probing every configured one —
+    /// required when an id isn't unique across all of them (see
+    /// `plugin_provider_resolution.rs`). Pass `provider: None` for the old
+    /// probe-everything behavior.
+    pub async fn add_cards_with_provider(
+        &self,
+        collection_id: &str,
+        card_id: &str,
+        quantity: i32,
+        foil_quantity: i32,
+        purchase_price: Option<f64>,
+        provider: Option<&str>,
+    ) -> eyre::Result<Vec<CollectionCard>> {
         self.post(
             &format!("/api/collection/cards/{}/add", urlenc(collection_id)),
             &CardToAdd {
@@ -79,6 +97,7 @@ impl GathersClient {
                 quantity,
                 foil_quantity,
                 purchase_price,
+                provider: provider.map(str::to_string),
             },
         )
         .await
@@ -99,6 +118,7 @@ impl GathersClient {
                 quantity,
                 foil_quantity,
                 purchase_price: None,
+                provider: None,
             },
         )
         .await
@@ -112,9 +132,26 @@ impl GathersClient {
         card_id: &str,
         delta: i32,
     ) -> eyre::Result<CollectionCard> {
+        self.adjust_want_with_provider(collection_id, card_id, delta, None).await
+    }
+
+    /// Like `adjust_want`, but see `add_cards_with_provider` — only used
+    /// when the card doesn't already have a row in the collection; an
+    /// existing row keeps its own provider regardless.
+    pub async fn adjust_want_with_provider(
+        &self,
+        collection_id: &str,
+        card_id: &str,
+        delta: i32,
+        provider: Option<&str>,
+    ) -> eyre::Result<CollectionCard> {
         self.post(
             &format!("/api/collection/cards/{}/want", urlenc(collection_id)),
-            &AdjustWantQuantityRequest { id: card_id.to_string(), delta },
+            &AdjustWantQuantityRequest {
+                id: card_id.to_string(),
+                delta,
+                provider: provider.map(str::to_string),
+            },
         )
         .await
     }

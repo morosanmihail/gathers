@@ -40,12 +40,19 @@ pub struct CardToAdd {
     pub foil_quantity: i32,
     #[serde(rename = "purchasePrice")]
     pub purchase_price: Option<f64>,
+    /// Which system/plugin this card came from. When omitted, the server
+    /// falls back to probing every configured system and plugin for the
+    /// id — see `plugin_provider_resolution.rs`.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdjustWantQuantityRequest {
     pub id: String,
     pub delta: i32,
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

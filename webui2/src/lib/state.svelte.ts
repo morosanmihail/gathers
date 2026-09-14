@@ -25,6 +25,10 @@ class AppState {
 		return this.systemInfo?.systems ?? [];
 	}
 
+	get plugins() {
+		return this.systemInfo?.plugins ?? [];
+	}
+
 	async loadSystemInfo() {
 		try {
 			this.systemInfo = await getSystemInfo();
