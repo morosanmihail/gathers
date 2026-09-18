@@ -16,6 +16,24 @@ name = "share_view"
 [[example]]
 name = "plugin_provider_resolution"
 
+[[example]]
+name = "collection_management"
+
+[[example]]
+name = "purchase_history_editing"
+
+[[example]]
+name = "collection_search_and_value"
+
+[[example]]
+name = "csv_import_export"
+
+[[example]]
+name = "plugin_catalog"
+
+[[example]]
+name = "system_info_and_mtg_catalog"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }

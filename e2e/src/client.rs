@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use eyre::{Context, bail};
 use reqwest::StatusCode;
 
 use crate::models::{
     AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, CollectionRemoveResponse, PublicCollectionPage,
-    PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse,
+    CollectionAddResponse, CollectionRemoveResponse, CollectionCard, CollectionValueBreakdown,
+    PluginCard, PluginSummary, PublicCollectionPage, PurchaseHistoryResponse, ShareLink,
+    ShareLinkRevokeResponse, SystemInfo,
 };
 
 /// HTTP client for the GatheRs server.
@@ -42,6 +45,14 @@ impl GathersClient {
     pub async fn remove_collection(&self, id: &str) -> eyre::Result<CollectionRemoveResponse> {
         self.post_empty(&format!("/api/collection/remove/{}", urlenc(id)))
             .await
+    }
+
+    pub async fn rename_collection(&self, id: &str, new_id: &str) -> eyre::Result<Collection> {
+        self.post(
+            &format!("/api/collection/rename/{}", urlenc(id)),
+            &serde_json::json!({ "new_id": new_id }),
+        )
+        .await
     }
 
     // ── cards in a collection ─────────────────────────────────────────────────
@@ -237,6 +248,228 @@ impl GathersClient {
             urlenc(collection_id),
         ))
         .await
+    }
+
+    /// Update a purchase history entry in place. Returns the response status
+    /// (204 on success, 404 if the entry doesn't exist, 400 on a validation
+    /// error such as recording more copies than the collection owns) plus
+    /// the response body text (non-empty only for a 400).
+    pub async fn update_purchase_entry(
+        &self,
+        collection_id: &str,
+        entry_id: i64,
+        quantity: i32,
+        foil_quantity: i32,
+        normal_price_per_unit: Option<f64>,
+        foil_price_per_unit: Option<f64>,
+    ) -> eyre::Result<(StatusCode, String)> {
+        let url = format!(
+            "{}/api/collection/cards/{}/purchase_history_entry/{entry_id}",
+            self.base_url,
+            urlenc(collection_id)
+        );
+        let resp = self
+            .client
+            .patch(&url)
+            .json(&serde_json::json!({
+                "quantity": quantity,
+                "foil_quantity": foil_quantity,
+                "normal_price_per_unit": normal_price_per_unit,
+                "foil_price_per_unit": foil_price_per_unit,
+            }))
+            .send()
+            .await
+            .with_context(|| format!("PATCH {url}"))?;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        Ok((status, body))
+    }
+
+    /// Delete a purchase history entry. Returns the response status (204 if
+    /// removed, 404 if no such entry existed).
+    pub async fn delete_purchase_entry(
+        &self,
+        collection_id: &str,
+        entry_id: i64,
+    ) -> eyre::Result<StatusCode> {
+        let url = format!(
+            "{}/api/collection/cards/{}/purchase_history_entry/{entry_id}",
+            self.base_url,
+            urlenc(collection_id)
+        );
+        let resp = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url}"))?;
+        Ok(resp.status())
+    }
+
+    // ── collection value & search ───────────────────────────────────────────
+
+    pub async fn value_breakdown(&self, collection_id: &str) -> eyre::Result<CollectionValueBreakdown> {
+        self.get(&format!(
+            "/api/collection/cards/{}/value_breakdown",
+            urlenc(collection_id)
+        ))
+        .await
+    }
+
+    /// Search within a collection's cards using the same filter shape as the
+    /// global card search endpoints (see `mtg_search`), scoped to just this
+    /// collection's owned/wanted entries.
+    pub async fn search_collection_cards(
+        &self,
+        collection_id: &str,
+        filters: &serde_json::Value,
+        offset: usize,
+        limit: usize,
+    ) -> eyre::Result<Vec<CollectionCard>> {
+        self.post(
+            &format!(
+                "/api/collection/cards/{}/search?offset={offset}&limit={limit}",
+                urlenc(collection_id)
+            ),
+            filters,
+        )
+        .await
+    }
+
+    pub async fn search_collection_cards_count(
+        &self,
+        collection_id: &str,
+        filters: &serde_json::Value,
+    ) -> eyre::Result<usize> {
+        self.post(
+            &format!("/api/collection/cards/{}/search/count", urlenc(collection_id)),
+            filters,
+        )
+        .await
+    }
+
+    // ── CSV import/export ───────────────────────────────────────────────────
+
+    pub async fn export_csv(&self, collection_id: &str) -> eyre::Result<String> {
+        let url = format!("{}/api/collection/export/{}", self.base_url, urlenc(collection_id));
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GET {url} → {status}: {body}");
+        }
+        resp.text().await.with_context(|| format!("GET {url} read body"))
+    }
+
+    pub async fn import_csv(&self, collection_name: &str, csv: &str) -> eyre::Result<()> {
+        let url = format!("{}/api/collection/import", self.base_url);
+        let part = reqwest::multipart::Part::bytes(csv.as_bytes().to_vec())
+            .file_name("import.csv")
+            .mime_str("text/csv")?;
+        let form = reqwest::multipart::Form::new()
+            .text("collection", collection_name.to_string())
+            .part("file", part);
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        parse_response(resp, "POST", &url).await
+    }
+
+    // ── system info ─────────────────────────────────────────────────────────
+
+    pub async fn system_info(&self) -> eyre::Result<SystemInfo> {
+        self.get("/api/system").await
+    }
+
+    // ── plugins ──────────────────────────────────────────────────────────────
+
+    pub async fn list_plugins(&self) -> eyre::Result<Vec<PluginSummary>> {
+        self.get("/api/plugins").await
+    }
+
+    pub async fn plugin_search(
+        &self,
+        name: &str,
+        text: Option<&str>,
+        set_code: Option<&str>,
+        skip: Option<usize>,
+        limit: Option<usize>,
+    ) -> eyre::Result<Vec<PluginCard>> {
+        self.post(
+            &format!("/api/plugins/{}/search", urlenc(name)),
+            &serde_json::json!({
+                "filters": { "text": text, "set_code": set_code },
+                "skip": skip,
+                "limit": limit,
+            }),
+        )
+        .await
+    }
+
+    pub async fn plugin_cards_by_ids(
+        &self,
+        name: &str,
+        ids: Vec<String>,
+    ) -> eyre::Result<HashMap<String, PluginCard>> {
+        self.post(&format!("/api/plugins/{}/cards/by-ids", urlenc(name)), &ids)
+            .await
+    }
+
+    pub async fn plugin_update(&self, name: &str) -> eyre::Result<String> {
+        self.get(&format!("/api/plugins/{}/update", urlenc(name))).await
+    }
+
+    // ── mtg card catalog ─────────────────────────────────────────────────────
+
+    pub async fn mtg_search(
+        &self,
+        filters: &serde_json::Value,
+        skip: usize,
+        limit: usize,
+    ) -> eyre::Result<Vec<serde_json::Value>> {
+        self.post(&format!("/api/mtg/cards/search?skip={skip}&limit={limit}"), filters)
+            .await
+    }
+
+    pub async fn mtg_cards_by_ids(
+        &self,
+        ids: &[String],
+    ) -> eyre::Result<HashMap<String, serde_json::Value>> {
+        let qs: String = ids
+            .iter()
+            .map(|id| format!("ids={}", urlenc(id)))
+            .collect::<Vec<_>>()
+            .join("&");
+        self.get(&format!("/api/mtg/cards?{qs}")).await
+    }
+
+    pub async fn mtg_random_card(&self) -> eyre::Result<serde_json::Value> {
+        self.get("/api/mtg/cards/random").await
+    }
+
+    pub async fn mtg_sets(&self) -> eyre::Result<Vec<serde_json::Value>> {
+        self.get("/api/mtg/sets").await
+    }
+
+    pub async fn mtg_bulk_prices(
+        &self,
+        ids: &[String],
+    ) -> eyre::Result<HashMap<String, serde_json::Value>> {
+        let qs: String = ids
+            .iter()
+            .map(|id| format!("ids={}", urlenc(id)))
+            .collect::<Vec<_>>()
+            .join("&");
+        self.get(&format!("/api/mtg/prices?{qs}")).await
     }
 
     // ── low-level helpers ─────────────────────────────────────────────────────

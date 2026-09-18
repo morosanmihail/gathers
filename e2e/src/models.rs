@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,4 +117,58 @@ pub struct ShareLink {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareLinkRevokeResponse {
     pub revoked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionValueBreakdown {
+    pub total_value: f64,
+    pub profit: f64,
+    pub untracked_value: f64,
+    pub priced_count: usize,
+    pub total_count: usize,
+    pub wanted_value: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadProgressInfo {
+    pub downloaded: u64,
+    pub total: u64,
+    pub phase: String,
+}
+
+/// Response from `GET /api/system`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub system: String,
+    pub systems: Vec<String>,
+    pub plugins: Vec<String>,
+    pub downloading: HashMap<String, DownloadProgressInfo>,
+    pub demo_mode: bool,
+    pub pricing_enabled: bool,
+    pub collections_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSummary {
+    pub name: String,
+    pub base_url: String,
+}
+
+/// A card served by a third-party plugin (see `retrieval::systems::plugin`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCard {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub set_code: String,
+    #[serde(default)]
+    pub set_name: String,
+    #[serde(default)]
+    pub collector_number: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub extra: HashMap<String, String>,
 }
