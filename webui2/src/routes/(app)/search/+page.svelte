@@ -194,7 +194,7 @@
 		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id, 1, 0, purchasePrice, providerFromActiveSystem(activeSystem))
+				addCardToCollection(addCollection, addTarget!.id, '', 1, purchasePrice, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added "${addTarget.name}" to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);

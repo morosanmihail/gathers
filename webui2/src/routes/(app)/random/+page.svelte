@@ -68,7 +68,7 @@
 		if (!addTarget || !addCollection) return;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id, 1, 0, null, cardProvider)
+				addCardToCollection(addCollection, addTarget!.id, '', 1, null, cardProvider)
 			);
 			toast = `Added "${addTarget.name}" to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);

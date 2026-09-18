@@ -15,13 +15,13 @@ pub(super) fn remove_collection(
     move_to: Option<&CollectionID>,
 ) -> eyre::Result<CollectionID> {
     if let Some(target) = move_to {
-        let query = "INSERT INTO cards (uuid, collection, quantity, foilquantity, timeadded, timeupdated, provider)
-            SELECT uuid, ?1 as collection, quantity, foilquantity, timeadded, strftime('%Y-%m-%dT%H:%M:%SZ', 'now') as timeupdated, provider FROM
-\t(SELECT uuid, ?2 as collection, quantity, foilquantity, timeadded, provider FROM cards WHERE collection = ?2) WHERE true
-            ON CONFLICT (uuid, collection)
+        let query = "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, timeadded, timeupdated, provider)
+            SELECT uuid, finish, ?1 as collection, quantity, want_quantity, timeadded, strftime('%Y-%m-%dT%H:%M:%SZ', 'now') as timeupdated, provider
+            FROM cards WHERE collection = ?2
+            ON CONFLICT (uuid, finish, collection)
             DO UPDATE SET
                 quantity = cards.quantity + EXCLUDED.quantity,
-                foilquantity = cards.foilquantity + EXCLUDED.foilquantity,
+                want_quantity = cards.want_quantity + EXCLUDED.want_quantity,
                 timeupdated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');";
         conn.execute(query, params![target, name])?;
     }

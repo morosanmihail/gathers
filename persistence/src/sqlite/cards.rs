@@ -20,23 +20,22 @@ pub(super) fn add_cards(
     let mut query_params: Vec<String> = vec![];
     for c in cards {
         query_params.push(c.uuid.clone());
+        query_params.push(c.finish.clone());
         query_params.push(collection_id.clone());
         query_params.push(c.quantity.to_string());
-        query_params.push(c.foil_quantity.to_string());
         query_params.push(c.want_quantity.to_string());
         query_params.push(c.time_added.clone());
         query_params.push(c.time_added.clone()); // timeupdated = timeadded on creation
         query_params.push(c.provider.clone());
     }
     let query = format!(
-        "INSERT INTO cards (uuid, collection, quantity, foilquantity, want_quantity, timeadded, timeupdated, provider)
+        "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, timeadded, timeupdated, provider)
 VALUES {}
-ON CONFLICT (uuid, collection) DO UPDATE SET
+ON CONFLICT (uuid, finish, collection) DO UPDATE SET
  quantity = max(cards.quantity + EXCLUDED.quantity, 0),
- foilquantity = max(cards.foilquantity + EXCLUDED.foilquantity, 0),
  want_quantity = max(cards.want_quantity + EXCLUDED.want_quantity, 0),
  timeupdated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, provider",
+RETURNING uuid, finish, collection, quantity, want_quantity, timeadded, provider",
         placeholders
     );
     let mut stmt = conn.prepare(&query)?;
@@ -44,9 +43,9 @@ RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, pr
         .query_map(rusqlite::params_from_iter(query_params.iter()), |row| {
             Ok(CollectionCard {
                 uuid: row.get(0)?,
-                collection: row.get(1)?,
-                quantity: row.get(2)?,
-                foil_quantity: row.get(3)?,
+                finish: row.get(1)?,
+                collection: row.get(2)?,
+                quantity: row.get(3)?,
                 want_quantity: row.get(4)?,
                 time_added: row.get(5)?,
                 provider: row.get(6)?,
@@ -55,10 +54,7 @@ RETURNING uuid, collection, quantity, foilquantity, want_quantity, timeadded, pr
         .flatten()
         .collect();
 
-    conn.execute(
-        "DELETE FROM cards WHERE quantity = 0 AND foilquantity = 0 AND want_quantity = 0",
-        [],
-    )?;
+    conn.execute("DELETE FROM cards WHERE quantity = 0 AND want_quantity = 0", [])?;
 
     Ok(result)
 }
@@ -88,9 +84,12 @@ pub(super) fn get_paginated(
         i += params.providers.len();
     }
 
+    // Sorts (and paginates) over individual (uuid, finish) rows, not
+    // distinct cards — a card with several finishes contributes one row
+    // per finish. Grouping those back into "one card, several finishes"
+    // is a display-layer concern (see `models::CollectionCard::finish`).
     let sort_col = match &params.sort_by {
         Some(CollectionSortField::Quantity) => "quantity",
-        Some(CollectionSortField::FoilQuantity) => "foilquantity",
         Some(CollectionSortField::WantQuantity) => "want_quantity",
         Some(CollectionSortField::Provider) => "provider",
         _ => "timeadded",
@@ -102,7 +101,7 @@ pub(super) fn get_paginated(
     };
 
     let query = format!(
-        "SELECT uuid, quantity, foilquantity, want_quantity, timeadded, provider \
+        "SELECT uuid, finish, quantity, want_quantity, timeadded, provider \
          FROM cards WHERE {} ORDER BY {} {} LIMIT ?{} OFFSET ?{}",
         conditions.join(" AND "),
         sort_col,
@@ -119,8 +118,8 @@ pub(super) fn get_paginated(
         .query_map(rusqlite::params_from_iter(query_params.iter()), |row| {
             Ok(CollectionCard {
                 uuid: row.get(0)?,
-                quantity: row.get(1)?,
-                foil_quantity: row.get(2)?,
+                finish: row.get(1)?,
+                quantity: row.get(2)?,
                 want_quantity: row.get(3)?,
                 time_added: row.get(4)?,
                 collection: collection_id.clone(),

@@ -1,37 +1,56 @@
 <script lang="ts">
-	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { cardImageUrl, rarityClass, isWantOnly } from '$lib/types';
+	import type { CollectionCard, CardGroup, MtgCard, AnyCard, CardPrices } from '$lib/types';
+	import { cardImageUrl, rarityClass, isWantOnly, catalogFinishes, finishLabel } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
-	import QtyControls from './QtyControls.svelte';
+	import { portal } from '$lib/portal';
+	import { createHoverTooltip, clampHorizontal } from '$lib/tooltip.svelte';
+	import FinishList from './FinishList.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
 	import SetTooltip from './SetTooltip.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
 	import AddDropdown from './AddDropdown.svelte';
 
 	interface Props {
-		card: AnyCard | CollectionCard;
+		card: AnyCard | CollectionCard | CardGroup;
 		collectionMode?: boolean;
 		selectable?: boolean;
 		price?: string | null;
 		cardPrices?: CardPrices;
 		collection?: string;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
-		onAddFoil?: (card: AnyCard | CollectionCard) => void;
+		onAddFinish?: (card: AnyCard | CollectionCard, finish: string) => void;
 		onAddWanted?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
+		onAdjust?: (group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) => void;
 		onWantAdjust?: (card: CollectionCard, delta: number) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, selectable = true, price = null, cardPrices, collection = '', onAdd, onAddFoil, onAddWanted, onAdjust, onWantAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, price = null, cardPrices, collection = '', onAdd, onAddFinish, onAddWanted, onAdjust, onWantAdjust, onclick }: Props = $props();
 
-	const col = $derived(card as CollectionCard);
+	const col = $derived(card as CardGroup);
 	const isSelected = $derived(app.selectedCards.has(card.id));
 	const rawImgUrl = $derived(cardImageUrl(card as CollectionCard));
-	const qty = $derived(collectionMode && col.quantity != null
-		? col.foilQuantity > 0 ? `${col.quantity} + ${col.foilQuantity}✦` : `${col.quantity}`
+	const qty = $derived(collectionMode && col.entries
+		? col.entries
+			.filter((e) => (e.quantity ?? 0) > 0)
+			.map((e) => e.finish ? `${e.quantity}✦${e.finish !== 'foil' ? ` (${e.finish})` : ''}` : `${e.quantity}`)
+			.join(' + ') || null
 		: null);
+
+	// Catalog finishes (MTG only, for now) shown on hovering the image —
+	// mainly useful in search results, where the card isn't owned yet so
+	// FinishList's owned-finish list isn't shown.
+	const finishes = $derived(catalogFinishes(card as MtgCard));
+	const finishTooltip = createHoverTooltip(80);
+	function finishTooltipPosition(el: HTMLElement) {
+		const rect = el.getBoundingClientRect();
+		return `top: ${rect.bottom + 4}px; ${clampHorizontal(rect, 160)}`;
+	}
+	function showFinishTooltip(e: MouseEvent) {
+		if (!finishes.length) return;
+		finishTooltip.showEl(e.currentTarget as HTMLElement, finishTooltipPosition);
+	}
 
 	let imgUrl = $state('');
 	$effect(() => {
@@ -63,14 +82,21 @@
 	{/if}
 
 	<!-- Image -->
-	{#if imgUrl}
-		<img class="card-tile-img" src={imgUrl} alt={card.name} />
-	{:else}
-		<div class="card-tile-img-placeholder">
-			<div>
-				<div style="font-size: 1.5rem; margin-bottom: 4px;">🃏</div>
-				<div style="font-weight:700;">{card.name ?? '…'}</div>
+	<div role="presentation" onmouseenter={showFinishTooltip} onmouseleave={finishTooltip.hide}>
+		{#if imgUrl}
+			<img class="card-tile-img" src={imgUrl} alt={card.name} />
+		{:else}
+			<div class="card-tile-img-placeholder">
+				<div>
+					<div style="font-size: 1.5rem; margin-bottom: 4px;">🃏</div>
+					<div style="font-weight:700;">{card.name ?? '…'}</div>
+				</div>
 			</div>
+		{/if}
+	</div>
+	{#if finishTooltip.visible}
+		<div use:portal class="finish-hover-tooltip" style={finishTooltip.style} role="tooltip">
+			{finishes.map(finishLabel).join(', ')}
 		</div>
 	{/if}
 
@@ -95,11 +121,10 @@
 	<!-- Qty controls (collection mode) -->
 	{#if collectionMode && onAdjust}
 		<div style="padding: 4px 8px 6px; border-top: 1px solid var(--border);">
-			<QtyControls
-				quantity={col.quantity ?? 0}
-				foilQuantity={col.foilQuantity ?? 0}
+			<FinishList
+				group={col}
 				{price}
-				onAdjust={(delta, foil, purchasePrice) => onAdjust(col, delta, foil, purchasePrice)}
+				onAdjust={(finish, delta, purchasePrice) => onAdjust(col, finish, delta, purchasePrice)}
 			/>
 		</div>
 	{/if}
@@ -114,11 +139,12 @@
 	{/if}
 
 	<!-- Add to collection dropdown (search mode) -->
-	{#if !collectionMode && (onAdd || onAddFoil || onAddWanted)}
+	{#if !collectionMode && (onAdd || onAddFinish || onAddWanted)}
 		<div class="card-tile-add" role="presentation" onclick={(e) => e.stopPropagation()}>
 			<AddDropdown
 				onAdd={onAdd ? () => onAdd(card) : undefined}
-				onAddFoil={onAddFoil ? () => onAddFoil(card) : undefined}
+				{finishes}
+				onAddFinish={onAddFinish ? (finish) => onAddFinish(card, finish) : undefined}
 				onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
 			/>
 		</div>

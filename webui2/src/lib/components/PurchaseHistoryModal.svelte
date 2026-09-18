@@ -3,6 +3,7 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { portal } from '$lib/portal';
 	import { fmtDate } from '$lib/format';
+	import { finishLabel } from '$lib/types';
 
 	interface Props {
 		collection: string;
@@ -24,9 +25,7 @@
 	// Per-row edit state keyed by entry id
 	interface EditState {
 		quantity: string;
-		foil_quantity: string;
-		normal_price: string;
-		foil_price: string;
+		price: string;
 		saving: boolean;
 	}
 	let editing = $state<Map<number, EditState>>(new Map());
@@ -52,9 +51,7 @@
 		const m = new Map(editing);
 		m.set(e.id, {
 			quantity: String(e.quantity),
-			foil_quantity: String(e.foil_quantity),
-			normal_price: e.normal_price_per_unit != null ? String(e.normal_price_per_unit) : '',
-			foil_price: e.foil_price_per_unit != null ? String(e.foil_price_per_unit) : '',
+			price: e.price_per_unit != null ? String(e.price_per_unit) : '',
 			saving: false
 		});
 		editing = m;
@@ -76,9 +73,7 @@
 			await updatePurchaseEntry(
 				collection, id,
 				parseInt(s.quantity) || 0,
-				parseInt(s.foil_quantity) || 0,
-				s.normal_price !== '' ? parseFloat(s.normal_price) : null,
-				s.foil_price !== '' ? parseFloat(s.foil_price) : null
+				s.price !== '' ? parseFloat(s.price) : null
 			);
 			await load();
 		} catch (e) {
@@ -129,10 +124,9 @@
 							<th style="padding: 10px 14px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2); white-space:nowrap;">Card</th>
 							<th style="padding: 10px 14px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Set</th>
 							<th style="padding: 10px 14px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Date</th>
+							<th style="padding: 10px 14px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Finish</th>
 							<th style="padding: 10px 14px; text-align:center; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Qty</th>
-							<th style="padding: 10px 14px; text-align:center; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Foil</th>
-							<th style="padding: 10px 14px; text-align:right; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Normal price</th>
-							<th style="padding: 10px 14px; text-align:right; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Foil price</th>
+							<th style="padding: 10px 14px; text-align:right; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text2);">Price</th>
 							<th style="padding: 10px 14px;"></th>
 						</tr>
 					</thead>
@@ -150,22 +144,17 @@
 									{fmtDate(entry.recorded_at)}
 								</td>
 
+								<td style="padding: 8px 14px; color: var(--text2); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;">
+									{finishLabel(entry.finish)}
+								</td>
 								{#if ed}
 									<td style="padding: 4px 8px;">
 										<input class="input" style="width:60px;height:28px;padding:3px 6px;text-align:center;"
 											bind:value={ed.quantity} type="number" min="0" />
 									</td>
 									<td style="padding: 4px 8px;">
-										<input class="input" style="width:60px;height:28px;padding:3px 6px;text-align:center;"
-											bind:value={ed.foil_quantity} type="number" min="0" />
-									</td>
-									<td style="padding: 4px 8px;">
 										<input class="input" style="width:80px;height:28px;padding:3px 6px;text-align:right;font-family:'JetBrains Mono',monospace;"
-											bind:value={ed.normal_price} placeholder="—" />
-									</td>
-									<td style="padding: 4px 8px;">
-										<input class="input" style="width:80px;height:28px;padding:3px 6px;text-align:right;font-family:'JetBrains Mono',monospace;"
-											bind:value={ed.foil_price} placeholder="—" />
+											bind:value={ed.price} placeholder="—" />
 									</td>
 									<td style="padding: 4px 8px; white-space: nowrap; display: flex; gap: 4px;">
 										<button class="btn btn-sm btn-accent" disabled={ed.saving} onclick={() => saveEdit(entry.id)}>
@@ -177,14 +166,8 @@
 									<td style="padding: 8px 14px; text-align:center; font-family:'JetBrains Mono',monospace;">
 										{entry.quantity}
 									</td>
-									<td style="padding: 8px 14px; text-align:center; font-family:'JetBrains Mono',monospace; color: var(--accent-text);">
-										{entry.foil_quantity}✦
-									</td>
 									<td style="padding: 8px 14px; text-align:right; font-family:'JetBrains Mono',monospace; color: var(--accent-text);">
-										{entry.normal_price_per_unit != null ? `$${entry.normal_price_per_unit.toFixed(2)}` : '—'}
-									</td>
-									<td style="padding: 8px 14px; text-align:right; font-family:'JetBrains Mono',monospace; color: var(--accent-text);">
-										{entry.foil_price_per_unit != null ? `$${entry.foil_price_per_unit.toFixed(2)}` : '—'}
+										{entry.price_per_unit != null ? `$${entry.price_per_unit.toFixed(2)}` : '—'}
 									</td>
 									<td style="padding: 8px 14px; white-space: nowrap;">
 										<button class="btn btn-sm" onclick={() => startEdit(entry)}>Edit</button>

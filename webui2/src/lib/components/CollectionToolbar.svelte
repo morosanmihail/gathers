@@ -11,11 +11,11 @@
 		renameCollection,
 		invalidateCache
 	} from '$lib/api';
-	import type { CollectionCard } from '$lib/types';
+	import type { CardGroup } from '$lib/types';
 
 	interface Props {
 		collection: string;
-		cards: CollectionCard[];
+		groups: CardGroup[];
 		onRefresh: () => void;
 		onSearchOpen: () => void;
 		searchOpen: boolean;
@@ -26,7 +26,7 @@
 		filterActive?: boolean;
 	}
 
-	let { collection, cards, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onShareOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
+	let { collection, groups, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onShareOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
 
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
 	let moveDest = $state('');
@@ -38,7 +38,7 @@
 	let renameError = $state('');
 
 	const selectedList = $derived(
-		cards.filter(c => app.selectedCards.has(c.id))
+		groups.filter(g => app.selectedCards.has(g.id))
 	);
 
 	const otherCollections = $derived(
@@ -67,8 +67,12 @@
 		confirmDelete = null;
 		try {
 			await app.withOp('Deleting cards', async () => {
-				for (const card of selectedList) {
-					await deleteCardFromCollection(collection, card.id, card.quantity, card.foilQuantity);
+				for (const group of selectedList) {
+					for (const entry of group.entries) {
+						if ((entry.quantity ?? 0) > 0) {
+							await deleteCardFromCollection(collection, entry.id, entry.finish ?? '', entry.quantity ?? 0);
+						}
+					}
 				}
 			});
 			app.clearSelected();
@@ -82,16 +86,17 @@
 		if (!moveDest || !selectedList.length) return;
 		moveError = '';
 		try {
-			await app.withOp(`Moving to ${moveDest}`, () =>
-				moveCards(moveDest, selectedList.map(c => ({
-					id: c.id,
-					quantity: c.quantity,
-					foilQuantity: c.foilQuantity,
-					wantQuantity: c.wantQuantity ?? 0,
-					collectionId: c.collectionId,
-					provider: c.provider ?? ''
-				})))
-			);
+			// Every finish row of each selected card moves — including a
+			// want-only "" row that has no owned copies of anything.
+			const items = selectedList.flatMap(g => g.entries.map(entry => ({
+				id: entry.id,
+				finish: entry.finish ?? '',
+				quantity: entry.quantity ?? 0,
+				wantQuantity: entry.wantQuantity ?? 0,
+				collectionId: entry.collectionId,
+				provider: entry.provider ?? ''
+			})));
+			await app.withOp(`Moving to ${moveDest}`, () => moveCards(moveDest, items));
 			app.clearSelected();
 			onRefresh();
 		} catch (e) {
@@ -203,7 +208,7 @@
 		<button class="btn btn-ghost" onclick={() => app.clearSelected()}>Clear selection</button>
 		<div class="toolbar-sep"></div>
 	{:else}
-		<button class="btn btn-ghost btn-sm" onclick={() => app.selectAll(cards.map(c => c.id))}>
+		<button class="btn btn-ghost btn-sm" onclick={() => app.selectAll(groups.map(g => g.id))}>
 			Select all
 		</button>
 		<div class="toolbar-sep"></div>

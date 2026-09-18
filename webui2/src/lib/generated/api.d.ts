@@ -1812,8 +1812,7 @@ export interface components {
             toughness?: string | null;
             types?: string[] | null;
         };
-        /** @enum {string} */
-        APICollectionSortField: "TimeAdded" | "Quantity" | "FoilQuantity" | "WantQuantity" | "Provider";
+        APICollectionSortField: ("TimeAdded" | "WantQuantity" | "Provider") | "Quantity";
         /** @enum {string} */
         APIEnergyType: "Fire" | "Water" | "Grass" | "Lightning" | "Psychic" | "Fighting" | "Darkness" | "Metal" | "Dragon" | "Fairy" | "Colorless" | "Energy";
         APIPokemonCard: {
@@ -1878,8 +1877,14 @@ export interface components {
             uuid: string;
         };
         CardToAdd: {
-            /** Format: int32 */
-            foilQuantity: number;
+            /**
+             * @description Which printing/finish this add/remove applies to — MTG's `""`
+             *     (nonfoil) / `"foil"` / `"etched"`, a Pokemon variant like `"reverse
+             *     holo"`, or just `""` for a game with a single version per collector
+             *     number (Riftbound). Defaults to `""` (the primary/default finish).
+             * @default
+             */
+            finish: string;
             id: string;
             /**
              * @description Which system/plugin this card came from, e.g. `RiftboundSQLite` or
@@ -1911,8 +1916,14 @@ export interface components {
         };
         CollectionCard: {
             collectionId: string;
-            /** Format: int32 */
-            foilQuantity: number;
+            /**
+             * @description Which printing/finish this row tracks — see `CardToAdd::finish`.
+             *     Distinct finishes of the same card `id` are separate rows; a client
+             *     groups them back together by `id` to show "one card, several
+             *     finishes" (e.g. nonfoil + foil).
+             * @default
+             */
+            finish: string;
             id: string;
             /** @default  */
             provider: string;
@@ -1953,14 +1964,11 @@ export interface components {
         CollectionPurchaseHistoryEntry: {
             card_name?: string | null;
             card_uuid: string;
-            /** Format: double */
-            foil_price_per_unit?: number | null;
-            /** Format: int32 */
-            foil_quantity: number;
+            finish: string;
             /** Format: int64 */
             id: number;
             /** Format: double */
-            normal_price_per_unit?: number | null;
+            price_per_unit?: number | null;
             provider: string;
             /** Format: int32 */
             quantity: number;
@@ -2105,14 +2113,11 @@ export interface components {
         };
         PurchaseHistoryEntry: {
             card_uuid: string;
-            /** Format: double */
-            foil_price_per_unit?: number | null;
-            /** Format: int32 */
-            foil_quantity: number;
+            finish: string;
             /** Format: int64 */
             id: number;
             /** Format: double */
-            normal_price_per_unit?: number | null;
+            price_per_unit?: number | null;
             provider: string;
             /** Format: int32 */
             quantity: number;
@@ -2247,11 +2252,7 @@ export interface components {
         Systems: "Scryfall" | "Sql" | "RiftboundSql" | "PokemonSql";
         UpdatePurchaseEntryBody: {
             /** Format: double */
-            foil_price_per_unit?: number | null;
-            /** Format: int32 */
-            foil_quantity: number;
-            /** Format: double */
-            normal_price_per_unit?: number | null;
+            price_per_unit?: number | null;
             /** Format: int32 */
             quantity: number;
         };

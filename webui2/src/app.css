@@ -453,7 +453,10 @@ label.field-label {
 .card-list-header,
 .card-row {
 	display: grid;
-	grid-template-columns: 32px 1fr 110px 90px 130px 110px 80px 80px 90px;
+	/* Qty column holds a variable-length, vertically-stacked list of
+	   per-finish rows now (FinishList) rather than two fixed side-by-side
+	   normal/foil cells, so it's one wider column instead of two. */
+	grid-template-columns: 32px 1fr 110px 90px 130px 110px 150px 90px;
 	align-items: center;
 	gap: 0;
 	padding: 0 20px;
@@ -1264,6 +1267,45 @@ label.field-label {
 
 .qty-foil { color: var(--accent-text); }
 
+.qty-finish-label {
+	font-size: 0.68rem;
+	color: var(--text2);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	min-width: 40px;
+}
+
+.add-finish-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 2px;
+}
+
+.finish-hover-tooltip {
+	position: fixed;
+	z-index: 600;
+	background: var(--surface2);
+	border: 1px solid var(--border2);
+	border-radius: var(--radius);
+	padding: 4px 10px;
+	box-shadow: var(--shadow);
+	font-size: 0.74rem;
+	color: var(--text2);
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.add-finish-select {
+	height: 22px;
+	padding: 1px 4px;
+	font-size: 0.72rem;
+	border-radius: 4px;
+	border: 1px solid var(--border2);
+	background: var(--surface2);
+	color: var(--text);
+}
+
 /* ─── Rarity badges ────────────────────────────────────── */
 .rarity { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .rarity-C { color: var(--text3); }
@@ -1308,7 +1350,7 @@ label.field-label {
 	/* The name column is `1fr` on desktop — with a scrollable container that
 	   stretches to fit a long, unbroken name, dragging every column after it
 	   further right. Give it a fixed width instead and let the name wrap. */
-	.card-list-header, .card-row { grid-template-columns: 32px 160px 110px 90px 130px 110px 100px 100px 90px; }
+	.card-list-header, .card-row { grid-template-columns: 32px 160px 110px 90px 130px 110px 170px 90px; }
 	.card-list-search .card-list-header, .card-list-search .card-row,
 	.card-list-results .card-list-header, .card-list-results .card-row {
 		grid-template-columns: 32px 160px 110px 90px 110px 140px;

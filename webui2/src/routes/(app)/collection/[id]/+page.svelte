@@ -15,12 +15,15 @@
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
-	import { defaultFilters } from '$lib/types';
-	import type { CollectionCard, CardPrices, ValueBreakdown } from '$lib/types';
+	import { defaultFilters, groupByCard } from '$lib/types';
+	import type { CollectionCard, CardGroup, CardPrices, ValueBreakdown } from '$lib/types';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
 
 	let cards = $state<CollectionCard[]>([]);
+	// One (uuid, finish) row per API entry; grouped back into "one card,
+	// several finishes" for display — see `groupByCard`.
+	const groups = $derived(groupByCard(cards));
 	let total = $state(0);
 	let currentPage = $state(1);
 	let loading = $state(true);
@@ -31,7 +34,7 @@
 	let valueHover = $state(false);
 
 	// Fields the /list endpoint accepts; everything else goes through /search
-	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'FoilQuantity', 'WantQuantity', 'Provider']);
+	const COLLECTION_SORT_FIELDS = new Set(['TimeAdded', 'Quantity', 'WantQuantity', 'Provider']);
 
 	let collectionFilters = $state(defaultFilters());
 	let sortBy = $state('');
@@ -40,7 +43,7 @@
 	let filterOpen = $state(false);
 	let historyOpen = $state(false);
 	let shareOpen = $state(false);
-	let detailCard = $state<CollectionCard | null>(null);
+	let detailCard = $state<CardGroup | null>(null);
 	let filterDebounce: ReturnType<typeof setTimeout> | null = null;
 
 	const filterActive = $derived(
@@ -123,20 +126,26 @@
 		}
 	}
 
-	async function adjustCardQty(card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) {
+	async function adjustCardQty(group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) {
 		try {
 			if (delta > 0) {
-				await addCardToCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice, card.provider);
+				await addCardToCollection(collectionId, group.id, finish, delta, purchasePrice, group.provider);
 			} else {
-				await deleteCardFromCollection(collectionId, card.id, foil ? 0 : 1, foil ? 1 : 0);
+				await deleteCardFromCollection(collectionId, group.id, finish, -delta);
 			}
-			// Optimistically update local state
+			// Optimistically update local state. The touched finish might not
+			// have had a row yet (adding a brand-new version of the card).
+			let found = false;
 			cards = cards.map(c => {
-				if (c.id !== card.id) return c;
-				const qty = foil ? c.quantity : Math.max(0, c.quantity + delta);
-				const foilQty = foil ? Math.max(0, c.foilQuantity + delta) : c.foilQuantity;
-				return { ...c, quantity: qty, foilQuantity: foilQty };
-			}).filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);
+				if (c.id !== group.id || (c.finish ?? '') !== finish) return c;
+				found = true;
+				return { ...c, quantity: Math.max(0, (c.quantity ?? 0) + delta) };
+			});
+			if (!found && delta > 0) {
+				const { entries: _entries, ...primary } = group;
+				cards = [...cards, { ...primary, finish, quantity: delta, wantQuantity: 0 }];
+			}
+			cards = cards.filter(c => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
 			total = Math.max(0, total + delta);
 			refreshValue();
 		} catch (e) {
@@ -148,8 +157,8 @@
 		try {
 			await adjustWantQuantity(collectionId, card.id, delta, card.provider);
 			const wantQuantity = Math.max(0, (card.wantQuantity ?? 0) + delta);
-			cards = cards.map(c => c.id === card.id ? { ...c, wantQuantity } : c)
-				.filter(c => c.quantity > 0 || c.foilQuantity > 0 || (c.wantQuantity ?? 0) > 0);
+			cards = cards.map(c => (c.id === card.id && !(c.finish ?? '')) ? { ...c, wantQuantity } : c)
+				.filter(c => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
 			if (detailCard?.id === card.id) detailCard = { ...detailCard, wantQuantity };
 		} catch (e) {
 			console.error('[gathers] handleWantChange failed:', e);
@@ -201,8 +210,9 @@
 		{ field: 'Rarity',     label: 'Rarity' },
 		{ field: 'Artist',     label: 'Artist' },
 		{ field: '',           label: 'Price' },
-		{ field: 'Quantity',   label: 'Qty' },
-		{ field: 'FoilQuantity', label: 'Foil' },
+		// One spanning column now — a card can own any number of finishes,
+		// each rendered as its own row by FinishList inside this cell.
+		{ field: 'Quantity',   label: 'Qty (by finish)' },
 		{ field: 'WantQuantity', label: 'Wanted' },
 	];
 </script>
@@ -214,7 +224,7 @@
 <div>
 	<CollectionToolbar
 		collection={collectionId}
-		{cards}
+		{groups}
 		onRefresh={handleRefresh}
 		onSearchOpen={() => searchOpen = !searchOpen}
 		{searchOpen}
@@ -236,7 +246,7 @@
 	<div class="page-header" style="padding-bottom: 8px;">
 		<h1 class="page-title">{collectionId}</h1>
 		{#if !loading}
-			<span class="page-subtitle">{total.toLocaleString()} card{total !== 1 ? 's' : ''}</span>
+			<span class="page-subtitle">{total.toLocaleString()} entr{total !== 1 ? 'ies' : 'y'}</span>
 		{/if}
 		{#if collectionValue != null}
 			<span
@@ -291,7 +301,7 @@
 		</div>
 	{:else}
 		<CardResultsList
-			{cards}
+			cards={groups}
 			viewMode={app.viewMode}
 			{listHeaders}
 			keyFn={(c) => (c as CollectionCard).collectionId + '-' + c.id}
@@ -300,7 +310,7 @@
 			{prices}
 			onAdjust={adjustCardQty}
 			onWantAdjust={handleWantChange}
-			onclick={(c) => detailCard = c as CollectionCard}
+			onclick={(c) => detailCard = c as CardGroup}
 			{sortBy}
 			{sortOrder}
 			onSortClick={handleSortClick}

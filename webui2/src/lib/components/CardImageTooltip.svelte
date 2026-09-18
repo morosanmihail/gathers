@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { portal } from '$lib/portal';
-	import type { AnyCard, CollectionCard } from '$lib/types';
-	import { cardImageUrl } from '$lib/types';
+	import type { AnyCard, CollectionCard, MtgCard } from '$lib/types';
+	import { cardImageUrl, catalogFinishes, finishLabel } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { createHoverTooltip } from '$lib/tooltip.svelte';
 
@@ -12,6 +12,7 @@
 	let { card }: Props = $props();
 
 	const tooltip = createHoverTooltip(80);
+	const finishes = $derived(catalogFinishes(card as MtgCard));
 
 	const rawUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 	let resolvedUrl = $state('');
@@ -58,6 +59,9 @@
 {#if tooltip.visible && resolvedUrl}
 	<div use:portal class="card-img-tooltip" style={tooltip.style}>
 		<img src={resolvedUrl} alt={card.name} width="200" />
+		{#if finishes.length}
+			<div class="card-img-finishes">{finishes.map(finishLabel).join(', ')}</div>
+		{/if}
 	</div>
 {/if}
 
@@ -80,6 +84,14 @@
 		display: block;
 		width: 200px;
 		height: auto;
-		border-radius: 10px;
+	}
+
+	.card-img-finishes {
+		line-height: 1.3;
+		padding: 6px 8px;
+		background: var(--surface2);
+		color: var(--text2);
+		font-size: 0.72rem;
+		text-align: center;
 	}
 </style>

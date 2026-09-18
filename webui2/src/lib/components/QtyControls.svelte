@@ -1,32 +1,35 @@
 <script lang="ts">
+	// +/- stepper for a single card finish (e.g. the "" / normal row, or a
+	// "foil" row) — one of these renders per finish in `FinishList`, rather
+	// than a single component owning a hardcoded normal+foil pair.
 	interface Props {
 		quantity: number;
-		foilQuantity: number;
-		onAdjust: (delta: number, foil: boolean, purchasePrice?: number | null) => void;
+		onAdjust: (delta: number, purchasePrice?: number | null) => void;
 		price?: string | null;
+		label?: string;
 		busy?: boolean;
 	}
 
-	let { quantity, foilQuantity, onAdjust, price = null, busy = false }: Props = $props();
+	let { quantity, onAdjust, price = null, label, busy = false }: Props = $props();
 
 	// Pending add: waiting for user to confirm purchase price
-	let pending = $state<{ foil: boolean; priceStr: string } | null>(null);
+	let pending = $state(false);
+	let priceStr = $state('');
 
-	function startAdd(foil: boolean) {
+	function startAdd() {
 		// Strip currency symbol if present
-		const raw = price?.replace(/[^0-9.]/g, '') ?? '';
-		pending = { foil, priceStr: raw };
+		priceStr = price?.replace(/[^0-9.]/g, '') ?? '';
+		pending = true;
 	}
 
 	function confirmAdd() {
-		if (!pending) return;
-		const parsed = pending.priceStr !== '' ? parseFloat(pending.priceStr) : null;
+		const parsed = priceStr !== '' ? parseFloat(priceStr) : null;
 		const purchasePrice = parsed != null && isFinite(parsed) && parsed > 0 ? parsed : null;
-		onAdjust(1, pending.foil, purchasePrice);
-		pending = null;
+		onAdjust(1, purchasePrice);
+		pending = false;
 	}
 
-	function cancelAdd() { pending = null; }
+	function cancelAdd() { pending = false; }
 
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') { e.preventDefault(); confirmAdd(); }
@@ -38,9 +41,9 @@
 	{#if pending}
 		<!-- Price confirmation row -->
 		<div class="qty-row" style="gap:4px; flex-wrap: nowrap;">
-			<span style="font-size:0.72rem; color:var(--text2); white-space:nowrap;">
-				{pending.foil ? 'Foil' : 'Normal'} price:
-			</span>
+			{#if label}
+				<span style="font-size:0.72rem; color:var(--text2); white-space:nowrap;">{label} price:</span>
+			{/if}
 			<div style="display:flex; align-items:center; gap:3px;">
 				<span style="color:var(--text2); font-size:0.82rem;">$</span>
 				<!-- svelte-ignore a11y_autofocus -->
@@ -50,7 +53,7 @@
 					min="0"
 					step="0.01"
 					placeholder="0.00"
-					bind:value={pending.priceStr}
+					bind:value={priceStr}
 					onkeydown={onKeydown}
 					style="width:72px; height:24px; padding:2px 6px; font-size:0.82rem; font-family:'JetBrains Mono',monospace;"
 					autofocus
@@ -61,14 +64,10 @@
 		</div>
 	{:else}
 		<div class="qty-row">
-			<button class="qty-btn" disabled={busy || quantity <= 0} onclick={() => onAdjust(-1, false)}>−</button>
+			{#if label}<span class="qty-finish-label">{label}</span>{/if}
+			<button class="qty-btn" disabled={busy || quantity <= 0} onclick={() => onAdjust(-1)}>−</button>
 			<span class="qty-val">{quantity}</span>
-			<button class="qty-btn add" disabled={busy} onclick={() => startAdd(false)}>+</button>
-		</div>
-		<div class="qty-row">
-			<button class="qty-btn" disabled={busy || foilQuantity <= 0} onclick={() => onAdjust(-1, true)}>−</button>
-			<span class="qty-val qty-foil">{foilQuantity}✦</span>
-			<button class="qty-btn add" disabled={busy} onclick={() => startAdd(true)}>+</button>
+			<button class="qty-btn add" disabled={busy} onclick={startAdd}>+</button>
 		</div>
 	{/if}
 </div>

@@ -133,21 +133,37 @@ impl PersistenceSystem {
         let mut i: f32 = 0.0;
 
         for g in cta.chunks(50) {
-            let batch: Vec<CollectionCard> = g
-                .iter()
-                .map(|c| CollectionCard {
-                    uuid: c.0.clone(),
-                    quantity: c.1 as i32,
-                    foil_quantity: c.2 as i32,
-                    want_quantity: 0,
-                    collection: collection_id.clone(),
-                    time_added: time_added.clone(),
-                    provider: c.3.clone(),
-                })
-                .collect();
+            // The CSV interchange format only understands two finishes —
+            // the default (nonfoil) bucket and `foil` — so each resolved
+            // row expands into up to two finish rows.
+            let mut batch: Vec<CollectionCard> = vec![];
+            for c in g {
+                if c.1 > 0 {
+                    batch.push(CollectionCard {
+                        uuid: c.0.clone(),
+                        finish: String::new(),
+                        quantity: c.1 as i32,
+                        want_quantity: 0,
+                        collection: collection_id.clone(),
+                        time_added: time_added.clone(),
+                        provider: c.3.clone(),
+                    });
+                }
+                if c.2 > 0 {
+                    batch.push(CollectionCard {
+                        uuid: c.0.clone(),
+                        finish: "foil".to_string(),
+                        quantity: c.2 as i32,
+                        want_quantity: 0,
+                        collection: collection_id.clone(),
+                        time_added: time_added.clone(),
+                        provider: c.3.clone(),
+                    });
+                }
+            }
             self.add_cards_to_collection(&collection_id, &batch).await?;
 
-            i += batch.len() as f32;
+            i += g.len() as f32;
             if let Some(ref sender) = progress_sender {
                 sender.send(i / total)?;
             }
@@ -164,6 +180,76 @@ impl PersistenceSystem {
     ) -> eyre::Result<String> {
         let by_name = systems_by_name(retrievals);
 
+        // Fetch every (uuid, finish) row first and group by uuid — the CSV
+        // interchange format only has two quantity columns, so each card's
+        // rows collapse into (quantity for the default finish, quantity for
+        // `foil`). Any other finish (e.g. a Pokemon reverse-holo) isn't
+        // representable in this two-column format and is left out of the
+        // export entirely, rather than mislabeling it as foil.
+        let mut offset = 0;
+        let limit = 500;
+        let mut all_cards = vec![];
+        loop {
+            let page = self
+                .get_cards_in_collection_paginated(collection_id, CollectionCardsParams::new(offset, limit))
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            offset += page.len();
+            all_cards.extend(page);
+        }
+
+        struct ExportRow {
+            quantity: u32,
+            foil_quantity: u32,
+            provider: String,
+        }
+        let mut by_uuid: HashMap<String, ExportRow> = HashMap::new();
+        for card in &all_cards {
+            let entry = by_uuid.entry(card.uuid.clone()).or_insert_with(|| ExportRow {
+                quantity: 0,
+                foil_quantity: 0,
+                provider: card.provider.clone(),
+            });
+            match card.finish.as_str() {
+                "" if card.quantity > 0 => entry.quantity += card.quantity as u32,
+                "foil" if card.quantity > 0 => entry.foil_quantity += card.quantity as u32,
+                _ => {}
+            }
+        }
+        // A card whose only rows are an unrepresentable finish (or a
+        // wishlist-only `""` row with quantity 0) has nothing to export.
+        by_uuid.retain(|_, row| row.quantity > 0 || row.foil_quantity > 0);
+
+        // Group UUIDs by stored provider so we issue one lookup per system.
+        let mut ids_by_provider: HashMap<&str, Vec<String>> = Default::default();
+        for (uuid, row) in &by_uuid {
+            ids_by_provider.entry(row.provider.as_str()).or_default().push(uuid.clone());
+        }
+
+        let mut looked_up: HashMap<String, (models::Card, String)> = Default::default();
+        for (provider, ids) in &ids_by_provider {
+            if let Some(system) = by_name.get(provider)
+                && let Ok(result) = system.get_cards_by_ids(ids.clone()).await {
+                    for (uuid, card) in result {
+                        looked_up.insert(uuid, (card, system.name().to_string()));
+                    }
+                }
+        }
+
+        // Fall back: try every system for cards not yet resolved.
+        let unfound: Vec<String> = by_uuid.keys().filter(|u| !looked_up.contains_key(*u)).cloned().collect();
+        if !unfound.is_empty() {
+            for system in retrievals {
+                if let Ok(result) = system.get_cards_by_ids(unfound.clone()).await {
+                    for (uuid, card) in result {
+                        looked_up.entry(uuid).or_insert_with(|| (card, system.name().to_string()));
+                    }
+                }
+            }
+        }
+
         let mut wtr = csv::Writer::from_writer(vec![]);
         wtr.write_record([
             mapping.header_for(CsvField::SetCode),
@@ -172,69 +258,17 @@ impl PersistenceSystem {
             mapping.header_for(CsvField::FoilQuantity),
             mapping.header_for(CsvField::Provider),
         ])?;
-
-        let mut offset = 0;
-        let limit = 100;
-        loop {
-            let cards = self
-                .get_cards_in_collection_paginated(collection_id, CollectionCardsParams::new(offset, limit))
-                .await?;
-            if cards.is_empty() {
-                break;
+        for (uuid, row) in &by_uuid {
+            if let Some((searched, provider)) = looked_up.get(uuid) {
+                use models::CardTrait as _;
+                wtr.write_record([
+                    searched.get_set(),
+                    searched.get_collector_number(),
+                    row.quantity.to_string(),
+                    row.foil_quantity.to_string(),
+                    provider.clone(),
+                ])?;
             }
-
-            // Group UUIDs by stored provider so we issue one lookup per system.
-            let mut ids_by_provider: HashMap<&str, Vec<String>> = Default::default();
-            for card in &cards {
-                ids_by_provider
-                    .entry(card.provider.as_str())
-                    .or_default()
-                    .push(card.uuid.clone());
-            }
-
-            let mut looked_up: HashMap<String, (models::Card, String)> = Default::default();
-            for (provider, ids) in &ids_by_provider {
-                if let Some(system) = by_name.get(provider)
-                    && let Ok(result) = system.get_cards_by_ids(ids.clone()).await {
-                        for (uuid, card) in result {
-                            looked_up.insert(uuid, (card, system.name().to_string()));
-                        }
-                    }
-            }
-
-            // Fall back: try every system for cards not yet resolved.
-            let unfound: Vec<String> = cards
-                .iter()
-                .filter(|c| !looked_up.contains_key(&c.uuid))
-                .map(|c| c.uuid.clone())
-                .collect();
-            if !unfound.is_empty() {
-                for system in retrievals {
-                    if let Ok(result) = system.get_cards_by_ids(unfound.clone()).await {
-                        for (uuid, card) in result {
-                            looked_up
-                                .entry(uuid)
-                                .or_insert_with(|| (card, system.name().to_string()));
-                        }
-                    }
-                }
-            }
-
-            for card in &cards {
-                if let Some((searched, provider)) = looked_up.get(&card.uuid) {
-                    use models::CardTrait as _;
-                    wtr.write_record([
-                        searched.get_set(),
-                        searched.get_collector_number(),
-                        card.quantity.to_string(),
-                        card.foil_quantity.to_string(),
-                        provider.clone(),
-                    ])?;
-                }
-            }
-
-            offset += limit;
-            wtr.flush()?;
         }
         let data = String::from_utf8(wtr.into_inner()?)?;
         Ok(data)
@@ -277,30 +311,36 @@ mod tests {
         assert_eq!(collections.len(), 2); // Default and the new one
         let new_collection = collections.iter().find(|c| !"Default".eq(*c)).unwrap();
 
+        // 3 rows: M13/39 gets a normal row (qty 2) + a foil row (qty 1);
+        // ISD/173 gets only a foil row (qty 4) since its normal qty is 0.
         let card_count = s
             .get_cards_in_collection_count(new_collection.clone(), &[])
             .await
             .unwrap();
-        assert_eq!(card_count, 2);
+        assert_eq!(card_count, 3);
 
         let cards = s
             .get_cards_in_collection_paginated(new_collection, CollectionCardsParams::new(0, 10))
             .await
             .unwrap();
 
-        let card = cards
+        let normal = cards
             .iter()
-            .find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1")
+            .find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1" && c.finish.is_empty())
             .unwrap();
-        assert_eq!(card.quantity, 2);
-        assert_eq!(card.foil_quantity, 1);
+        assert_eq!(normal.quantity, 2);
+        let foil = cards
+            .iter()
+            .find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1" && c.finish == "foil")
+            .unwrap();
+        assert_eq!(foil.quantity, 1);
 
-        let card = cards
+        assert!(!cards.iter().any(|c| c.uuid == "0003caab-9ff5-5d1a-bc06-976dd0457f19" && c.finish.is_empty()));
+        let foil = cards
             .iter()
-            .find(|c| c.uuid == "0003caab-9ff5-5d1a-bc06-976dd0457f19")
+            .find(|c| c.uuid == "0003caab-9ff5-5d1a-bc06-976dd0457f19" && c.finish == "foil")
             .unwrap();
-        assert_eq!(card.quantity, 0);
-        assert_eq!(card.foil_quantity, 4);
+        assert_eq!(foil.quantity, 4);
 
         let latest_progress_update = receiver.borrow();
         assert_eq!(*latest_progress_update, 1.0);
@@ -387,9 +427,16 @@ mod tests {
             .get_cards_in_collection_paginated(&collection, CollectionCardsParams::new(0, 10))
             .await
             .unwrap();
-        let card = cards.iter().find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1").unwrap();
-        assert_eq!(card.quantity, 3);
-        assert_eq!(card.foil_quantity, 2);
+        let normal = cards
+            .iter()
+            .find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1" && c.finish.is_empty())
+            .unwrap();
+        assert_eq!(normal.quantity, 3);
+        let foil = cards
+            .iter()
+            .find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1" && c.finish == "foil")
+            .unwrap();
+        assert_eq!(foil.quantity, 2);
     }
 
     #[tokio::test]

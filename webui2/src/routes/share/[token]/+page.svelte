@@ -4,22 +4,24 @@
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import { getPublicCollectionCards } from '$lib/api';
 	import { app, setViewMode } from '$lib/state.svelte';
-	import type { CollectionCard } from '$lib/types';
+	import { groupByCard } from '$lib/types';
+	import type { CollectionCard, CardGroup } from '$lib/types';
 
 	// Fields the /api/share endpoint can sort by server-side (mirrors the
 	// collection-entry columns, not card-level fields like name/rarity).
-	const SORTABLE_FIELDS = new Set(['Quantity', 'FoilQuantity']);
+	const SORTABLE_FIELDS = new Set(['Quantity']);
 
 	const token = $derived(decodeURIComponent($page.params.token ?? ''));
 
 	let cards = $state<CollectionCard[]>([]);
+	const groups = $derived(groupByCard(cards));
 	let total = $state(0);
 	let currentPage = $state(1);
 	let loading = $state(true);
 	let error = $state('');
 	let sortBy = $state('');
 	let sortOrder = $state<'Asc' | 'Desc'>('Asc');
-	let detailCard = $state<CollectionCard | null>(null);
+	let detailCard = $state<CardGroup | null>(null);
 
 	const collectionId = $derived(cards[0]?.collectionId ?? '');
 
@@ -68,8 +70,7 @@
 		{ field: 'Name',         label: 'Name' },
 		{ field: 'SetCode',      label: 'Set' },
 		{ field: 'Rarity',       label: 'Rarity' },
-		{ field: 'Quantity',     label: 'Qty' },
-		{ field: 'FoilQuantity', label: 'Foil' },
+		{ field: 'Quantity',     label: 'Qty (by finish)' },
 	];
 </script>
 
@@ -120,7 +121,7 @@
 		<div class="page-header">
 			<h1 class="page-title">{collectionId || 'Shared collection'}</h1>
 			{#if !loading && !error}
-				<span class="page-subtitle">{total.toLocaleString()} card{total !== 1 ? 's' : ''}</span>
+				<span class="page-subtitle">{total.toLocaleString()} entr{total !== 1 ? 'ies' : 'y'}</span>
 			{/if}
 		</div>
 
@@ -138,13 +139,13 @@
 			</div>
 		{:else}
 			<CardResultsList
-				{cards}
+				cards={groups}
 				viewMode={app.viewMode}
 				{listHeaders}
 				keyFn={(c) => c.id}
 				collectionMode
 				selectable={false}
-				onclick={(c) => detailCard = c as CollectionCard}
+				onclick={(c) => detailCard = c as CardGroup}
 				{sortBy}
 				{sortOrder}
 				onSortClick={handleSortClick}

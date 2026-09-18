@@ -88,8 +88,8 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         &mut self,
         collection_id: &CollectionID,
         card_uuid: &CardID,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
         time_added: &str,
         provider: &str,
     ) -> eyre::Result<CollectionCard> {
@@ -100,9 +100,9 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
             collection_id,
             &[CollectionCard {
                 uuid: card_uuid.clone(),
+                finish: finish.to_string(),
                 collection: collection_id.clone(),
                 quantity,
-                foil_quantity,
                 want_quantity: 0,
                 time_added: time_added.to_string(),
                 provider: provider.to_string(),
@@ -111,13 +111,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let card = result
             .pop()
             .ok_or_else(|| eyre::eyre!("No card returned from upsert"))?;
-        purchase_history::trim_history_to_collection(
-            &tx,
-            collection_id,
-            card_uuid,
-            card.quantity,
-            card.foil_quantity,
-        )?;
+        purchase_history::trim_history_to_collection(&tx, collection_id, card_uuid, finish, card.quantity)?;
         tx.commit()?;
         Ok(card)
     }
@@ -131,13 +125,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let tx = conn.transaction()?;
         let result = cards::add_cards(&tx, collection_id, input_cards)?;
         for card in &result {
-            purchase_history::trim_history_to_collection(
-                &tx,
-                collection_id,
-                &card.uuid,
-                card.quantity,
-                card.foil_quantity,
-            )?;
+            purchase_history::trim_history_to_collection(&tx, collection_id, &card.uuid, &card.finish, card.quantity)?;
         }
         tx.commit()?;
         Ok(result)
@@ -152,14 +140,16 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<CollectionCard> {
         let conn = self.connection.lock().await;
         let now = chrono::Utc::now().to_rfc3339();
+        // Wanting a card doesn't pin down a finish yet — always tracked on
+        // the default (`""`) finish row.
         let mut result = cards::add_cards(
             &conn,
             collection_id,
             &[CollectionCard {
                 uuid: card_uuid.clone(),
+                finish: String::new(),
                 collection: collection_id.clone(),
                 quantity: 0,
-                foil_quantity: 0,
                 want_quantity: delta,
                 time_added: now,
                 provider: provider.to_string(),
@@ -178,7 +168,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         let mut conn = self.connection.lock().await;
         let tx = conn.transaction()?;
         for c in input_cards {
-            if c.quantity == 0 && c.foil_quantity == 0 && c.want_quantity == 0 {
+            if c.quantity == 0 && c.want_quantity == 0 {
                 continue;
             }
             if c.collection == to_collection_id {
@@ -189,25 +179,22 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 &c.collection,
                 &[CollectionCard {
                     uuid: c.uuid.clone(),
+                    finish: c.finish.clone(),
                     collection: c.collection.clone(),
                     quantity: -c.quantity,
-                    foil_quantity: -c.foil_quantity,
                     want_quantity: -c.want_quantity,
                     time_added: c.time_added.clone(),
                     provider: c.provider.clone(),
                 }],
             )?;
-            let (src_qty, src_foil_qty) = source_results
-                .first()
-                .map(|sc| (sc.quantity, sc.foil_quantity))
-                .unwrap_or((0, 0));
+            let src_qty = source_results.first().map(|sc| sc.quantity).unwrap_or(0);
             purchase_history::transfer_trimmed_history_to_collection(
                 &tx,
                 &c.collection,
                 &to_collection_id,
                 &c.uuid,
+                &c.finish,
                 src_qty,
-                src_foil_qty,
             )?;
             let provider = source_results
                 .first()
@@ -219,9 +206,9 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 &to_collection_id,
                 &[CollectionCard {
                     uuid: c.uuid.clone(),
+                    finish: c.finish.clone(),
                     collection: to_collection_id.clone(),
                     quantity: c.quantity,
-                    foil_quantity: c.foil_quantity,
                     want_quantity: c.want_quantity,
                     time_added: c.time_added.clone(),
                     provider,
@@ -245,25 +232,14 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         &mut self,
         collection_id: &CollectionID,
         card_uuid: &CardID,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
-        normal_price_per_unit: Option<f64>,
-        foil_price_per_unit: Option<f64>,
+        price_per_unit: Option<f64>,
         provider: &str,
         recorded_at: &str,
     ) -> eyre::Result<()> {
         let conn = self.connection.lock().await;
-        purchase_history::record_purchase(
-            &conn,
-            collection_id,
-            card_uuid,
-            quantity,
-            foil_quantity,
-            normal_price_per_unit,
-            foil_price_per_unit,
-            provider,
-            recorded_at,
-        )
+        purchase_history::record_purchase(&conn, collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at)
     }
 
     async fn get_purchase_history(
@@ -286,7 +262,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     async fn get_collection_purchase_totals(
         &self,
         collection_id: &CollectionID,
-    ) -> eyre::Result<std::collections::HashMap<CardID, PurchaseSummary>> {
+    ) -> eyre::Result<std::collections::HashMap<(CardID, String), PurchaseSummary>> {
         let conn = self.connection.lock().await;
         purchase_history::get_collection_totals(&conn, collection_id)
     }
@@ -305,12 +281,10 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         collection_id: &CollectionID,
         entry_id: i64,
         quantity: i32,
-        foil_quantity: i32,
-        normal_price_per_unit: Option<f64>,
-        foil_price_per_unit: Option<f64>,
+        price_per_unit: Option<f64>,
     ) -> eyre::Result<UpdateEntryResult> {
         let conn = self.connection.lock().await;
-        purchase_history::update_entry(&conn, collection_id, entry_id, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit)
+        purchase_history::update_entry(&conn, collection_id, entry_id, quantity, price_per_unit)
     }
 
     async fn create_share_link(&mut self, collection_id: &CollectionID) -> eyre::Result<ShareLink> {
