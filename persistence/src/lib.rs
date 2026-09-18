@@ -8,6 +8,7 @@ use models::CollectionCard;
 use models::CollectionID;
 use models::filters::SortOrder;
 
+pub use crate::csv_models::{CsvField, CsvFieldMapping};
 pub use crate::sqlite::SQLitePersistenceSystem;
 
 #[derive(Debug, Default, Clone)]

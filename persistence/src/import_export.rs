@@ -3,10 +3,65 @@ use std::collections::HashMap;
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait as _};
 
 use crate::{CollectionCard, CollectionCardsParams, PersistenceSystem, PersistenceSystemTrait as _};
-use crate::csv_models::CSVCard;
+use crate::csv_models::{CSVCard, CsvField, CsvFieldMapping};
 
 fn systems_by_name<'a>(retrievals: &'a [RetrievalSystem]) -> HashMap<&'a str, &'a RetrievalSystem> {
     retrievals.iter().map(|r| (r.name(), r)).collect()
+}
+
+/// Reads every row of `filename` into `CSVCard`s, resolving each column by
+/// the header text `mapping` says holds it (falling back to
+/// `CsvField::default_header` for anything not overridden) rather than
+/// assuming gathers' own fixed column names. `SetCode`/`CollectorNumber`/
+/// `Quantity` must all be present under their resolved header; `Provider`
+/// and `FoilQuantity` are optional and default to an empty string / 0 when
+/// the file has no such column at all — several third-party formats (see
+/// `CsvFieldMapping::preset`) don't track foil as a separate count.
+fn read_csv(filename: &str, mapping: &CsvFieldMapping) -> eyre::Result<Vec<CSVCard>> {
+    let mut rdr = csv::Reader::from_path(filename)?;
+    let header_to_field = mapping.header_to_field();
+
+    let mut field_index: HashMap<CsvField, usize> = HashMap::new();
+    for (i, header) in rdr.headers()?.iter().enumerate() {
+        if let Some(&field) = header_to_field.get(header) {
+            field_index.insert(field, i);
+        }
+    }
+
+    for required in [CsvField::SetCode, CsvField::CollectorNumber, CsvField::Quantity] {
+        if !field_index.contains_key(&required) {
+            return Err(eyre::eyre!(
+                "CSV is missing a '{}' column",
+                mapping.header_for(required)
+            ));
+        }
+    }
+
+    let mut cards = vec![];
+    for result in rdr.records() {
+        let record = result?;
+        let get = |field: CsvField| -> Option<&str> {
+            field_index.get(&field).and_then(|&i| record.get(i))
+        };
+        // A field with no matching column at all defaults to 0 (rather than
+        // failing to parse an empty string) — see the doc comment above.
+        let parse_count = |field: CsvField| -> eyre::Result<u32> {
+            match get(field) {
+                Some(v) => v
+                    .parse()
+                    .map_err(|_| eyre::eyre!("invalid value {v:?} in '{}' column", mapping.header_for(field))),
+                None => Ok(0),
+            }
+        };
+        cards.push(CSVCard {
+            set_code: get(CsvField::SetCode).unwrap_or_default().to_string(),
+            collector_number: get(CsvField::CollectorNumber).unwrap_or_default().to_string(),
+            quantity: parse_count(CsvField::Quantity)?,
+            foil_quantity: parse_count(CsvField::FoilQuantity)?,
+            provider: get(CsvField::Provider).unwrap_or_default().to_string(),
+        });
+    }
+    Ok(cards)
 }
 
 impl PersistenceSystem {
@@ -16,15 +71,12 @@ impl PersistenceSystem {
         collection_name: String,
         retrievals: &[RetrievalSystem],
         progress_sender: Option<tokio::sync::watch::Sender<f32>>,
+        mapping: &CsvFieldMapping,
     ) -> eyre::Result<()> {
         const DEFAULT_PROVIDER: &str = "MagicSQLite";
         const BULK_CHUNK_SIZE: usize = 500;
 
-        let mut rdr = csv::Reader::from_path(filename)?;
-        let mut cards: Vec<CSVCard> = vec![];
-        for result in rdr.deserialize() {
-            cards.push(result?);
-        }
+        let cards = read_csv(&filename, mapping)?;
 
         let by_name = systems_by_name(retrievals);
 
@@ -108,10 +160,19 @@ impl PersistenceSystem {
         &self,
         collection_id: &models::CollectionID,
         retrievals: &[RetrievalSystem],
+        mapping: &CsvFieldMapping,
     ) -> eyre::Result<String> {
         let by_name = systems_by_name(retrievals);
 
         let mut wtr = csv::Writer::from_writer(vec![]);
+        wtr.write_record([
+            mapping.header_for(CsvField::SetCode),
+            mapping.header_for(CsvField::CollectorNumber),
+            mapping.header_for(CsvField::Quantity),
+            mapping.header_for(CsvField::FoilQuantity),
+            mapping.header_for(CsvField::Provider),
+        ])?;
+
         let mut offset = 0;
         let limit = 100;
         loop {
@@ -162,13 +223,13 @@ impl PersistenceSystem {
             for card in &cards {
                 if let Some((searched, provider)) = looked_up.get(&card.uuid) {
                     use models::CardTrait as _;
-                    wtr.serialize(CSVCard {
-                        set_code: searched.get_set(),
-                        collector_number: searched.get_collector_number(),
-                        quantity: card.quantity as u32,
-                        foil_quantity: card.foil_quantity as u32,
-                        provider: provider.clone(),
-                    })?;
+                    wtr.write_record([
+                        searched.get_set(),
+                        searched.get_collector_number(),
+                        card.quantity.to_string(),
+                        card.foil_quantity.to_string(),
+                        provider.clone(),
+                    ])?;
                 }
             }
 
@@ -202,9 +263,15 @@ mod tests {
         let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
             MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
         );
-        s.import_csv("../data/test.csv".to_string(), "New Collection".to_string(), &[r.clone()], Some(sender))
-            .await
-            .unwrap();
+        s.import_csv(
+            "../data/test.csv".to_string(),
+            "New Collection".to_string(),
+            &[r.clone()],
+            Some(sender),
+            &CsvFieldMapping::default(),
+        )
+        .await
+        .unwrap();
 
         let collections = s.list_collections(None).await.unwrap();
         assert_eq!(collections.len(), 2); // Default and the new one
@@ -239,7 +306,7 @@ mod tests {
         assert_eq!(*latest_progress_update, 1.0);
 
         let export = s
-            .export_collection(new_collection, &[r])
+            .export_collection(new_collection, &[r], &CsvFieldMapping::default())
             .await
             .expect("Should work");
 
@@ -251,5 +318,104 @@ mod tests {
                 || export
                     == format!("Set,CollectorNumber,Quantity,FoilQuantity,Provider\nISD,173,0,4,{provider}\nM13,39,2,1,{provider}\n")
         );
+    }
+
+    #[tokio::test]
+    async fn test_export_with_custom_field_mapping() {
+        let mut s = PersistenceSystem::SQLitePersistenceSystem(
+            SQLitePersistenceSystem::new(true, None).unwrap(),
+        );
+        let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
+            MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
+        );
+        s.import_csv(
+            "../data/test.csv".to_string(),
+            "New Collection".to_string(),
+            &[r.clone()],
+            None,
+            &CsvFieldMapping::default(),
+        )
+        .await
+        .unwrap();
+        let collection = s.list_collections(None).await.unwrap().into_iter().find(|c| c != "Default").unwrap();
+
+        let mut mapping = CsvFieldMapping::new();
+        mapping.set(CsvField::SetCode, Some("Code".to_string()));
+        mapping.set(CsvField::CollectorNumber, Some("Number".to_string()));
+
+        let export = s.export_collection(&collection, &[r], &mapping).await.unwrap();
+
+        // Overridden headers used for the mapped fields, defaults kept for the rest.
+        assert!(export.starts_with("Code,Number,Quantity,FoilQuantity,Provider\n"));
+        assert!(export.contains("M13,39,2,1,"));
+        assert!(export.contains("ISD,173,0,4,"));
+    }
+
+    #[tokio::test]
+    async fn test_import_with_custom_field_mapping() {
+        // A file using entirely different column names than gathers' own
+        // default format — only resolvable because a mapping says what
+        // each of these columns actually is.
+        let path = std::env::temp_dir().join(format!("gathers_test_{}.csv", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "Code,Number,Qty,FoilQty\nM13,39,3,2\n").unwrap();
+
+        let mut mapping = CsvFieldMapping::new();
+        mapping.set(CsvField::SetCode, Some("Code".to_string()));
+        mapping.set(CsvField::CollectorNumber, Some("Number".to_string()));
+        mapping.set(CsvField::Quantity, Some("Qty".to_string()));
+        mapping.set(CsvField::FoilQuantity, Some("FoilQty".to_string()));
+
+        let mut s = PersistenceSystem::SQLitePersistenceSystem(
+            SQLitePersistenceSystem::new(true, None).unwrap(),
+        );
+        let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
+            MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
+        );
+        s.import_csv(
+            path.to_string_lossy().to_string(),
+            "Mapped Import".to_string(),
+            &[r],
+            None,
+            &mapping,
+        )
+        .await
+        .unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let collection = s.list_collections(None).await.unwrap().into_iter().find(|c| c != "Default").unwrap();
+        let cards = s
+            .get_cards_in_collection_paginated(&collection, CollectionCardsParams::new(0, 10))
+            .await
+            .unwrap();
+        let card = cards.iter().find(|c| c.uuid == "0005d268-3fd0-5424-bc6b-573ecd713aa1").unwrap();
+        assert_eq!(card.quantity, 3);
+        assert_eq!(card.foil_quantity, 2);
+    }
+
+    #[tokio::test]
+    async fn test_import_missing_required_column_errors() {
+        let path = std::env::temp_dir().join(format!("gathers_test_{}.csv", uuid::Uuid::new_v4()));
+        // No Quantity/FoilQuantity columns at all.
+        std::fs::write(&path, "Set,CollectorNumber\nM13,39\n").unwrap();
+
+        let mut s = PersistenceSystem::SQLitePersistenceSystem(
+            SQLitePersistenceSystem::new(true, None).unwrap(),
+        );
+        let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
+            MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
+        );
+        let result = s
+            .import_csv(
+                path.to_string_lossy().to_string(),
+                "Broken Import".to_string(),
+                &[r],
+                None,
+                &CsvFieldMapping::default(),
+            )
+            .await;
+        std::fs::remove_file(&path).ok();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Quantity"));
     }
 }

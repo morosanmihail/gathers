@@ -1044,10 +1044,64 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         }
     }
 
+    /// Optional CSV column-header overrides for import/export, shared by
+    /// both endpoints (as query params on export, matching-named multipart
+    /// text fields on import — see `build_csv_mapping`). `preset` names one
+    /// of `persistence::CsvFieldMapping`'s built-in third-party formats
+    /// (e.g. `tcgplayer`); any of the five `*_field` overrides given on top
+    /// of it replace just that one field, preset or not. Defaults (nothing
+    /// given at all) reproduce gathers' own original fixed CSV format.
+    #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+    struct CsvMappingParams {
+        #[serde(default)]
+        preset: Option<String>,
+        #[serde(default)]
+        set_code_field: Option<String>,
+        #[serde(default)]
+        collector_number_field: Option<String>,
+        #[serde(default)]
+        quantity_field: Option<String>,
+        #[serde(default)]
+        foil_quantity_field: Option<String>,
+        #[serde(default)]
+        provider_field: Option<String>,
+    }
+
+    fn build_csv_mapping(params: &CsvMappingParams) -> Result<persistence::CsvFieldMapping, ApiError> {
+        let mut mapping = match params.preset.as_deref() {
+            None | Some("") => persistence::CsvFieldMapping::default(),
+            Some(name) => persistence::CsvFieldMapping::preset(name).ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorPayload {
+                        error: format!(
+                            "Unknown CSV mapping preset '{name}' (known presets: tcgplayer, cardkingdom, deckbox, mtggoldfish)"
+                        ),
+                    }),
+                )
+            })?,
+        };
+        for (field, value) in [
+            (persistence::CsvField::SetCode, &params.set_code_field),
+            (persistence::CsvField::CollectorNumber, &params.collector_number_field),
+            (persistence::CsvField::Quantity, &params.quantity_field),
+            (persistence::CsvField::FoilQuantity, &params.foil_quantity_field),
+            (persistence::CsvField::Provider, &params.provider_field),
+        ] {
+            if let Some(header) = value {
+                mapping.set(field, Some(header.clone()));
+            }
+        }
+        Ok(mapping)
+    }
+
     async fn export(
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
+        Query(mapping_params): Query<CsvMappingParams>,
     ) -> Result<Response, ApiError> {
+        let mapping = build_csv_mapping(&mapping_params)?;
+
         let retrievals: Vec<RetrievalSystem> = {
             let guard = state.0.lock().await;
             [guard.mtg.clone(), guard.riftbound.clone(), guard.pokemon.clone()]
@@ -1061,7 +1115,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .export_collection(&collection_id, &retrievals)
+            .export_collection(&collection_id, &retrievals, &mapping)
             .await
             .map_err(|e| {
                 (
@@ -1097,6 +1151,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         if demo_mode() { return Err(demo_err()); }
         let mut file_bytes: Option<Vec<u8>> = None;
         let mut collection_name: Option<String> = None;
+        let mut mapping_params = CsvMappingParams::default();
 
         while let Some(field) = multipart.next_field().await.map_err(|e| {
             (
@@ -1106,7 +1161,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 }),
             )
         })? {
-            match field.name() {
+            let name = field.name().map(str::to_string);
+            match name.as_deref() {
                 Some("file") => {
                     file_bytes = Some(field.bytes().await.map_err(|e| {
                         (
@@ -1127,9 +1183,33 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                         )
                     })?);
                 }
+                // Optional CSV field-mapping overrides — see `CsvMappingParams`.
+                Some(field_name @ ("preset" | "set_code_field" | "collector_number_field"
+                    | "quantity_field" | "foil_quantity_field" | "provider_field")) => {
+                    let value = field.text().await.map_err(|e| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(ErrorPayload {
+                                error: format!("Failed to read '{field_name}' field: {e}"),
+                            }),
+                        )
+                    })?;
+                    let target = match field_name {
+                        "preset" => &mut mapping_params.preset,
+                        "set_code_field" => &mut mapping_params.set_code_field,
+                        "collector_number_field" => &mut mapping_params.collector_number_field,
+                        "quantity_field" => &mut mapping_params.quantity_field,
+                        "foil_quantity_field" => &mut mapping_params.foil_quantity_field,
+                        "provider_field" => &mut mapping_params.provider_field,
+                        _ => unreachable!(),
+                    };
+                    *target = Some(value);
+                }
                 _ => {}
             }
         }
+
+        let mapping = build_csv_mapping(&mapping_params)?;
 
         let bytes = file_bytes.ok_or_else(|| {
             (
@@ -1174,7 +1254,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .import_csv(tmp_path, collection_name, &retrievals, None)
+            .import_csv(tmp_path, collection_name, &retrievals, None, &mapping)
             .await
             .map_err(|e| {
                 (
