@@ -363,9 +363,17 @@ type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' |
 // provider name as-is (e.g. "RiftboundSQLite"), or `plugin:{name}` — the
 // colon is just this UI's internal sentinel for "show the plugin filter
 // fields," and needs translating to the `plugin-{name}` (dash) convention
-// the server actually stores/expects as a provider string.
+// the server actually stores/expects as a provider string. The provider is
+// always lowercase even when the plugin is configured as e.g. "Books" (which
+// is still what's displayed).
 export function providerFromActiveSystem(activeSystem: string): string {
-	return activeSystem.startsWith('plugin:') ? `plugin-${activeSystem.slice('plugin:'.length)}` : activeSystem;
+	return activeSystem.startsWith('plugin:')
+		? pluginProvider(activeSystem.slice('plugin:'.length))
+		: activeSystem;
+}
+
+function pluginProvider(name: string): string {
+	return `plugin-${name.toLowerCase()}`;
 }
 
 export async function addCardToCollection(
@@ -472,7 +480,7 @@ export async function searchPokemon(filters: SearchFilters, page: number): Promi
 }
 
 // A plugin-sourced card's `provider` is stored/returned by the server as
-// `plugin-{name}` (see `cards_add` in collections.rs) — matched here so a
+// lowercase `plugin-{name}` (see `cards_add` in collections.rs) — matched here so a
 // search result and the same card once added to a collection carry the
 // same provider string.
 function mapPluginCard(name: string, c: PluginCardWire): PluginResultCard {
@@ -484,7 +492,8 @@ function mapPluginCard(name: string, c: PluginCardWire): PluginResultCard {
 		collectorNumber: c.collector_number || undefined,
 		description: c.description ?? undefined,
 		image: c.image_url ?? undefined,
-		provider: `plugin-${name}`
+		extra: c.extra && Object.keys(c.extra).length > 0 ? c.extra : undefined,
+		provider: pluginProvider(name)
 	};
 }
 
@@ -601,6 +610,25 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(settings)
 	});
+}
+
+// Restarts the server in place, then waits for it to answer again. The old
+// process stops accepting connections as soon as it's asked to restart, so a
+// short pause before polling can't be mistaken for the old server still being up.
+export async function restartServer(timeoutMs = 60_000): Promise<void> {
+	await fetchJSON('/api/settings/restart', { method: 'POST' });
+	invalidateSystemInfo();
+	const deadline = Date.now() + timeoutMs;
+	await new Promise(resolve => setTimeout(resolve, 1000));
+	while (Date.now() < deadline) {
+		try {
+			if ((await fetch('/api/system')).ok) return;
+		} catch {
+			/* still down */
+		}
+		await new Promise(resolve => setTimeout(resolve, 1000));
+	}
+	throw new Error('Server did not come back after restarting');
 }
 
 export async function triggerUpdate(endpoint: string): Promise<string> {

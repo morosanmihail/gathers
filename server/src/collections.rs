@@ -17,7 +17,7 @@ use persistence::{CollectionCardsParams, PersistenceSystem, PersistenceSystemTra
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait};
 
 use crate::{
-    ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
+    ApiError, ErrorPayload, GathersState, demo_mode, demo_err, find_plugin, plugin_provider,
     collections::collections_models::{
         APICardSearchFilters, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
         CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
@@ -153,7 +153,7 @@ async fn provider_has_card(
 ) -> bool {
     let ids = vec![card_id.to_string()];
     if let Some(name) = provider.strip_prefix("plugin-") {
-        let Some(plugin) = plugins.get(name) else {
+        let Some(plugin) = find_plugin(plugins, name) else {
             return false;
         };
         matches!(plugin.cards_by_ids(ids).await, Ok(found) if !found.is_empty())
@@ -182,7 +182,11 @@ async fn resolve_provider(state: &GathersState, card_id: &str, explicit: Option<
     if let Some(explicit) = explicit.filter(|p| !p.is_empty())
         && provider_has_card(&systems, &plugins, explicit, card_id).await
     {
-        return explicit.to_string();
+        // Plugin providers are stored lowercase whatever case the client sent.
+        return match explicit.strip_prefix("plugin-") {
+            Some(name) => plugin_provider(name),
+            None => explicit.to_string(),
+        };
     }
 
     for (name, system) in &systems {
@@ -196,7 +200,7 @@ async fn resolve_provider(state: &GathersState, card_id: &str, explicit: Option<
         if let Ok(found) = plugin.cards_by_ids(vec![card_id.to_string()]).await
             && !found.is_empty()
         {
-            return format!("plugin-{name}");
+            return plugin_provider(name);
         }
     }
     String::new()
@@ -228,7 +232,7 @@ async fn hydrate_collectibles(
     let mut out = HashMap::new();
     for (provider, ids) in by_provider {
         if let Some(name) = provider.strip_prefix("plugin-") {
-            if let Some(plugin) = plugins.get(name)
+            if let Some(plugin) = find_plugin(&plugins, name)
                 && let Ok(data) = plugin.cards_by_ids(ids.clone()).await
             {
                 out.extend(data.into_iter().map(|(k, v)| (k, AnyCollectible::Plugin(v))));

@@ -1550,6 +1550,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RestartResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugins": {
         parameters: {
             query?: never;
@@ -2134,6 +2168,10 @@ export interface components {
         };
         /** @enum {string} */
         RBRarity: "Common" | "Uncommon" | "Rare" | "Epic" | "Showcase";
+        RestartResponse: {
+            /** @description Always true: the server is shutting down to re-exec itself. */
+            restarting: boolean;
+        };
         ResultCard: {
             mtGCard: components["schemas"]["ResultCardInner"];
         };
@@ -2246,6 +2284,11 @@ export interface components {
             plugins: string[];
             /** @description Whether pricing support is enabled (market prices, purchase history, etc.). */
             pricing_enabled: boolean;
+            /**
+             * @description Whether settings were saved that only take effect after a server
+             *     restart. Stays set until the server restarts.
+             */
+            restart_required: boolean;
             /** @description Primary active system, identified by NamedRetrievalSystem::name(). */
             system: string;
             /**

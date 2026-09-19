@@ -83,14 +83,14 @@ base_url = "http://localhost:5236"
 enabled = true
 ```
 
-- `name` is how the plugin is addressed everywhere: `/api/plugins/{name}/...`, and the provider string `plugin-{name}` used when one of its cards is stored in a collection.
+- `name` is how the plugin is addressed everywhere: `/api/plugins/{name}/...`, and the provider string `plugin-{name}` used when one of its cards is stored in a collection. The provider string is always stored lowercase (a plugin named `Books` stores `plugin-books`), and name lookups ignore case; the name is displayed as you configured it.
 - Config changes take effect on server restart, same as `system`/`auto_download_*`.
 - You can also add/remove `[[plugins]]` entries from the web UI's Settings page (under the Systems panel) instead of hand-editing the file. That page also has an **Update** button per enabled plugin, which calls your `/gathers-plugin/v1/update` — so implement it, even as a no-op, rather than leaving it unreachable.
 - Two plugins can't share a `name`: the Settings page blocks saving a config with a duplicate, and the server also logs a warning (keeping only the last one) if it finds duplicates in a hand-edited `server.toml`.
 
 ## What plugins get for free
 
-Once registered, `name` shows up in `/api/system`'s `plugins` list, and the web UI's search page/add-to-collection modal automatically render it as a selectable source — no frontend changes needed. Cards can be searched, viewed, and **added to a real collection**: `POST /api/collection/cards/{id}/add` probes your plugin's `cards/by-ids` the same way it probes MTG/Riftbound/Pokémon, and stores the card with `provider = "plugin-{name}"`.
+Once registered, `name` shows up in `/api/system`'s `plugins` list, and the web UI's search page/add-to-collection modal automatically render it as a selectable source — no frontend changes needed. Cards can be searched, viewed, and **added to a real collection**: `POST /api/collection/cards/{id}/add` probes your plugin's `cards/by-ids` the same way it probes MTG/Riftbound/Pokémon, and stores the card with `provider = "plugin-{name}"` (lowercased).
 
 What that gets you, concretely, once a card is in a collection:
 - It shows up in the plain collection listing and count.

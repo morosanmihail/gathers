@@ -61,7 +61,7 @@ The `server.toml` config supports these keys beyond `system` and `port`:
 | `pokemon_db_path` | see env var default | Path to `pokemon.db` |
 | `storage_db_path` | see env var default | Path to `storage.db` |
 
-All config options can also be changed at runtime via the Settings page in the web UI (`/settings`). Changes to `pricing_enabled` and `collections_enabled` take effect immediately; other changes (paths, port, systems, `auto_download_enabled`, `auto_download_interval_hours`) require a server restart.
+All config options can also be changed at runtime via the Settings page in the web UI (`/settings`). Changes to `pricing_enabled` and `collections_enabled` take effect immediately; other changes (paths, port, systems, `auto_download_enabled`, `auto_download_interval_hours`) require a server restart. When you save such a change, the Settings page shows a banner with a **Restart now** button; it calls `POST /api/settings/restart`, which re-executes the server in place (same binary, arguments and environment — no process supervisor needed) and is disabled in demo mode. `/api/system` reports the pending state as `restart_required`, and a restart clears it.
 
 ## Retrieval Database
 

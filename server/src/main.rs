@@ -77,6 +77,9 @@ pub struct SystemInfo {
     pub pricing_enabled: bool,
     /// Whether collection management is enabled.
     pub collections_enabled: bool,
+    /// Whether settings were saved that only take effect after a server
+    /// restart. Stays set until the server restarts.
+    pub restart_required: bool,
 }
 
 type GathersState = (Arc<Mutex<RetrievalState>>, Arc<Mutex<StorageState>>);
@@ -99,9 +102,33 @@ pub struct RetrievalState {
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
     pub pricing_enabled: bool,
     pub collections_enabled: bool,
+    /// Set when saved settings need a restart to apply; a restart clears it
+    /// by starting from a fresh `RetrievalState`.
+    pub restart_required: bool,
     /// Third-party plugin proxies, keyed by name. Set after construction —
     /// see `PluginConfig` and the wiring in `main()`.
     pub plugins: HashMap<String, retrieval::PluginRetrievalSystem>,
+}
+
+/// The `provider` string stored on collection cards that come from plugin
+/// `name`. Always lowercase, whatever case the plugin was configured with
+/// (`Books` -> `plugin-books`); the configured name is still what's shown to
+/// users and what keys `RetrievalState::plugins`.
+pub fn plugin_provider(name: &str) -> String {
+    format!("plugin-{}", name.to_lowercase())
+}
+
+/// Looks a plugin up by name ignoring case, so a lowercase stored provider
+/// (or a row stored before providers were lowercased) still resolves to a
+/// plugin configured as `Books`. An exact match wins over a case-folded one.
+pub fn find_plugin<'a, T>(plugins: &'a HashMap<String, T>, name: &str) -> Option<&'a T> {
+    let lowered = name.to_lowercase();
+    plugins.get(name).or_else(|| {
+        plugins
+            .iter()
+            .find(|(configured, _)| configured.to_lowercase() == lowered)
+            .map(|(_, plugin)| plugin)
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +164,7 @@ impl RetrievalState {
             downloading: HashMap::new(),
             pricing_enabled,
             collections_enabled,
+            restart_required: false,
             plugins: HashMap::new(),
         };
 
@@ -241,7 +269,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled }
+        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -278,7 +306,7 @@ impl RetrievalState {
     }
 
     pub fn require_plugin(&self, name: &str) -> Result<&retrieval::PluginRetrievalSystem, ApiError> {
-        self.plugins.get(name).ok_or_else(|| {
+        find_plugin(&self.plugins, name).ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
                 Json(ErrorPayload {
@@ -418,6 +446,18 @@ pub struct ServerConfig {
     storage_db_path: Option<String>,
     #[serde(default)]
     pub plugins: Vec<PluginConfig>,
+}
+
+impl ServerConfig {
+    /// Whether going from `self` to `new` changes anything that is only read
+    /// at startup. `pricing_enabled` and `collections_enabled` are applied to
+    /// the running server on save; everything else needs a restart.
+    fn restart_needed(&self, new: &ServerConfig) -> bool {
+        let mut live_applied = self.clone();
+        live_applied.pricing_enabled = new.pricing_enabled;
+        live_applied.collections_enabled = new.collections_enabled;
+        toml::to_string(&live_applied).ok() != toml::to_string(new).ok()
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -660,7 +700,9 @@ async fn main() -> eyre::Result<()> {
     {
         let mut seen = std::collections::HashSet::new();
         for p in config.plugins.iter().filter(|p| p.enabled) {
-            if !seen.insert(p.name.as_str()) {
+            // Names differing only by case share a provider string, so they
+            // count as duplicates too.
+            if !seen.insert(p.name.to_lowercase()) {
                 warn!(name = %p.name, "Duplicate plugin name in config — only the last one will be used");
             }
         }
@@ -820,7 +862,121 @@ async fn main() -> eyre::Result<()> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
     info!(port, "Listening on 0.0.0.0:{port}");
 
-    axum::serve(listener, app).await?;
+    // `POST /api/settings/restart` fires `RESTART`: stop accepting connections,
+    // let in-flight requests (including the one that asked) finish, then
+    // re-exec ourselves.
+    let serve = axum::serve(listener, app).with_graceful_shutdown(RESTART.notified());
+    tokio::select! {
+        res = serve => res?,
+        // Don't let a stuck connection hold the restart up forever.
+        _ = async {
+            RESTART.notified().await;
+            tokio::time::sleep(RESTART_DRAIN_TIMEOUT).await;
+        } => warn!("Timed out draining connections — restarting anyway"),
+    }
 
-    Ok(())
+    info!("Restarting");
+    Err(reexec().into())
+}
+
+/// Fired (with `notify_waiters`, since both the graceful shutdown and its
+/// drain timeout wait on it) by the restart endpoint to make `main` shut down
+/// and re-exec.
+pub(crate) static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+const RESTART_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Replaces this process with a fresh copy of itself (same args and
+/// environment). On unix that's a real `exec`, so the PID stays the same and
+/// works without a supervisor; only returns if it failed.
+fn reexec() -> std::io::Error {
+    let mut exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => return e,
+    };
+    // Linux appends " (deleted)" when the binary was replaced while running
+    // (e.g. after an upgrade) — restart into the new one at the same path.
+    if let Some(live) = exe.to_str().and_then(|p| p.strip_suffix(" (deleted)")) {
+        exe = live.into();
+    }
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        cmd.exec()
+    }
+    #[cfg(not(unix))]
+    match cmd.spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(e) => e,
+    }
+}
+
+#[cfg(test)]
+mod restart_needed_tests {
+    use super::*;
+
+    fn config() -> ServerConfig {
+        toml::from_str("system = [\"RiftboundSql\"]\nport = 5234").unwrap()
+    }
+
+    #[test]
+    fn unchanged_config_needs_no_restart() {
+        assert!(!config().restart_needed(&config()));
+    }
+
+    #[test]
+    fn live_applied_toggles_need_no_restart() {
+        let mut new = config();
+        new.pricing_enabled = !new.pricing_enabled;
+        new.collections_enabled = !new.collections_enabled;
+        assert!(!config().restart_needed(&new));
+    }
+
+    #[test]
+    fn startup_only_settings_need_a_restart() {
+        let changes: [fn(&mut ServerConfig); 6] = [
+            |c| c.port = 1234,
+            |c| c.system.push(Systems::Sql),
+            |c| c.auto_download_enabled = !c.auto_download_enabled,
+            |c| c.auto_download_interval_hours += 1,
+            |c| c.mtg_db_path = Some("/elsewhere.db".into()),
+            |c| c.plugins.push(PluginConfig { name: "books".into(), base_url: "http://localhost:5236".into(), enabled: true }),
+        ];
+        for change in changes {
+            let mut new = config();
+            change(&mut new);
+            assert!(config().restart_needed(&new));
+        }
+    }
+}
+
+#[cfg(test)]
+mod plugin_name_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_provider_is_lowercase() {
+        assert_eq!(plugin_provider("Books"), "plugin-books");
+        assert_eq!(plugin_provider("books"), "plugin-books");
+        assert_eq!(plugin_provider("Dummy-Books"), "plugin-dummy-books");
+    }
+
+    #[test]
+    fn find_plugin_ignores_case_and_keeps_configured_name() {
+        let plugins = HashMap::from([("Books".to_string(), 1)]);
+        assert_eq!(find_plugin(&plugins, "books"), Some(&1));
+        assert_eq!(find_plugin(&plugins, "Books"), Some(&1));
+        assert_eq!(find_plugin(&plugins, "BOOKS"), Some(&1));
+        assert_eq!(find_plugin(&plugins, "comics"), None);
+    }
+
+    #[test]
+    fn find_plugin_prefers_exact_match() {
+        let plugins = HashMap::from([("Books".to_string(), 1), ("books".to_string(), 2)]);
+        assert_eq!(find_plugin(&plugins, "books"), Some(&2));
+        assert_eq!(find_plugin(&plugins, "Books"), Some(&1));
+    }
 }
