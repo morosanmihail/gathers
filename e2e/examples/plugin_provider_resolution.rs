@@ -99,7 +99,7 @@ async fn run(
     // request is actually driving the outcome.
     step("1. Explicit provider A wins exactly, despite an identical id existing under B");
     client
-        .add_cards_with_provider(col_a, BOOK_ID, 1, 0, None, Some(&provider_a))
+        .add_cards_with_provider(col_a, BOOK_ID, "", 1, None, Some(&provider_a))
         .await?;
     let cards = client.list_cards(col_a).await?;
     let card = find_card(&cards, BOOK_ID)?;
@@ -108,7 +108,7 @@ async fn run(
 
     step("2. Explicit provider B wins exactly, despite an identical id existing under A");
     client
-        .add_cards_with_provider(col_b, BOOK_ID, 1, 0, None, Some(&provider_b))
+        .add_cards_with_provider(col_b, BOOK_ID, "", 1, None, Some(&provider_b))
         .await?;
     let cards = client.list_cards(col_b).await?;
     let card = find_card(&cards, BOOK_ID)?;
@@ -117,7 +117,7 @@ async fn run(
 
     // ── 3. Omitted provider still resolves to a real, valid one ─────────────
     step("3. Omitted provider falls back to probing every configured plugin");
-    client.add_cards(col_fallback, BOOK_ID, 1, 0, None).await?;
+    client.add_cards(col_fallback, BOOK_ID, "", 1, None).await?;
     let cards = client.list_cards(col_fallback).await?;
     let card = find_card(&cards, BOOK_ID)?;
     ensure(
@@ -132,7 +132,7 @@ async fn run(
     // ── 4. A bogus/wrong claimed provider isn't trusted blindly ─────────────
     step("4. A provider claim that doesn't actually have the card is rejected, not trusted");
     client
-        .add_cards_with_provider(col_bogus, BOOK_ID, 1, 0, None, Some("plugin-does-not-exist"))
+        .add_cards_with_provider(col_bogus, BOOK_ID, "", 1, None, Some("plugin-does-not-exist"))
         .await?;
     let cards = client.list_cards(col_bogus).await?;
     let card = find_card(&cards, BOOK_ID)?;

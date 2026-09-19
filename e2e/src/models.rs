@@ -19,9 +19,12 @@ pub struct CollectionRemoveResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionCard {
     pub id: String,
+    /// Which printing/finish this row tracks — `""` (the default/primary
+    /// finish), MTG's `"foil"`/`"etched"`, a Pokemon variant, etc. Distinct
+    /// finishes of the same card `id` are separate rows.
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    #[serde(rename = "foilQuantity")]
-    pub foil_quantity: i32,
     #[serde(rename = "wantQuantity", default)]
     pub want_quantity: i32,
     #[serde(rename = "collectionId")]
@@ -35,9 +38,10 @@ pub struct CollectionCard {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CardToAdd {
     pub id: String,
+    /// See `CollectionCard::finish`. Defaults to `""` (the primary finish).
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    #[serde(rename = "foilQuantity")]
-    pub foil_quantity: i32,
     #[serde(rename = "purchasePrice")]
     pub purchase_price: Option<f64>,
     /// Which system/plugin this card came from. When omitted, the server
@@ -59,10 +63,10 @@ pub struct AdjustWantQuantityRequest {
 pub struct PurchaseHistoryEntry {
     pub id: i64,
     pub card_uuid: String,
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    pub foil_quantity: i32,
-    pub normal_price_per_unit: Option<f64>,
-    pub foil_price_per_unit: Option<f64>,
+    pub price_per_unit: Option<f64>,
     pub provider: String,
     pub recorded_at: String,
 }
@@ -78,10 +82,10 @@ pub struct CollectionPurchaseHistoryEntry {
     pub card_uuid: String,
     pub card_name: Option<String>,
     pub set_code: Option<String>,
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    pub foil_quantity: i32,
-    pub normal_price_per_unit: Option<f64>,
-    pub foil_price_per_unit: Option<f64>,
+    pub price_per_unit: Option<f64>,
     pub provider: String,
     pub recorded_at: String,
 }

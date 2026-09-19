@@ -16,6 +16,9 @@ name = "share_view"
 [[example]]
 name = "plugin_provider_resolution"
 
+[[example]]
+name = "finishes"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }

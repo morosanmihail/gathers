@@ -66,23 +66,23 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     // ── 2. Add cards with purchase prices ────────────────────────────────────
     step("2. Add cards to source collection");
 
-    // card A: 4 copies in two batches at different prices
-    client.add_cards(col_src, CARD_A, 2, 0, Some(3.00)).await?;
-    client.add_cards(col_src, CARD_A, 2, 0, Some(5.00)).await?;
+    // card A: 4 copies (default finish) in two batches at different prices
+    client.add_cards(col_src, CARD_A, "", 2, Some(3.00)).await?;
+    client.add_cards(col_src, CARD_A, "", 2, Some(5.00)).await?;
     // card B: 2 foil at $10 each
-    client.add_cards(col_src, CARD_B, 0, 2, Some(10.00)).await?;
+    client.add_cards(col_src, CARD_B, "foil", 2, Some(10.00)).await?;
 
     let cards = client.list_cards(col_src).await?;
-    let a = find_card(&cards, CARD_A)?;
+    let a = find_finish(&cards, CARD_A, "")?;
     eq(a.quantity, 4, "card A quantity")?;
-    eq(a.foil_quantity, 0, "card A foil")?;
-    let b = find_card(&cards, CARD_B)?;
-    eq(b.quantity, 0, "card B quantity")?;
-    eq(b.foil_quantity, 2, "card B foil")?;
-    ok("4× card A + 2× foil card B in collection");
+    ensure(find_finish(&cards, CARD_A, "foil").is_err(), "card A has no foil row")?;
+    let b = find_finish(&cards, CARD_B, "foil")?;
+    eq(b.quantity, 2, "card B foil quantity")?;
+    ensure(find_finish(&cards, CARD_B, "").is_err(), "card B has no default-finish row")?;
+    ok("4× card A (default finish) + 2× foil card B in collection");
 
     let count = client.card_count(col_src).await?;
-    eq(count, 2, "card count = 2 distinct cards")?;
+    eq(count, 2, "card count = 2 distinct (uuid, finish) rows")?;
     ok("card_count returns 2");
 
     // ── 3. Verify purchase history recorded ──────────────────────────────────
@@ -92,11 +92,13 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     eq(hist_a.entries.len(), 2, "card A: 2 purchase entries")?;
     let total_qty_a: i32 = hist_a.entries.iter().map(|e| e.quantity).sum();
     eq(total_qty_a, 4, "card A: total purchased qty = 4")?;
+    ensure(hist_a.entries.iter().all(|e| e.finish.is_empty()), "card A history rows are default-finish")?;
     ok("card A: 2 purchase history entries summing to 4");
 
     let hist_b = client.purchase_history(col_src, CARD_B).await?;
     eq(hist_b.entries.len(), 1, "card B: 1 purchase entry")?;
-    eq(hist_b.entries[0].foil_quantity, 2, "card B: foil qty = 2")?;
+    eq(hist_b.entries[0].finish.as_str(), "foil", "card B: history entry is foil")?;
+    eq(hist_b.entries[0].quantity, 2, "card B: foil qty = 2")?;
     ok("card B: 1 foil purchase history entry");
 
     let all_hist = client.all_purchase_history(col_src).await?;
@@ -108,10 +110,10 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
 
     // Remove 2 copies; 2 remain. History: [qty=2 @ $3, qty=2 @ $5].
     // Cheapest ($3) entry should be removed, $5 entry kept.
-    client.remove_cards(col_src, CARD_A, 2, 0).await?;
+    client.remove_cards(col_src, CARD_A, "", 2).await?;
 
     let cards = client.list_cards(col_src).await?;
-    let a = find_card(&cards, CARD_A)?;
+    let a = find_finish(&cards, CARD_A, "")?;
     eq(a.quantity, 2, "card A quantity after remove")?;
 
     let hist_a = client.purchase_history(col_src, CARD_A).await?;
@@ -120,7 +122,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     let remaining_price = hist_a
         .entries
         .iter()
-        .filter_map(|e| e.normal_price_per_unit)
+        .filter_map(|e| e.price_per_unit)
         .max_by(|a, b| a.partial_cmp(b).unwrap());
     ensure(
         remaining_price == Some(5.00),
@@ -131,7 +133,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     // ── 5. Remove all of card A → history fully cleared ──────────────────────
     step("5. Remove remaining 2× card A");
 
-    client.remove_cards(col_src, CARD_A, 2, 0).await?;
+    client.remove_cards(col_src, CARD_A, "", 2).await?;
 
     let hist_a = client.purchase_history(col_src, CARD_A).await?;
     ensure(hist_a.entries.is_empty(), "card A history empty after full removal")?;
@@ -154,7 +156,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     eq(wanted.quantity, 0, "card A owned quantity unaffected by want")?;
 
     let cards = client.list_cards(col_src).await?;
-    let a = find_card(&cards, CARD_A)?;
+    let a = find_finish(&cards, CARD_A, "")?;
     eq(a.want_quantity, 3, "card A listed with want_quantity = 3")?;
     ok("want-only entry appears in collection listing");
 
@@ -168,19 +170,19 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
         !cards.iter().any(|c| c.id == CARD_A),
         "want-only row purged once want quantity returns to 0",
     )?;
-    ok("want-only row removed once quantity, foil, and want are all 0");
+    ok("want-only row removed once quantity and want are both 0");
 
     // ── 6. Re-add card A, then move both cards to dst ─────────────────────────
     step("6. Re-add card A with price, then move both cards to dst");
 
-    client.add_cards(col_src, CARD_A, 3, 0, Some(7.00)).await?;
+    client.add_cards(col_src, CARD_A, "", 3, Some(7.00)).await?;
 
     let cards = client.list_cards(col_src).await?;
     let cards_to_move: Vec<CollectionCard> = cards
         .into_iter()
         .filter(|c| c.id == CARD_A || c.id == CARD_B)
         .collect();
-    eq(cards_to_move.len(), 2, "2 distinct cards to move")?;
+    eq(cards_to_move.len(), 2, "2 distinct (uuid, finish) rows to move")?;
 
     client.move_cards(col_dst, &cards_to_move).await?;
 
@@ -202,10 +204,10 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     step("8. Verify destination received cards and purchase history");
 
     let dst_cards = client.list_cards(col_dst).await?;
-    let a_dst = find_card(&dst_cards, CARD_A)?;
+    let a_dst = find_finish(&dst_cards, CARD_A, "")?;
     eq(a_dst.quantity, 3, "dst: card A quantity = 3")?;
-    let b_dst = find_card(&dst_cards, CARD_B)?;
-    eq(b_dst.foil_quantity, 2, "dst: card B foil = 2")?;
+    let b_dst = find_finish(&dst_cards, CARD_B, "foil")?;
+    eq(b_dst.quantity, 2, "dst: card B foil = 2")?;
     ok("destination has correct quantities");
 
     let hist_a_dst = client.purchase_history(col_dst, CARD_A).await?;
@@ -214,7 +216,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     ok("card A purchase history transferred to destination");
 
     let hist_b_dst = client.purchase_history(col_dst, CARD_B).await?;
-    let foil_b_dst: i32 = hist_b_dst.entries.iter().map(|e| e.foil_quantity).sum();
+    let foil_b_dst: i32 = hist_b_dst.entries.iter().filter(|e| e.finish == "foil").map(|e| e.quantity).sum();
     eq(foil_b_dst, 2, "dst: card B foil history sums to 2")?;
     ok("card B foil purchase history transferred to destination");
 
@@ -226,15 +228,15 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     step("9. Partial move: 1× card A back to src");
 
     let dst_cards = client.list_cards(col_dst).await?;
-    let a_in_dst = find_card(&dst_cards, CARD_A)?.clone();
+    let a_in_dst = find_finish(&dst_cards, CARD_A, "")?.clone();
 
     client
         .move_cards(
             col_src,
             &[CollectionCard {
                 id: a_in_dst.id.clone(),
+                finish: a_in_dst.finish.clone(),
                 quantity: 1,
-                foil_quantity: 0,
                 want_quantity: 0,
                 collection_id: col_dst.to_string(),
                 time_added: a_in_dst.time_added.clone(),
@@ -244,7 +246,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
         .await?;
 
     let dst_cards = client.list_cards(col_dst).await?;
-    let a_dst = find_card(&dst_cards, CARD_A)?;
+    let a_dst = find_finish(&dst_cards, CARD_A, "")?;
     eq(a_dst.quantity, 2, "dst: card A quantity = 2 after partial move back")?;
 
     let hist_a_dst = client.purchase_history(col_dst, CARD_A).await?;
@@ -261,10 +263,11 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     step("10. Move a wanted-only card (0 owned copies)");
 
     // Card B isn't in col_src at all right now; wanting it creates a
-    // wishlist-only row with nothing owned.
+    // wishlist-only row with nothing owned. Want quantity always lives on
+    // the default (`""`) finish row, regardless of which finish is owned.
     client.adjust_want(col_src, CARD_B, 4).await?;
     let src_cards = client.list_cards(col_src).await?;
-    let b_src = find_card(&src_cards, CARD_B)?.clone();
+    let b_src = find_finish(&src_cards, CARD_B, "")?.clone();
     eq(b_src.want_quantity, 4, "src: card B want quantity = 4")?;
     eq(b_src.quantity, 0, "src: card B owned quantity = 0")?;
 
@@ -273,8 +276,8 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
             col_dst,
             &[CollectionCard {
                 id: b_src.id.clone(),
+                finish: b_src.finish.clone(),
                 quantity: 0,
-                foil_quantity: 0,
                 want_quantity: 4,
                 collection_id: col_src.to_string(),
                 time_added: b_src.time_added.clone(),
@@ -285,15 +288,16 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
 
     let src_cards = client.list_cards(col_src).await?;
     ensure(
-        !src_cards.iter().any(|c| c.id == CARD_B),
+        find_finish(&src_cards, CARD_B, "").is_err(),
         "src: wanted-only card B row purged after move",
     )?;
     ok("wanted-only card moved out of source");
 
     let dst_cards = client.list_cards(col_dst).await?;
-    let b_dst = find_card(&dst_cards, CARD_B)?;
+    let b_dst = find_finish(&dst_cards, CARD_B, "")?;
     eq(b_dst.want_quantity, 4, "dst: card B want quantity = 4 after move")?;
-    eq(b_dst.foil_quantity, 2, "dst: card B foil quantity untouched by want move")?;
+    let b_dst_foil = find_finish(&dst_cards, CARD_B, "foil")?;
+    eq(b_dst_foil.quantity, 2, "dst: card B foil quantity untouched by want move")?;
     ok("wanted-only card's want_quantity arrived at destination");
 
     step("11. Move a card with both owned copies and a want quantity");
@@ -301,7 +305,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     // Card A currently sits in col_src with quantity=1 (from step 9) and no want.
     client.adjust_want(col_src, CARD_A, 2).await?;
     let src_cards = client.list_cards(col_src).await?;
-    let a_src = find_card(&src_cards, CARD_A)?.clone();
+    let a_src = find_finish(&src_cards, CARD_A, "")?.clone();
     eq(a_src.quantity, 1, "src: card A quantity = 1 before combined move")?;
     eq(a_src.want_quantity, 2, "src: card A want quantity = 2 before combined move")?;
 
@@ -310,8 +314,8 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
             col_dst,
             &[CollectionCard {
                 id: a_src.id.clone(),
+                finish: a_src.finish.clone(),
                 quantity: 1,
-                foil_quantity: 0,
                 want_quantity: 2,
                 collection_id: col_src.to_string(),
                 time_added: a_src.time_added.clone(),
@@ -328,7 +332,7 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
     ok("combined owned+want card fully vacated source");
 
     let dst_cards = client.list_cards(col_dst).await?;
-    let a_dst = find_card(&dst_cards, CARD_A)?;
+    let a_dst = find_finish(&dst_cards, CARD_A, "")?;
     eq(a_dst.quantity, 3, "dst: card A quantity = 3 after combined move")?;
     eq(a_dst.want_quantity, 2, "dst: card A want quantity = 2 after combined move")?;
     ok("combined owned+want quantities both arrived at destination");
@@ -339,11 +343,11 @@ async fn run(client: &GathersClient, col_src: &str, col_dst: &str) -> eyre::Resu
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn find_card<'a>(cards: &'a [CollectionCard], id: &str) -> eyre::Result<&'a CollectionCard> {
+fn find_finish<'a>(cards: &'a [CollectionCard], id: &str, finish: &str) -> eyre::Result<&'a CollectionCard> {
     cards
         .iter()
-        .find(|c| c.id == id)
-        .ok_or_else(|| eyre::eyre!("card '{id}' not found in collection"))
+        .find(|c| c.id == id && c.finish == finish)
+        .ok_or_else(|| eyre::eyre!("card '{id}' (finish {finish:?}) not found in collection"))
 }
 
 fn ensure(cond: bool, msg: &str) -> eyre::Result<()> {

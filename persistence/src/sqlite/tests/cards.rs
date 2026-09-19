@@ -102,6 +102,36 @@ async fn test_quantity_floor_cannot_go_negative() {
     assert_eq!(cards.len(), 0);
 }
 
+// Regression test: removing (or un-wanting) a (uuid, finish) that has no
+// existing row must be a no-op, not create a negative-quantity "ghost" row.
+// The ON CONFLICT clamp (`max(cards.quantity + EXCLUDED.quantity, 0)`) only
+// ever fires when a row already exists — a fresh INSERT with no conflict
+// bypasses it entirely, so the initial value needs its own floor.
+#[tokio::test]
+async fn test_remove_never_added_card_creates_no_ghost_row() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    p.add_card_to_collection(&col, &"never-added".to_string(), "foil", -3, OLD_TIME, "")
+        .await
+        .unwrap();
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert!(cards.is_empty(), "removing a never-added (uuid, finish) must create no row at all");
+}
+
+#[tokio::test]
+async fn test_want_negative_on_never_wanted_card_creates_no_ghost_row() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+
+    let card = p.adjust_want_quantity(&col, &"never-wanted".to_string(), -7, "").await.unwrap();
+    assert_eq!(card.want_quantity, 0, "want floors at 0 even starting from nothing");
+
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert!(cards.is_empty(), "un-wanting a never-wanted card must create no row at all");
+}
+
 // ── pagination ────────────────────────────────────────────────────────────────
 
 #[tokio::test]

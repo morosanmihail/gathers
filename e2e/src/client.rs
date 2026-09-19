@@ -62,17 +62,20 @@ impl GathersClient {
         .await
     }
 
-    /// Add (or subtract when qty is negative) cards to a collection.
-    /// Pass `purchase_price` to record a purchase history entry.
+    /// Add (or subtract when qty is negative) cards to a collection, for a
+    /// specific finish (`""` = the default/primary finish, MTG's `"foil"`/
+    /// `"etched"`, or any other finish label — the server doesn't validate
+    /// `finish` against the card's own catalog finishes, see
+    /// `finishes.rs`). Pass `purchase_price` to record a purchase history entry.
     pub async fn add_cards(
         &self,
         collection_id: &str,
         card_id: &str,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
         purchase_price: Option<f64>,
     ) -> eyre::Result<Vec<CollectionCard>> {
-        self.add_cards_with_provider(collection_id, card_id, quantity, foil_quantity, purchase_price, None)
+        self.add_cards_with_provider(collection_id, card_id, finish, quantity, purchase_price, None)
             .await
     }
 
@@ -85,8 +88,8 @@ impl GathersClient {
         &self,
         collection_id: &str,
         card_id: &str,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
         purchase_price: Option<f64>,
         provider: Option<&str>,
     ) -> eyre::Result<Vec<CollectionCard>> {
@@ -94,8 +97,8 @@ impl GathersClient {
             &format!("/api/collection/cards/{}/add", urlenc(collection_id)),
             &CardToAdd {
                 id: card_id.to_string(),
+                finish: finish.to_string(),
                 quantity,
-                foil_quantity,
                 purchase_price,
                 provider: provider.map(str::to_string),
             },
@@ -108,15 +111,15 @@ impl GathersClient {
         &self,
         collection_id: &str,
         card_id: &str,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
     ) -> eyre::Result<Vec<CollectionCard>> {
         self.post(
             &format!("/api/collection/cards/{}/delete", urlenc(collection_id)),
             &CardToAdd {
                 id: card_id.to_string(),
+                finish: finish.to_string(),
                 quantity,
-                foil_quantity,
                 purchase_price: None,
                 provider: None,
             },

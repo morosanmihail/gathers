@@ -12,6 +12,24 @@ pub(super) fn add_cards(
         return Ok(vec![]);
     }
 
+    // Rows with no existing (uuid, finish) in this collection get their
+    // initial quantity/want_quantity floored at 0 in Rust before the INSERT —
+    // otherwise removing (or un-wanting) a (uuid, finish) that was never
+    // added would insert a negative-quantity "ghost" row instead of being a
+    // no-op: the ON CONFLICT clamp below only clamps `existing + delta`, and
+    // there's no existing row here for it to clamp against. This can't be
+    // done in the VALUES clause itself (e.g. `MAX(?, 0)`) because that
+    // expression also becomes `EXCLUDED.quantity`, which the ON CONFLICT
+    // branch needs un-clamped to correctly compute `existing + delta`.
+    let existing: std::collections::HashSet<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT uuid, finish FROM cards WHERE collection = ?1")?;
+        stmt.query_map(rusqlite::params![collection_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .flatten()
+        .collect()
+    };
+
     let placeholders = cards
         .iter()
         .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?)")
@@ -19,11 +37,14 @@ pub(super) fn add_cards(
         .join(",");
     let mut query_params: Vec<String> = vec![];
     for c in cards {
+        let is_new = !existing.contains(&(c.uuid.clone(), c.finish.clone()));
+        let quantity = if is_new { c.quantity.max(0) } else { c.quantity };
+        let want_quantity = if is_new { c.want_quantity.max(0) } else { c.want_quantity };
         query_params.push(c.uuid.clone());
         query_params.push(c.finish.clone());
         query_params.push(collection_id.clone());
-        query_params.push(c.quantity.to_string());
-        query_params.push(c.want_quantity.to_string());
+        query_params.push(quantity.to_string());
+        query_params.push(want_quantity.to_string());
         query_params.push(c.time_added.clone());
         query_params.push(c.time_added.clone()); // timeupdated = timeadded on creation
         query_params.push(c.provider.clone());
