@@ -169,9 +169,13 @@ pub struct CollectionRenameRequest {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct CardToAdd {
     pub id: String,
+    /// Which printing/finish this add/remove applies to — MTG's `""`
+    /// (nonfoil) / `"foil"` / `"etched"`, a Pokemon variant like `"reverse
+    /// holo"`, or just `""` for a game with a single version per collector
+    /// number (Riftbound). Defaults to `""` (the primary/default finish).
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    #[serde(rename = "foilQuantity")]
-    pub foil_quantity: i32,
     #[serde(rename = "purchasePrice", default)]
     pub purchase_price: Option<f64>,
     /// Which system/plugin this card came from, e.g. `RiftboundSQLite` or
@@ -197,8 +201,11 @@ pub struct AdjustWantQuantityRequest {
 pub enum APICollectionSortField {
     #[default]
     TimeAdded,
+    /// Sorts by each row's own quantity — since a row is now one specific
+    /// finish of a card, this applies per finish, not to a single fixed
+    /// "normal" bucket. There's no separate "foil quantity" sort field any
+    /// more; filter to `finish == "foil"` client-side for that view.
     Quantity,
-    FoilQuantity,
     WantQuantity,
     Provider,
 }
@@ -208,7 +215,6 @@ impl From<APICollectionSortField> for persistence::CollectionSortField {
         match value {
             APICollectionSortField::TimeAdded => persistence::CollectionSortField::TimeAdded,
             APICollectionSortField::Quantity => persistence::CollectionSortField::Quantity,
-            APICollectionSortField::FoilQuantity => persistence::CollectionSortField::FoilQuantity,
             APICollectionSortField::WantQuantity => persistence::CollectionSortField::WantQuantity,
             APICollectionSortField::Provider => persistence::CollectionSortField::Provider,
         }
@@ -233,9 +239,13 @@ pub struct CollectionCardsQuery {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CollectionCard {
     pub id: String,
+    /// Which printing/finish this row tracks — see `CardToAdd::finish`.
+    /// Distinct finishes of the same card `id` are separate rows; a client
+    /// groups them back together by `id` to show "one card, several
+    /// finishes" (e.g. nonfoil + foil).
+    #[serde(default)]
+    pub finish: String,
     pub quantity: i32,
-    #[serde(rename = "foilQuantity")]
-    pub foil_quantity: i32,
     #[serde(rename = "wantQuantity", default)]
     pub want_quantity: i32,
     #[serde(rename = "collectionId")]
@@ -288,8 +298,8 @@ impl From<&CollectionCard> for models::CollectionCard {
     fn from(value: &CollectionCard) -> Self {
         models::CollectionCard {
             uuid: value.id.to_string(),
+            finish: value.finish.clone(),
             quantity: value.quantity,
-            foil_quantity: value.foil_quantity,
             want_quantity: value.want_quantity,
             collection: value.collection_id.to_string(),
             time_added: value.time_added.to_string(),
@@ -366,10 +376,9 @@ pub struct CollectionPurchaseHistoryEntry {
     pub card_uuid: String,
     pub card_name: Option<String>,
     pub set_code: Option<String>,
+    pub finish: String,
     pub quantity: i32,
-    pub foil_quantity: i32,
-    pub normal_price_per_unit: Option<f64>,
-    pub foil_price_per_unit: Option<f64>,
+    pub price_per_unit: Option<f64>,
     pub provider: String,
     pub recorded_at: String,
 }

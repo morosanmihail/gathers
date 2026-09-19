@@ -254,8 +254,8 @@ async function enrichEntries(entries: CollectionEntry[]): Promise<CollectionCard
 			return {
 				...detail,
 				id: entry.id,
+				finish: entry.finish ?? '',
 				quantity: entry.quantity,
-				foilQuantity: entry.foilQuantity,
 				wantQuantity: entry.wantQuantity ?? 0,
 				collectionId: entry.collectionId,
 				timeAdded: entry.timeAdded,
@@ -357,7 +357,7 @@ export async function searchCollectionCount(
 	});
 }
 
-type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' | 'provider'>;
+type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' | 'provider' | 'finish'>;
 
 // A search result's `activeSystem` tab value is either a real system's
 // provider name as-is (e.g. "RiftboundSQLite"), or `plugin:{name}` — the
@@ -371,15 +371,15 @@ export function providerFromActiveSystem(activeSystem: string): string {
 export async function addCardToCollection(
 	collection: string,
 	cardId: string,
+	finish = '',
 	quantity = 1,
-	foilQuantity = 0,
 	purchasePrice?: number | null,
 	provider?: string
 ): Promise<void> {
 	const body: CardToAdd = {
 		id: cardId,
+		finish,
 		quantity,
-		foilQuantity,
 		...(purchasePrice != null ? { purchasePrice } : {}),
 		...(provider ? { provider } : {})
 	};
@@ -391,11 +391,11 @@ export async function addCardToCollection(
 	invalidateCollectionStats(collection);
 }
 
-export async function deleteCardFromCollection(collection: string, cardId: string, quantity: number, foilQuantity: number): Promise<void> {
+export async function deleteCardFromCollection(collection: string, cardId: string, finish: string, quantity: number): Promise<void> {
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/delete`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id: cardId, quantity, foilQuantity })
+		body: JSON.stringify({ id: cardId, finish, quantity })
 	});
 	invalidateCollectionStats(collection);
 }
@@ -570,14 +570,12 @@ export async function updatePurchaseEntry(
 	collection: string,
 	entryId: number,
 	quantity: number,
-	foil_quantity: number,
-	normal_price_per_unit: number | null,
-	foil_price_per_unit: number | null
+	price_per_unit: number | null
 ): Promise<void> {
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit })
+		body: JSON.stringify({ quantity, price_per_unit })
 	});
 	invalidatePurchaseHistory(collection);
 }

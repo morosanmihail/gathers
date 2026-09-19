@@ -8,19 +8,17 @@ fn insert_purchase_row(
     conn: &Connection,
     collection_id: &CollectionID,
     card_uuid: &CardID,
+    finish: &str,
     quantity: i32,
-    foil_quantity: i32,
-    normal_price_per_unit: Option<f64>,
-    foil_price_per_unit: Option<f64>,
+    price_per_unit: Option<f64>,
     provider: &str,
     recorded_at: &str,
 ) -> eyre::Result<()> {
     conn.execute(
         "INSERT INTO purchase_history \
-         (collection_id, card_uuid, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, provider, recorded_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![collection_id, card_uuid, quantity, foil_quantity,
-                normal_price_per_unit, foil_price_per_unit, provider, recorded_at],
+         (collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at],
     )?;
     Ok(())
 }
@@ -29,32 +27,28 @@ pub(super) fn record_purchase(
     conn: &Connection,
     collection_id: &CollectionID,
     card_uuid: &CardID,
+    finish: &str,
     quantity: i32,
-    foil_quantity: i32,
-    normal_price_per_unit: Option<f64>,
-    foil_price_per_unit: Option<f64>,
+    price_per_unit: Option<f64>,
     provider: &str,
     recorded_at: &str,
 ) -> eyre::Result<()> {
-    insert_purchase_row(conn, collection_id, card_uuid, quantity, foil_quantity,
-        normal_price_per_unit, foil_price_per_unit, provider, recorded_at)
+    insert_purchase_row(conn, collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at)
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<PurchaseHistoryEntry> {
     Ok(PurchaseHistoryEntry {
         id: row.get(0)?,
         card_uuid: row.get(1)?,
-        quantity: row.get(2)?,
-        foil_quantity: row.get(3)?,
-        normal_price_per_unit: row.get(4)?,
-        foil_price_per_unit: row.get(5)?,
-        provider: row.get(6)?,
-        recorded_at: row.get(7)?,
+        finish: row.get(2)?,
+        quantity: row.get(3)?,
+        price_per_unit: row.get(4)?,
+        provider: row.get(5)?,
+        recorded_at: row.get(6)?,
     })
 }
 
-const SELECT_FIELDS: &str =
-    "SELECT id, card_uuid, quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, provider, recorded_at";
+const SELECT_FIELDS: &str = "SELECT id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at";
 
 pub(super) fn get_history(
     conn: &Connection,
@@ -87,19 +81,22 @@ pub(super) fn get_all_history(
     Ok(entries)
 }
 
+/// Trims recorded purchase-history quantity for one card+finish down to
+/// `target_qty` (e.g. after removing owned copies) — the cheapest entries
+/// are trimmed first (then oldest), so the remaining recorded cost basis
+/// reflects only the copies of that finish still actually owned.
 pub(super) fn trim_history_to_collection(
     conn: &Connection,
     collection_id: &CollectionID,
     card_uuid: &CardID,
+    finish: &str,
     target_qty: i32,
-    target_foil_qty: i32,
 ) -> eyre::Result<()> {
-    trim_by_type(conn, collection_id, None, card_uuid, target_qty, false)?;
-    trim_by_type(conn, collection_id, None, card_uuid, target_foil_qty, true)?;
+    trim_by_finish(conn, collection_id, None, card_uuid, finish, target_qty)?;
     conn.execute(
         "DELETE FROM purchase_history \
-         WHERE collection_id = ?1 AND card_uuid = ?2 AND quantity <= 0 AND foil_quantity <= 0",
-        params![collection_id, card_uuid],
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3 AND quantity <= 0",
+        params![collection_id, card_uuid, finish],
     )?;
     Ok(())
 }
@@ -109,15 +106,14 @@ pub(super) fn transfer_trimmed_history_to_collection(
     src_collection: &CollectionID,
     dst_collection: &CollectionID,
     card_uuid: &CardID,
+    finish: &str,
     target_qty: i32,
-    target_foil_qty: i32,
 ) -> eyre::Result<()> {
-    trim_by_type(conn, src_collection, Some(dst_collection), card_uuid, target_qty, false)?;
-    trim_by_type(conn, src_collection, Some(dst_collection), card_uuid, target_foil_qty, true)?;
+    trim_by_finish(conn, src_collection, Some(dst_collection), card_uuid, finish, target_qty)?;
     conn.execute(
         "DELETE FROM purchase_history \
-         WHERE collection_id = ?1 AND card_uuid = ?2 AND quantity <= 0 AND foil_quantity <= 0",
-        params![src_collection, card_uuid],
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3 AND quantity <= 0",
+        params![src_collection, card_uuid, finish],
     )?;
     Ok(())
 }
@@ -125,32 +121,23 @@ pub(super) fn transfer_trimmed_history_to_collection(
 struct TrimEntry {
     id: i64,
     qty: i32,
-    normal_price: Option<f64>,
-    foil_price: Option<f64>,
+    price: Option<f64>,
     provider: String,
     recorded_at: String,
 }
 
-fn trim_by_type(
+fn trim_by_finish(
     conn: &Connection,
     collection_id: &CollectionID,
     transfer_to: Option<&CollectionID>,
     card_uuid: &CardID,
+    finish: &str,
     target: i32,
-    foil: bool,
 ) -> eyre::Result<()> {
-    let (qty_col, price_col) = if foil {
-        ("foil_quantity", "foil_price_per_unit")
-    } else {
-        ("quantity", "normal_price_per_unit")
-    };
-
     let total: i32 = conn.query_row(
-        &format!(
-            "SELECT COALESCE(SUM({qty_col}), 0) FROM purchase_history \
-             WHERE collection_id = ?1 AND card_uuid = ?2"
-        ),
-        params![collection_id, card_uuid],
+        "SELECT COALESCE(SUM(quantity), 0) FROM purchase_history \
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3",
+        params![collection_id, card_uuid, finish],
         |row| row.get(0),
     )?;
 
@@ -160,21 +147,20 @@ fn trim_by_type(
 
     let mut excess = total - target;
 
-    let mut stmt = conn.prepare(&format!(
-        "SELECT id, {qty_col}, normal_price_per_unit, foil_price_per_unit, provider, recorded_at \
+    let mut stmt = conn.prepare(
+        "SELECT id, quantity, price_per_unit, provider, recorded_at \
          FROM purchase_history \
-         WHERE collection_id = ?1 AND card_uuid = ?2 AND {qty_col} > 0 \
-         ORDER BY {price_col} ASC NULLS FIRST, id ASC"
-    ))?;
+         WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3 AND quantity > 0 \
+         ORDER BY price_per_unit ASC NULLS FIRST, id ASC",
+    )?;
     let entries: Vec<TrimEntry> = stmt
-        .query_map(params![collection_id, card_uuid], |row| {
+        .query_map(params![collection_id, card_uuid, finish], |row| {
             Ok(TrimEntry {
                 id: row.get(0)?,
                 qty: row.get(1)?,
-                normal_price: row.get(2)?,
-                foil_price: row.get(3)?,
-                provider: row.get(4)?,
-                recorded_at: row.get(5)?,
+                price: row.get(2)?,
+                provider: row.get(3)?,
+                recorded_at: row.get(4)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -185,17 +171,11 @@ fn trim_by_type(
         }
         let remove = entry.qty.min(excess);
         conn.execute(
-            &format!("UPDATE purchase_history SET {qty_col} = {qty_col} - ?1 WHERE id = ?2"),
+            "UPDATE purchase_history SET quantity = quantity - ?1 WHERE id = ?2",
             params![remove, entry.id],
         )?;
         if let Some(dst) = transfer_to {
-            let (new_qty, new_foil_qty, new_normal_price, new_foil_price) = if foil {
-                (0i32, remove, None::<f64>, entry.foil_price)
-            } else {
-                (remove, 0i32, entry.normal_price, None::<f64>)
-            };
-            insert_purchase_row(conn, dst, card_uuid, new_qty, new_foil_qty,
-                new_normal_price, new_foil_price, &entry.provider, &entry.recorded_at)?;
+            insert_purchase_row(conn, dst, card_uuid, finish, remove, entry.price, &entry.provider, &entry.recorded_at)?;
         }
         excess -= remove;
     }
@@ -215,62 +195,52 @@ pub(super) fn delete_entry(
     Ok(rows > 0)
 }
 
+/// The entry's `finish` is fixed at creation and can't be changed here —
+/// only how many copies (of that same finish) and at what price.
 pub(super) fn update_entry(
     conn: &Connection,
     collection_id: &CollectionID,
     entry_id: i64,
     quantity: i32,
-    foil_quantity: i32,
-    normal_price_per_unit: Option<f64>,
-    foil_price_per_unit: Option<f64>,
+    price_per_unit: Option<f64>,
 ) -> eyre::Result<UpdateEntryResult> {
-    let card_uuid: Option<String> = conn
+    let row: Option<(String, String)> = conn
         .query_row(
-            "SELECT card_uuid FROM purchase_history WHERE id = ?1 AND collection_id = ?2",
+            "SELECT card_uuid, finish FROM purchase_history WHERE id = ?1 AND collection_id = ?2",
             params![entry_id, collection_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
-    let Some(card_uuid) = card_uuid else {
+    let Some((card_uuid, finish)) = row else {
         return Ok(UpdateEntryResult::NotFound);
     };
 
-    let (col_qty, col_foil_qty): (i32, i32) = conn
+    let col_qty: i32 = conn
         .query_row(
-            "SELECT COALESCE(quantity, 0), COALESCE(foilquantity, 0) \
-             FROM cards WHERE collection = ?1 AND uuid = ?2",
-            params![collection_id, &card_uuid],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            "SELECT COALESCE(quantity, 0) FROM cards WHERE collection = ?1 AND uuid = ?2 AND finish = ?3",
+            params![collection_id, &card_uuid, &finish],
+            |row| row.get(0),
         )
-        .unwrap_or((0, 0));
+        .unwrap_or(0);
 
-    let (other_qty, other_foil_qty): (i32, i32) = conn.query_row(
-        "SELECT COALESCE(SUM(quantity), 0), COALESCE(SUM(foil_quantity), 0) \
-         FROM purchase_history WHERE card_uuid = ?1 AND collection_id = ?2 AND id != ?3",
-        params![&card_uuid, collection_id, entry_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+    let other_qty: i32 = conn.query_row(
+        "SELECT COALESCE(SUM(quantity), 0) FROM purchase_history \
+         WHERE card_uuid = ?1 AND finish = ?2 AND collection_id = ?3 AND id != ?4",
+        params![&card_uuid, &finish, collection_id, entry_id],
+        |row| row.get(0),
     )?;
 
     let new_total = other_qty + quantity;
-    let new_foil_total = other_foil_qty + foil_quantity;
-
     if new_total > col_qty {
         return Ok(UpdateEntryResult::ValidationError(format!(
             "Cannot record {new_total} copies — collection only has {col_qty}"
         )));
     }
-    if new_foil_total > col_foil_qty {
-        return Ok(UpdateEntryResult::ValidationError(format!(
-            "Cannot record {new_foil_total} foil copies — collection only has {col_foil_qty}"
-        )));
-    }
 
     conn.execute(
-        "UPDATE purchase_history \
-         SET quantity = ?1, foil_quantity = ?2, normal_price_per_unit = ?3, foil_price_per_unit = ?4 \
-         WHERE id = ?5 AND collection_id = ?6",
-        params![quantity, foil_quantity, normal_price_per_unit, foil_price_per_unit, entry_id, collection_id],
+        "UPDATE purchase_history SET quantity = ?1, price_per_unit = ?2 WHERE id = ?3 AND collection_id = ?4",
+        params![quantity, price_per_unit, entry_id, collection_id],
     )?;
     Ok(UpdateEntryResult::Updated)
 }
@@ -278,28 +248,23 @@ pub(super) fn update_entry(
 pub(super) fn get_collection_totals(
     conn: &Connection,
     collection_id: &CollectionID,
-) -> eyre::Result<HashMap<CardID, PurchaseSummary>> {
+) -> eyre::Result<HashMap<(CardID, String), PurchaseSummary>> {
     let mut stmt = conn.prepare(
-        "SELECT card_uuid, \
-                SUM(COALESCE(normal_price_per_unit, 0.0) * quantity), \
-                SUM(COALESCE(foil_price_per_unit, 0.0) * foil_quantity), \
-                SUM(CASE WHEN normal_price_per_unit IS NOT NULL THEN quantity ELSE 0 END), \
-                SUM(CASE WHEN foil_price_per_unit IS NOT NULL THEN foil_quantity ELSE 0 END) \
+        "SELECT card_uuid, finish, \
+                SUM(COALESCE(price_per_unit, 0.0) * quantity), \
+                SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END) \
          FROM purchase_history \
          WHERE collection_id = ?1 \
-         GROUP BY card_uuid \
-         HAVING SUM(CASE WHEN normal_price_per_unit IS NOT NULL THEN quantity ELSE 0 END) > 0 \
-             OR SUM(CASE WHEN foil_price_per_unit IS NOT NULL THEN foil_quantity ELSE 0 END) > 0",
+         GROUP BY card_uuid, finish \
+         HAVING SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END) > 0",
     )?;
     let map = stmt
         .query_map(params![collection_id], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
                 PurchaseSummary {
-                    total_normal_paid: row.get::<_, f64>(1)?,
-                    total_foil_paid: row.get::<_, f64>(2)?,
+                    total_paid: row.get::<_, f64>(2)?,
                     quantity: row.get::<_, i32>(3)?,
-                    foil_quantity: row.get::<_, i32>(4)?,
                 },
             ))
         })?

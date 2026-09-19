@@ -48,18 +48,21 @@ fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
 /// Pure computation of a collection's value breakdown, given already-resolved
 /// unit prices (normal, foil) per card uuid. Kept free of I/O so it can be
 /// unit tested without a live retrieval system or database.
+///
+/// `cards` is a flat list of (uuid, finish) rows now (see
+/// `models::CollectionCard::finish`), so `total_count`/`priced_count` count
+/// rows, not distinct cards — a card owned in two finishes (e.g. nonfoil +
+/// foil) contributes two rows. `purchase_totals` is keyed the same way:
+/// `(card_uuid, finish)`.
 fn compute_value_breakdown(
     cards: &[models::CollectionCard],
     unit_prices: &HashMap<String, (f64, f64)>,
-    purchase_totals: &HashMap<String, persistence::PurchaseSummary>,
+    purchase_totals: &HashMap<(String, String), persistence::PurchaseSummary>,
 ) -> collections_models::CollectionValueBreakdown {
     // Wanted-only entries (nothing owned yet) aren't part of the collection's
     // owned value — exclude them so price totals and the priced/total ratio
-    // only ever reflect normal/foil quantities actually owned.
-    let total_count = cards
-        .iter()
-        .filter(|c| c.quantity > 0 || c.foil_quantity > 0)
-        .count();
+    // only ever reflect quantities actually owned.
+    let total_count = cards.iter().filter(|c| c.quantity > 0).count();
 
     let mut total_value: f64 = 0.0;
     let mut profit: f64 = 0.0;
@@ -69,43 +72,40 @@ fn compute_value_breakdown(
 
     for card in cards {
         let Some(&(unit_normal, unit_foil)) = unit_prices.get(&card.uuid) else { continue };
+        // Pricing only distinguishes normal/foil (see `models::CardPrices`)
+        // — any other finish is priced as "normal" for lack of anything
+        // better, same as an unpriced card would fall back to 0.
+        let unit_price = if card.finish == "foil" { unit_foil } else { unit_normal };
 
+        // want_quantity is only ever tracked on the "" (default) finish row.
         if card.want_quantity > 0 {
             wanted_value += unit_normal * card.want_quantity as f64;
         }
 
-        if card.quantity <= 0 && card.foil_quantity <= 0 {
+        if card.quantity <= 0 {
             continue;
         }
 
-        let current = unit_normal * card.quantity as f64 + unit_foil * card.foil_quantity as f64;
+        let current = unit_price * card.quantity as f64;
         if current <= 0.0 {
             continue;
         }
         total_value += current;
         priced_count += 1;
 
-        if let Some(summary) = purchase_totals.get(&card.uuid) {
-            let paid_normal = summary.quantity.min(card.quantity);
-            let paid_foil = summary.foil_quantity.min(card.foil_quantity);
-
-            let cost_normal = if summary.quantity > 0 {
-                summary.total_normal_paid * paid_normal as f64 / summary.quantity as f64
-            } else {
-                0.0
-            };
-            let cost_foil = if summary.foil_quantity > 0 {
-                summary.total_foil_paid * paid_foil as f64 / summary.foil_quantity as f64
+        if let Some(summary) = purchase_totals.get(&(card.uuid.clone(), card.finish.clone())) {
+            let paid = summary.quantity.min(card.quantity);
+            let cost = if summary.quantity > 0 {
+                summary.total_paid * paid as f64 / summary.quantity as f64
             } else {
                 0.0
             };
 
-            let current_of_paid = unit_normal * paid_normal as f64 + unit_foil * paid_foil as f64;
-            profit += current_of_paid - (cost_normal + cost_foil);
+            let current_of_paid = unit_price * paid as f64;
+            profit += current_of_paid - cost;
 
-            let unpaid_normal = (card.quantity - paid_normal).max(0);
-            let unpaid_foil = (card.foil_quantity - paid_foil).max(0);
-            untracked_value += unit_normal * unpaid_normal as f64 + unit_foil * unpaid_foil as f64;
+            let unpaid = (card.quantity - paid).max(0);
+            untracked_value += unit_price * unpaid as f64;
         } else {
             untracked_value += current;
         }
@@ -763,8 +763,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         storage: &mut PersistenceSystem,
         collection_id: &str,
         uuid: String,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
         provider: String,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
         let now = chrono::Utc::now();
@@ -774,8 +774,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .add_card_to_collection(
                 &collection_id.to_string(),
                 &uuid,
+                finish,
                 quantity,
-                foil_quantity,
                 &now_str,
                 &provider,
             )
@@ -783,8 +783,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         {
             Ok(card) => Ok(Json(vec![CollectionCard {
                 id: card.uuid.to_string(),
+                finish: card.finish,
                 quantity: card.quantity,
-                foil_quantity: card.foil_quantity,
                 want_quantity: card.want_quantity,
                 collection_id: collection_id.to_string(),
                 time_added: DateTime::parse_from_rfc3339(&card.time_added)
@@ -818,28 +818,22 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             storage,
             &collection_id,
             input.id.clone(),
+            &input.finish,
             input.quantity,
-            input.foil_quantity,
             provider.clone(),
         )
         .await;
 
         // Record purchase history only when a positive price is supplied.
-        if result.is_ok()
-            && (input.quantity > 0 || input.foil_quantity > 0)
-            && input.purchase_price.is_some_and(|p| p > 0.0)
-        {
+        if result.is_ok() && input.quantity > 0 && input.purchase_price.is_some_and(|p| p > 0.0) {
             let now = chrono::Utc::now().to_rfc3339();
-            let normal_price = if input.quantity > 0 { input.purchase_price } else { None };
-            let foil_price = if input.foil_quantity > 0 { input.purchase_price } else { None };
             let _ = storage
                 .record_purchase(
                     &collection_id,
                     &input.id,
-                    input.quantity.max(0),
-                    input.foil_quantity.max(0),
-                    normal_price,
-                    foil_price,
+                    &input.finish,
+                    input.quantity,
+                    input.purchase_price,
                     &provider,
                     &now,
                 )
@@ -869,21 +863,13 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 }),
             )
         })?;
-        let neg_foil_quantity = input.foil_quantity.checked_neg().ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload {
-                    error: "Invalid foil quantity".to_string(),
-                }),
-            )
-        })?;
 
         mutate_card_quantities(
             storage,
             &collection_id,
             input.id,
+            &input.finish,
             neg_quantity,
-            neg_foil_quantity,
             "".to_string(),
         )
         .await
@@ -910,8 +896,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         {
             Ok(card) => Ok(Json(CollectionCard {
                 id: card.uuid,
+                finish: card.finish,
                 quantity: card.quantity,
-                foil_quantity: card.foil_quantity,
                 want_quantity: card.want_quantity,
                 collection_id: collection_id.clone(),
                 time_added: DateTime::parse_from_rfc3339(&card.time_added)
@@ -964,8 +950,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .into_iter()
             .map(|card| CollectionCard {
                 id: card.uuid,
+                finish: card.finish,
                 quantity: card.quantity,
-                foil_quantity: card.foil_quantity,
                 want_quantity: card.want_quantity,
                 collection_id: collection_id.clone(),
                 time_added: DateTime::parse_from_rfc3339(&card.time_added)
@@ -1044,10 +1030,64 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         }
     }
 
+    /// Optional CSV column-header overrides for import/export, shared by
+    /// both endpoints (as query params on export, matching-named multipart
+    /// text fields on import — see `build_csv_mapping`). `preset` names one
+    /// of `persistence::CsvFieldMapping`'s built-in third-party formats
+    /// (e.g. `tcgplayer`); any of the five `*_field` overrides given on top
+    /// of it replace just that one field, preset or not. Defaults (nothing
+    /// given at all) reproduce gathers' own original fixed CSV format.
+    #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+    struct CsvMappingParams {
+        #[serde(default)]
+        preset: Option<String>,
+        #[serde(default)]
+        set_code_field: Option<String>,
+        #[serde(default)]
+        collector_number_field: Option<String>,
+        #[serde(default)]
+        quantity_field: Option<String>,
+        #[serde(default)]
+        foil_quantity_field: Option<String>,
+        #[serde(default)]
+        provider_field: Option<String>,
+    }
+
+    fn build_csv_mapping(params: &CsvMappingParams) -> Result<persistence::CsvFieldMapping, ApiError> {
+        let mut mapping = match params.preset.as_deref() {
+            None | Some("") => persistence::CsvFieldMapping::default(),
+            Some(name) => persistence::CsvFieldMapping::preset(name).ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorPayload {
+                        error: format!(
+                            "Unknown CSV mapping preset '{name}' (known presets: tcgplayer, cardkingdom, deckbox, mtggoldfish)"
+                        ),
+                    }),
+                )
+            })?,
+        };
+        for (field, value) in [
+            (persistence::CsvField::SetCode, &params.set_code_field),
+            (persistence::CsvField::CollectorNumber, &params.collector_number_field),
+            (persistence::CsvField::Quantity, &params.quantity_field),
+            (persistence::CsvField::FoilQuantity, &params.foil_quantity_field),
+            (persistence::CsvField::Provider, &params.provider_field),
+        ] {
+            if let Some(header) = value {
+                mapping.set(field, Some(header.clone()));
+            }
+        }
+        Ok(mapping)
+    }
+
     async fn export(
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
+        Query(mapping_params): Query<CsvMappingParams>,
     ) -> Result<Response, ApiError> {
+        let mapping = build_csv_mapping(&mapping_params)?;
+
         let retrievals: Vec<RetrievalSystem> = {
             let guard = state.0.lock().await;
             [guard.mtg.clone(), guard.riftbound.clone(), guard.pokemon.clone()]
@@ -1061,7 +1101,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .export_collection(&collection_id, &retrievals)
+            .export_collection(&collection_id, &retrievals, &mapping)
             .await
             .map_err(|e| {
                 (
@@ -1097,6 +1137,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         if demo_mode() { return Err(demo_err()); }
         let mut file_bytes: Option<Vec<u8>> = None;
         let mut collection_name: Option<String> = None;
+        let mut mapping_params = CsvMappingParams::default();
 
         while let Some(field) = multipart.next_field().await.map_err(|e| {
             (
@@ -1106,7 +1147,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 }),
             )
         })? {
-            match field.name() {
+            let name = field.name().map(str::to_string);
+            match name.as_deref() {
                 Some("file") => {
                     file_bytes = Some(field.bytes().await.map_err(|e| {
                         (
@@ -1127,9 +1169,33 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                         )
                     })?);
                 }
+                // Optional CSV field-mapping overrides — see `CsvMappingParams`.
+                Some(field_name @ ("preset" | "set_code_field" | "collector_number_field"
+                    | "quantity_field" | "foil_quantity_field" | "provider_field")) => {
+                    let value = field.text().await.map_err(|e| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(ErrorPayload {
+                                error: format!("Failed to read '{field_name}' field: {e}"),
+                            }),
+                        )
+                    })?;
+                    let target = match field_name {
+                        "preset" => &mut mapping_params.preset,
+                        "set_code_field" => &mut mapping_params.set_code_field,
+                        "collector_number_field" => &mut mapping_params.collector_number_field,
+                        "quantity_field" => &mut mapping_params.quantity_field,
+                        "foil_quantity_field" => &mut mapping_params.foil_quantity_field,
+                        "provider_field" => &mut mapping_params.provider_field,
+                        _ => unreachable!(),
+                    };
+                    *target = Some(value);
+                }
                 _ => {}
             }
         }
+
+        let mapping = build_csv_mapping(&mapping_params)?;
 
         let bytes = file_bytes.ok_or_else(|| {
             (
@@ -1174,7 +1240,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .import_csv(tmp_path, collection_name, &retrievals, None)
+            .import_csv(tmp_path, collection_name, &retrievals, None, &mapping)
             .await
             .map_err(|e| {
                 (
@@ -1249,8 +1315,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .take(query.limit)
             .map(|cc| CollectionCard {
                 id: cc.uuid.clone(),
+                finish: cc.finish.clone(),
                 quantity: cc.quantity,
-                foil_quantity: cc.foil_quantity,
                 want_quantity: cc.want_quantity,
                 collection_id: collection_id.clone(),
                 time_added: DateTime::parse_from_rfc3339(&cc.time_added)
@@ -1401,9 +1467,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     #[derive(serde::Deserialize, schemars::JsonSchema)]
     struct UpdatePurchaseEntryBody {
         quantity: i32,
-        foil_quantity: i32,
-        normal_price_per_unit: Option<f64>,
-        foil_price_per_unit: Option<f64>,
+        price_per_unit: Option<f64>,
     }
 
     async fn delete_purchase_entry(
@@ -1440,9 +1504,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 &collection_id,
                 entry_id,
                 body.quantity,
-                body.foil_quantity,
-                body.normal_price_per_unit,
-                body.foil_price_per_unit,
+                body.price_per_unit,
             )
             .await
             .map_err(|e| (
@@ -1498,10 +1560,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     card_name: card.map(|c| collectible_name(c).to_string()),
                     set_code: card.map(collectible_set),
                     card_uuid: e.card_uuid,
+                    finish: e.finish,
                     quantity: e.quantity,
-                    foil_quantity: e.foil_quantity,
-                    normal_price_per_unit: e.normal_price_per_unit,
-                    foil_price_per_unit: e.foil_price_per_unit,
+                    price_per_unit: e.price_per_unit,
                     provider: e.provider,
                     recorded_at: e.recorded_at,
                 }
@@ -1654,8 +1715,8 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
                 obj.insert("id".to_string(), serde_json::Value::String(entry.uuid));
+                obj.insert("finish".to_string(), serde_json::Value::String(entry.finish));
                 obj.insert("quantity".to_string(), serde_json::Value::from(entry.quantity));
-                obj.insert("foilQuantity".to_string(), serde_json::Value::from(entry.foil_quantity));
                 obj.insert("wantQuantity".to_string(), serde_json::Value::from(entry.want_quantity));
                 obj.insert(
                     "collectionId".to_string(),
@@ -1680,11 +1741,11 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
 mod value_breakdown_tests {
     use super::*;
 
-    fn card(uuid: &str, quantity: i32, foil_quantity: i32, want_quantity: i32) -> models::CollectionCard {
+    fn card(uuid: &str, finish: &str, quantity: i32, want_quantity: i32) -> models::CollectionCard {
         models::CollectionCard {
             uuid: uuid.to_string(),
+            finish: finish.to_string(),
             quantity,
-            foil_quantity,
             want_quantity,
             time_added: "2024-01-01T00:00:00Z".to_string(),
             collection: "c1".to_string(),
@@ -1694,7 +1755,7 @@ mod value_breakdown_tests {
 
     #[test]
     fn wanted_value_sums_price_times_want_quantity() {
-        let cards = vec![card("a", 0, 0, 3)];
+        let cards = vec![card("a", "", 0, 3)];
         let unit_prices = HashMap::from([("a".to_string(), (2.5, 4.0))]);
         let purchase_totals = HashMap::new();
 
@@ -1710,7 +1771,7 @@ mod value_breakdown_tests {
     #[test]
     fn wanted_value_excluded_from_owned_totals_when_also_owned() {
         // Owned 2 normal, wants 5 more on top of what's owned.
-        let cards = vec![card("a", 2, 0, 5)];
+        let cards = vec![card("a", "", 2, 5)];
         let unit_prices = HashMap::from([("a".to_string(), (1.0, 1.0))]);
         let purchase_totals = HashMap::new();
 
@@ -1724,7 +1785,7 @@ mod value_breakdown_tests {
 
     #[test]
     fn zero_want_quantity_contributes_nothing() {
-        let cards = vec![card("a", 1, 0, 0)];
+        let cards = vec![card("a", "", 1, 0)];
         let unit_prices = HashMap::from([("a".to_string(), (3.0, 3.0))]);
         let purchase_totals = HashMap::new();
 
@@ -1735,7 +1796,7 @@ mod value_breakdown_tests {
 
     #[test]
     fn missing_price_excludes_card_from_wanted_value() {
-        let cards = vec![card("a", 0, 0, 4)];
+        let cards = vec![card("a", "", 0, 4)];
         let unit_prices = HashMap::new();
         let purchase_totals = HashMap::new();
 
@@ -1746,7 +1807,7 @@ mod value_breakdown_tests {
 
     #[test]
     fn multiple_wanted_cards_sum_together() {
-        let cards = vec![card("a", 0, 0, 2), card("b", 1, 0, 1)];
+        let cards = vec![card("a", "", 0, 2), card("b", "", 1, 1)];
         let unit_prices = HashMap::from([
             ("a".to_string(), (10.0, 10.0)),
             ("b".to_string(), (5.0, 5.0)),
@@ -1757,5 +1818,16 @@ mod value_breakdown_tests {
 
         // a: 2 * 10.0 = 20.0, b: 1 * 5.0 = 5.0
         assert_eq!(breakdown.wanted_value, 25.0);
+    }
+
+    #[test]
+    fn foil_finish_uses_foil_unit_price() {
+        let cards = vec![card("a", "foil", 2, 0)];
+        let unit_prices = HashMap::from([("a".to_string(), (1.0, 9.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.total_value, 18.0);
     }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { AnyCard, CollectionCard, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
-	import { cardImageUrl, rarityClass } from '$lib/types';
+	import type { AnyCard, CollectionCard, CardGroup, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
+	import { cardImageUrl, rarityClass, finishLabel, catalogFinishes } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import MtgCardDetail from './MtgCardDetail.svelte';
@@ -8,7 +8,7 @@
 	import PokemonCardDetail from './PokemonCardDetail.svelte';
 
 	interface Props {
-		card: AnyCard | CollectionCard;
+		card: AnyCard | CollectionCard | CardGroup;
 		onclose: () => void;
 		onWantChange?: (delta: number) => void;
 	}
@@ -16,6 +16,13 @@
 	let { card, onclose, onWantChange }: Props = $props();
 
 	const wantQty = $derived((card as CollectionCard).wantQuantity ?? 0);
+	// Only present when opened from the collection view (a CardGroup) —
+	// a search-result card has no owned finishes to list.
+	const ownedFinishes = $derived((card as CardGroup).entries?.filter(e => (e.quantity ?? 0) > 0) ?? []);
+
+	// Catalog finishes this card is actually printed in (MTG, Pokemon — see
+	// `CollectionCard.finishes`). Only worth a row when there's a real choice.
+	const printedFinishes = $derived(catalogFinishes(card as { finishes?: string[] }));
 
 	// Duck-type the system from whichever fields are present — cards from search
 	// results and from a collection listing (which merges card detail + entry
@@ -118,14 +125,23 @@
 						<span class={rarityClass(card.rarity)}>{card.rarity}</span>
 					</div>
 				{/if}
-				{#if (card as CollectionCard).quantity != null}
+				{#if printedFinishes.length > 1}
 					<div class="card-detail-row">
-						<span class="card-detail-label">Owned</span>
-						<span>
-							{(card as CollectionCard).quantity} normal
-							{#if (card as CollectionCard).foilQuantity}, {(card as CollectionCard).foilQuantity}✦ foil{/if}
-						</span>
+						<span class="card-detail-label">Finishes</span>
+						<span>{printedFinishes.map(finishLabel).join(', ')}</span>
 					</div>
+				{/if}
+				{#if (card as CardGroup).entries}
+					{#if ownedFinishes.length > 0}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Owned</span>
+							<span>
+								{#each ownedFinishes as entry, i (entry.finish ?? '')}
+									{i > 0 ? ', ' : ''}{entry.quantity} {finishLabel(entry.finish ?? '')}
+								{/each}
+							</span>
+						</div>
+					{/if}
 					{#if onWantChange}
 						<div class="card-detail-row">
 							<span class="card-detail-label">Want</span>

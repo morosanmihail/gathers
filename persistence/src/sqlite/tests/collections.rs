@@ -120,9 +120,9 @@ async fn test_remove_collection_with_move_to() {
         .get_cards_in_collection_paginated(&col2, CollectionCardsParams::new(0, 100))
         .await
         .unwrap();
-    assert_eq!(cards2.len(), 2);
-    assert_eq!(cards2.iter().find(|c| c.uuid == cid1).unwrap().quantity, 5);
-    assert_eq!(cards2.iter().find(|c| c.uuid == cid2).unwrap().quantity, 3);
+    assert_eq!(cards2.len(), 4); // 2 finishes each for card1 and card2
+    assert_eq!(cards2.iter().find(|c| c.uuid == cid1 && c.finish.is_empty()).unwrap().quantity, 5);
+    assert_eq!(cards2.iter().find(|c| c.uuid == cid2 && c.finish.is_empty()).unwrap().quantity, 3);
 }
 
 #[tokio::test]
@@ -139,10 +139,11 @@ async fn test_remove_default_collection_with_move_to() {
         .get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100))
         .await
         .unwrap();
-    assert_eq!(cards.len(), 2);
-    let dc = cards.iter().find(|c| c.uuid == cid).unwrap();
+    assert_eq!(cards.len(), 4); // 2 finishes each for card1 and default_card
+    let dc = cards.iter().find(|c| c.uuid == cid && c.finish.is_empty()).unwrap();
     assert_eq!(dc.quantity, 3);
-    assert_eq!(dc.foil_quantity, 1);
+    let dc_foil = cards.iter().find(|c| c.uuid == cid && c.finish == "foil").unwrap();
+    assert_eq!(dc_foil.quantity, 1);
 
     let cards = p
         .get_cards_in_collection_paginated(&DEFAULT.into(), CollectionCardsParams::new(0, 100))
@@ -168,11 +169,12 @@ async fn test_remove_collection_move_to_merges_quantities() {
         .get_cards_in_collection_paginated(&col2, CollectionCardsParams::new(0, 100))
         .await
         .unwrap();
-    assert_eq!(cards.len(), 2);
-    let shared = cards.iter().find(|c| c.uuid == "shared_card").unwrap();
+    assert_eq!(cards.len(), 3); // shared_card: 2 finishes merged; unique_card: 1 finish
+    let shared = cards.iter().find(|c| c.uuid == "shared_card" && c.finish.is_empty()).unwrap();
     assert_eq!(shared.quantity, 5);
-    assert_eq!(shared.foil_quantity, 5);
+    let shared_foil = cards.iter().find(|c| c.uuid == "shared_card" && c.finish == "foil").unwrap();
+    assert_eq!(shared_foil.quantity, 5);
     let unique = cards.iter().find(|c| c.uuid == "unique_card").unwrap();
     assert_eq!(unique.quantity, 5);
-    assert_eq!(unique.foil_quantity, 0);
+    assert!(unique.finish.is_empty());
 }

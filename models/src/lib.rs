@@ -49,10 +49,20 @@ pub struct Set {
 #[derive(Debug, Clone)]
 pub struct CollectionCard {
     pub uuid: CardID,
+    /// Which printing/finish of this card this row tracks — MTG's `""`
+    /// (nonfoil) / `"foil"` / `"etched"`, Pokemon's `""` / `"reverse
+    /// holo"` / `"holo"` / etc, or just `""` for a game with only one
+    /// version per collector number (Riftbound). `""` is always the
+    /// default/primary finish. Distinct finishes of the same `uuid` are
+    /// separate rows (separate `(uuid, finish, collection)` keys) — see
+    /// `persistence`'s `cards` table — so a UI groups them back together
+    /// by `uuid` to show "one card, several finishes".
+    pub finish: String,
     pub quantity: i32,
-    pub foil_quantity: i32,
-    /// Quantity the owner wants to acquire, independent of `quantity`/`foil_quantity`
-    /// already owned. Lets a card be tracked as a wishlist entry before any are owned.
+    /// Quantity the owner wants to acquire, independent of `quantity`
+    /// already owned. Only meaningful on the `""` (default) finish row —
+    /// wanting a card doesn't pin down which finish you're after yet.
+    /// Lets a card be tracked as a wishlist entry before any are owned.
     pub want_quantity: i32,
     pub time_added: String,
     pub collection: CollectionID,

@@ -1,33 +1,34 @@
 <script lang="ts">
-	import type { CollectionCard, MtgCard, AnyCard, CardPrices } from '$lib/types';
-	import { rarityClass, isWantOnly } from '$lib/types';
+	import type { CollectionCard, CardGroup, MtgCard, AnyCard, CardPrices } from '$lib/types';
+	import { rarityClass, isWantOnly, catalogFinishes } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import PriceTooltip from './PriceTooltip.svelte';
-	import QtyControls from './QtyControls.svelte';
+	import FinishList from './FinishList.svelte';
 	import SetTooltip from './SetTooltip.svelte';
 	import CardImageTooltip from './CardImageTooltip.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
 	import AddDropdown from './AddDropdown.svelte';
 
 	interface Props {
-		card: AnyCard | CollectionCard;
+		card: AnyCard | CollectionCard | CardGroup;
 		collectionMode?: boolean;
 		selectable?: boolean;
 		collection?: string;
 		price?: string | null;
 		cardPrices?: CardPrices;
 		onAdd?: (card: AnyCard | CollectionCard) => void;
-		onAddFoil?: (card: AnyCard | CollectionCard) => void;
+		onAddFinish?: (card: AnyCard | CollectionCard, finish: string) => void;
 		onAddWanted?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (card: CollectionCard, delta: number, foil: boolean, purchasePrice?: number | null) => void;
+		onAdjust?: (group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) => void;
 		onWantAdjust?: (card: CollectionCard, delta: number) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
 
-	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFoil, onAddWanted, onAdjust, onWantAdjust, onclick }: Props = $props();
+	let { card, collectionMode = false, selectable = true, collection = '', price = null, cardPrices, onAdd, onAddFinish, onAddWanted, onAdjust, onWantAdjust, onclick }: Props = $props();
 
-	const col = $derived(card as CollectionCard);
+	const col = $derived(card as CardGroup);
 	const isSelected = $derived(app.selectedCards.has(card.id));
+	const finishes = $derived(catalogFinishes(card as MtgCard));
 </script>
 
 <div
@@ -63,19 +64,19 @@
 		<PriceTooltip cardId={card.id} {collection} {price} {cardPrices} />
 	</div>
 	{#if collectionMode}
-		<!-- Qty + foil columns span both cells when editing price -->
-		<div class="card-row-cell" role="presentation" style="padding: 2px 4px; grid-column: span 2;" onclick={(e) => e.stopPropagation()}>
+		<!-- Finish rows span both cells when editing price -->
+		<div class="card-row-cell" role="presentation" style="padding: 2px 4px;" onclick={(e) => e.stopPropagation()}>
 			{#if onAdjust}
-				<QtyControls
-					quantity={col.quantity ?? 0}
-					foilQuantity={col.foilQuantity ?? 0}
+				<FinishList
+					group={col}
 					{price}
-					onAdjust={(delta, foil, purchasePrice) => onAdjust(col, delta, foil, purchasePrice)}
+					onAdjust={(finish, delta, purchasePrice) => onAdjust(col, finish, delta, purchasePrice)}
 				/>
 			{:else}
 				<div style="display:flex;gap:8px;">
-					<span class="card-row-qty">{col.quantity ?? 0}</span>
-					<span class="card-row-qty qty-foil">{col.foilQuantity ?? 0}✦</span>
+					{#each col.entries.filter((e) => (e.quantity ?? 0) > 0) as entry (entry.finish ?? '')}
+						<span class="card-row-qty" class:qty-foil={!!entry.finish}>{entry.quantity ?? 0}{entry.finish ? '✦' : ''}</span>
+					{/each}
 				</div>
 			{/if}
 		</div>
@@ -92,10 +93,11 @@
 		</div>
 	{:else}
 		<div class="card-row-cell" role="presentation" style="display:flex;gap:6px;" onclick={(e) => e.stopPropagation()}>
-			{#if onAdd || onAddFoil || onAddWanted}
+			{#if onAdd || onAddFinish || onAddWanted}
 				<AddDropdown
 					onAdd={onAdd ? () => onAdd(card) : undefined}
-					onAddFoil={onAddFoil ? () => onAddFoil(card) : undefined}
+					{finishes}
+					onAddFinish={onAddFinish ? (finish) => onAddFinish(card, finish) : undefined}
 					onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
 				/>
 			{/if}

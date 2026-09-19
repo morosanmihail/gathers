@@ -38,11 +38,15 @@ export type PluginResultCard = {
 
 export type AnyCard = MtgCard | RiftboundCard | PokemonCard | PluginResultCard;
 
-// Raw response from /api/collection/cards/{id}/list — no card details
+// Raw response from /api/collection/cards/{id}/list — no card details.
+// One row per (uuid, finish): a card owned in two finishes (e.g. nonfoil +
+// foil) is two entries sharing the same `id`. See `CardGroup`/`groupByCard`
+// below for how the UI puts those back together as "one card, several
+// finishes".
 export type CollectionEntry = components['schemas']['CollectionCard'];
 
 // CollectionEntry merged with card detail fields
-export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' | 'provider' | 'wantQuantity'> {
+export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' | 'provider' | 'wantQuantity' | 'finish'> {
 	image?: string;
 	name: string;
 	setCode?: string;
@@ -59,6 +63,74 @@ export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' |
 	imageUrl?: string;
 	energyTypes?: string[];
 	mtGCard?: MtgCard;
+	// The finishes this card is actually printed in — mtgjson's for MTG
+	// (e.g. ["nonfoil", "foil"], sometimes "etched") or the scraped
+	// `variants` for Pokemon (e.g. ["Normal", "Reverse Holofoil"]). Drives
+	// which finishes the "add another version" picker offers. Absent for
+	// games with no such catalog data yet (Riftbound).
+	finishes?: string[];
+}
+
+// One card (by uuid), grouped back together from its individual per-finish
+// `CollectionCard` rows. `entries` holds every finish actually present
+// (quantity or want > 0 on the "" row); the group's own top-level fields
+// (name, image, quantity, finish, ...) mirror one representative entry —
+// prefer the "" (default) finish since that's where `wantQuantity` lives.
+export interface CardGroup extends CollectionCard {
+	entries: CollectionCard[];
+}
+
+export function groupByCard(cards: CollectionCard[]): CardGroup[] {
+	const order: string[] = [];
+	const byId = new Map<string, CollectionCard[]>();
+	for (const c of cards) {
+		if (!byId.has(c.id)) { byId.set(c.id, []); order.push(c.id); }
+		byId.get(c.id)!.push(c);
+	}
+	return order.map(id => {
+		const entries = byId.get(id)!;
+		const primary = entries.find(e => !e.finish) ?? entries[0];
+		return { ...primary, entries };
+	});
+}
+
+// Human label for a finish value — "" (the default/primary finish) reads
+// as "Normal", anything else is title-cased as-is (MTG's "foil"/"etched",
+// a Pokemon variant like "reverse holo", ...).
+export function finishLabel(finish: string): string {
+	if (!finish) return 'Normal';
+	return finish.charAt(0).toUpperCase() + finish.slice(1);
+}
+
+// Maps a catalog finish value (mtgjson's "nonfoil", Pokemon's "Normal", or
+// another game's own finish name) to gathers' internal convention, where ""
+// means the default/primary finish.
+export function toInternalFinish(catalogFinish: string): string {
+	const lower = catalogFinish.toLowerCase();
+	return lower === 'nonfoil' || lower === 'normal' ? '' : catalogFinish;
+}
+
+// A card's own catalog finishes (MTG, Pokemon — see `CollectionCard.finishes`),
+// mapped to gathers' internal finish values. Empty when the game has no such
+// catalog data yet (Riftbound).
+export function catalogFinishes(card: { finishes?: string[] }): string[] {
+	return (card.finishes ?? []).map(toInternalFinish);
+}
+
+// Finishes that could still be added to this card group — from its own
+// `finishes` catalog data when available, otherwise falling back to a
+// generic Normal/Foil choice (the common case for games without per-card
+// finish data yet — see `finishes` field doc above). Already-owned finishes
+// (quantity > 0) are excluded.
+export function availableFinishesToAdd(group: CardGroup): string[] {
+	const owned = new Set(group.entries.filter(e => (e.quantity ?? 0) > 0).map(e => e.finish ?? ''));
+	const catalog = group.finishes?.length ? catalogFinishes(group) : ['', 'foil'];
+	const seen = new Set<string>();
+	return catalog.filter(f => {
+		if (owned.has(f) || seen.has(f)) return false;
+		seen.add(f);
+		return true;
+	});
 }
 
 export type CardSet = components['schemas']['Set'];
@@ -102,10 +174,10 @@ export type TriState = '' | 'true' | 'false';
 
 export type CardPrices = components['schemas']['CardPrices'];
 
-// True when a collection card is tracked purely as a wishlist entry — none
-// owned yet, only a desired quantity.
-export function isWantOnly(card: CollectionCard): boolean {
-	return (card.quantity ?? 0) === 0 && (card.foilQuantity ?? 0) === 0 && (card.wantQuantity ?? 0) > 0;
+// True when a card group is tracked purely as a wishlist entry — none of
+// its finishes owned yet, only a desired quantity.
+export function isWantOnly(group: CardGroup): boolean {
+	return group.entries.every(e => (e.quantity ?? 0) === 0) && (group.wantQuantity ?? 0) > 0;
 }
 
 export function rarityClass(r?: string): string {

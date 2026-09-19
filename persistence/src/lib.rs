@@ -8,14 +8,17 @@ use models::CollectionCard;
 use models::CollectionID;
 use models::filters::SortOrder;
 
+pub use crate::csv_models::{CsvField, CsvFieldMapping};
 pub use crate::sqlite::SQLitePersistenceSystem;
 
 #[derive(Debug, Default, Clone)]
 pub enum CollectionSortField {
     #[default]
     TimeAdded,
+    /// Sorts by each row's own `quantity` — since a row is now one
+    /// specific `finish` of a card (see `models::CollectionCard`), this
+    /// applies per finish rather than to a single fixed "normal" bucket.
     Quantity,
-    FoilQuantity,
     WantQuantity,
     Provider,
 }
@@ -85,8 +88,8 @@ pub trait PersistenceSystemTrait {
         &mut self,
         collection_id: &CollectionID,
         card_uuid: &CardID,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
         time_added: &str,
         provider: &str,
     ) -> impl std::future::Future<Output = eyre::Result<CollectionCard>>;
@@ -124,10 +127,9 @@ pub trait PersistenceSystemTrait {
         &mut self,
         collection_id: &CollectionID,
         card_uuid: &CardID,
+        finish: &str,
         quantity: i32,
-        foil_quantity: i32,
-        normal_price_per_unit: Option<f64>,
-        foil_price_per_unit: Option<f64>,
+        price_per_unit: Option<f64>,
         provider: &str,
         recorded_at: &str,
     ) -> impl std::future::Future<Output = eyre::Result<()>>;
@@ -143,10 +145,12 @@ pub trait PersistenceSystemTrait {
         collection_id: &CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<PurchaseHistoryEntry>>>;
 
+    /// Keyed by `(card_uuid, finish)` — each finish of a card has its own
+    /// cost basis.
     fn get_collection_purchase_totals(
         &self,
         collection_id: &CollectionID,
-    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<CardID, PurchaseSummary>>>;
+    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<(CardID, String), PurchaseSummary>>>;
 
     fn delete_purchase_entry(
         &mut self,
@@ -154,14 +158,14 @@ pub trait PersistenceSystemTrait {
         entry_id: i64,
     ) -> impl std::future::Future<Output = eyre::Result<bool>>;
 
+    /// The entry's `finish` is fixed at creation and can't be changed here
+    /// — only how many copies (of that same finish) and at what price.
     fn update_purchase_entry(
         &mut self,
         collection_id: &CollectionID,
         entry_id: i64,
         quantity: i32,
-        foil_quantity: i32,
-        normal_price_per_unit: Option<f64>,
-        foil_price_per_unit: Option<f64>,
+        price_per_unit: Option<f64>,
     ) -> impl std::future::Future<Output = eyre::Result<UpdateEntryResult>>;
 
     /// Explicitly grants read-only public access to a collection by minting
@@ -210,20 +214,17 @@ pub enum UpdateEntryResult {
 
 #[derive(Debug, Clone)]
 pub struct PurchaseSummary {
-    pub total_normal_paid: f64,
-    pub total_foil_paid: f64,
+    pub total_paid: f64,
     pub quantity: i32,
-    pub foil_quantity: i32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub struct PurchaseHistoryEntry {
     pub id: i64,
     pub card_uuid: String,
+    pub finish: String,
     pub quantity: i32,
-    pub foil_quantity: i32,
-    pub normal_price_per_unit: Option<f64>,
-    pub foil_price_per_unit: Option<f64>,
+    pub price_per_unit: Option<f64>,
     pub provider: String,
     pub recorded_at: String,
 }

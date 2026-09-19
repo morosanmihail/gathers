@@ -1,14 +1,25 @@
 <script lang="ts">
 	import { portal } from '$lib/portal';
 	import { clampHorizontal } from '$lib/tooltip.svelte';
+	import { finishLabel } from '$lib/types';
 
 	interface Props {
+		// Single generic "Add 1" — used when `finishes` is empty (no catalog
+		// finish data for this game, e.g. Riftbound/Pokemon today).
 		onAdd?: () => void;
-		onAddFoil?: () => void;
+		// Catalog finishes for this specific card (already mapped to gathers'
+		// internal values via `catalogFinishes` — "" for the default/nonfoil
+		// finish, "foil", "etched", ...). When non-empty, one "Add 1 <finish>"
+		// item is shown per finish instead of the single `onAdd` item.
+		finishes?: string[];
+		onAddFinish?: (finish: string) => void;
 		onAddWanted?: () => void;
 	}
 
-	let { onAdd, onAddFoil, onAddWanted }: Props = $props();
+	let { onAdd, finishes = [], onAddFinish, onAddWanted }: Props = $props();
+
+	const perFinish = $derived(finishes.length > 0 && !!onAddFinish);
+	const itemCount = $derived((perFinish ? finishes.length : (onAdd ? 1 : 0)) + (onAddWanted ? 1 : 0));
 
 	let open = $state(false);
 	let style = $state('');
@@ -16,9 +27,10 @@
 
 	function position() {
 		if (!btnEl) return;
-		const rect = btnEl.getBoundingClientRect();
-		const menuH = 108;
+		const itemH = 28;
+		const menuH = itemCount * itemH + 8;
 		const margin = 6;
+		const rect = btnEl.getBoundingClientRect();
 		const xStyle = clampHorizontal(rect, 140);
 		const fitsBelow = rect.bottom + margin + menuH <= window.innerHeight;
 		const yStyle = fitsBelow
@@ -54,11 +66,14 @@
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => { if (e.key === 'Escape') open = false; }}
 	>
-		{#if onAdd}
+		{#if perFinish}
+			{#each finishes as f (f)}
+				<button class="add-dropdown-item" role="menuitem" onclick={(e) => pick(e, () => onAddFinish?.(f))}>
+					Add 1 {finishLabel(f)}
+				</button>
+			{/each}
+		{:else if onAdd}
 			<button class="add-dropdown-item" role="menuitem" onclick={(e) => pick(e, onAdd)}>Add 1</button>
-		{/if}
-		{#if onAddFoil}
-			<button class="add-dropdown-item" role="menuitem" onclick={(e) => pick(e, onAddFoil)}>Add 1 foil</button>
 		{/if}
 		{#if onAddWanted}
 			<button class="add-dropdown-item" role="menuitem" onclick={(e) => pick(e, onAddWanted)}>Add 1 wanted</button>

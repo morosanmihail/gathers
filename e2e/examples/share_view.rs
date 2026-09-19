@@ -80,16 +80,16 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     // ── 3. Add cards, verify full data is merged in a single request ─────────
     step("3. Add cards, verify merged card data");
 
-    client.add_cards(col, CARD_A, 4, 0, None).await?;
-    client.add_cards(col, CARD_B, 0, 2, None).await?;
+    client.add_cards(col, CARD_A, "", 4, None).await?;
+    client.add_cards(col, CARD_B, "foil", 2, None).await?;
 
     let page = client.public_cards(&link.token, 0, 1000).await?;
-    eq(page.total, 2, "2 distinct cards")?;
+    eq(page.total, 2, "2 distinct (uuid, finish) rows")?;
     eq(page.cards.len(), 2, "page returns both cards in one request")?;
 
     let a = find(&page.cards, CARD_A)?;
     eq(field_i64(a, "quantity"), 4, "card A quantity")?;
-    eq(field_i64(a, "foilQuantity"), 0, "card A foil qty")?;
+    eq(field_str(a, "finish"), String::new(), "card A is the default finish")?;
     ensure(
         !field_str(a, "name").is_empty(),
         "card A has a non-empty name (full card data was merged in)",
@@ -100,8 +100,8 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     )?;
 
     let b = find(&page.cards, CARD_B)?;
-    eq(field_i64(b, "quantity"), 0, "card B quantity")?;
-    eq(field_i64(b, "foilQuantity"), 2, "card B foil qty")?;
+    eq(field_i64(b, "quantity"), 2, "card B quantity")?;
+    eq(field_str(b, "finish"), "foil".to_string(), "card B is the foil finish")?;
     ensure(!field_str(b, "name").is_empty(), "card B has a non-empty name")?;
     ok("both cards present with quantities + full card details merged in");
 

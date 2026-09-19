@@ -55,15 +55,12 @@
 	});
 
 	function fmtQty(e: PurchaseEntry) {
-		const parts: string[] = [];
-		if (e.quantity > 0) parts.push(`${e.quantity}×`);
-		if (e.foil_quantity > 0) parts.push(`${e.foil_quantity}✦`);
-		return parts.join(' ') || '—';
+		if (e.quantity <= 0) return '—';
+		return e.finish ? `${e.quantity}✦ ${e.finish}` : `${e.quantity}×`;
 	}
 
 	function fmtHistPrice(e: PurchaseEntry) {
-		const p = e.normal_price_per_unit ?? e.foil_price_per_unit;
-		return p != null ? `$${p.toFixed(2)}` : '—';
+		return e.price_per_unit != null ? `$${e.price_per_unit.toFixed(2)}` : '—';
 	}
 </script>
 

@@ -4,7 +4,7 @@
 	import CardDetailModal from './CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustWantQuantity, providerFromActiveSystem, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters } from '$lib/types';
+	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
 
 	interface Props {
@@ -84,15 +84,15 @@
 		}
 	}
 
-	async function addCard(card: AnyCard | CollectionCard, foil = false) {
+	async function addCard(card: AnyCard | CollectionCard, finish = '') {
 		const price = addPrice !== '' ? parseFloat(addPrice) : null;
 		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id, foil ? 0 : 1, foil ? 1 : 0, purchasePrice, providerFromActiveSystem(activeSystem))
+				addCardToCollection(collection, card.id, finish, 1, purchasePrice, providerFromActiveSystem(activeSystem))
 			);
-			toast = `Added ${card.name}${foil ? ' (foil)' : ''}`;
+			toast = `Added ${card.name}${finish ? ` (${finishLabel(finish)})` : ''}`;
 			setTimeout(() => toast = '', 2000);
 			onAdded?.();
 		} catch {
@@ -220,7 +220,7 @@
 						{collection}
 						{prices}
 						onAdd={(c) => addCard(c)}
-						onAddFoil={(c) => addCard(c, true)}
+						onAddFinish={(c, finish) => addCard(c, finish)}
 						onAddWanted={(c) => addWanted(c)}
 						onclick={(c) => detailCard = c as AnyCard}
 						{total}

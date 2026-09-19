@@ -57,6 +57,8 @@ mirrors = ["http://mirror.gathers.cards"]
 
 # Acknowledgements
 
+[MTGJson](https://mtgjson.com) database for all MTG card databases!
+
 Pokemon database scraper thanks to [pokedata](https://github.com/poketrax/pokedata).
 GatheRs version is a Rust rewrite.
 
@@ -68,3 +70,23 @@ GatheRs version is a rust rewrite.
 ![Example of the UI, List View](https://gathers.cards/images/webui2/collection2.png)
 
 ![Example of the UI, Riftbound](https://gathers.cards/images/webui2/purchase1.png)
+
+# Development
+
+Local dev environment is driven by [Tilt](https://tilt.dev) and [just](https://github.com/casey/just).
+
+```
+tilt up
+```
+
+Starts the server, the `dummy-plugin` example plugin, and the webui2 dev server together, rebuilding/reloading on source changes. Once up, the Tilt UI links to:
+- API — http://localhost:5234
+- Dummy Plugin — http://localhost:5236
+- UI v2 — http://localhost:5173
+
+`just` recipes (see the `Justfile`):
+- `just` — list available recipes
+- `just test` — run all workspace unit/integration tests
+- `just e2e` — run the e2e tests against a live server (needs one already running, e.g. via `tilt up`; point elsewhere with `GATHERS_URL=http://host:port`)
+- `just e2e-plugins` — run the plugin-provider-resolution e2e test against its own isolated, ephemeral server + dummy-plugin pair, so it needs no live server and never touches your real config/data
+- `just bench` — run the criterion benchmarks
