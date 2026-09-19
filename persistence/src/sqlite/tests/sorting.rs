@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn test_collection_sort_by_quantity_asc() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card_a".to_string(), "", 5, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_b".to_string(), "", 1, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_c".to_string(), "", 3, OLD_TIME, "").await.unwrap();
@@ -19,7 +19,7 @@ async fn test_collection_sort_by_quantity_asc() {
 #[tokio::test]
 async fn test_collection_sort_by_quantity_desc() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card_a".to_string(), "", 5, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_b".to_string(), "", 1, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_c".to_string(), "", 3, OLD_TIME, "").await.unwrap();
@@ -39,7 +39,7 @@ async fn test_collection_sort_by_quantity_desc() {
 #[tokio::test]
 async fn test_collection_sort_by_quantity_desc_applies_per_finish_row() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card_a".to_string(), "", 1, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_a".to_string(), "foil", 10, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card_b".to_string(), "", 1, OLD_TIME, "").await.unwrap();
@@ -57,7 +57,7 @@ async fn test_collection_sort_by_quantity_desc_applies_per_finish_row() {
 #[tokio::test]
 async fn test_collection_sort_by_provider() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"z_card".to_string(), "", 1, OLD_TIME, "ZProvider").await.unwrap();
     p.add_card_to_collection(&col, &"a_card".to_string(), "", 1, OLD_TIME, "AProvider").await.unwrap();
     p.add_card_to_collection(&col, &"m_card".to_string(), "", 1, OLD_TIME, "MProvider").await.unwrap();
@@ -75,7 +75,7 @@ async fn test_collection_sort_by_provider() {
 #[tokio::test]
 async fn test_collection_filter_by_provider() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"mtg2".to_string(), "", 2, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
@@ -91,7 +91,7 @@ async fn test_collection_filter_by_provider() {
 #[tokio::test]
 async fn test_collection_filter_by_providers_multi() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"pk1".to_string(), "", 1, OLD_TIME, "PokemonSQLite").await.unwrap();
@@ -110,7 +110,7 @@ async fn test_collection_filter_by_providers_multi() {
 #[tokio::test]
 async fn test_collection_filter_by_providers_single_entry() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
 
@@ -126,7 +126,7 @@ async fn test_collection_filter_by_providers_single_entry() {
 #[tokio::test]
 async fn test_collection_filter_provider_takes_precedence_over_providers() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
 
@@ -142,7 +142,7 @@ async fn test_collection_filter_provider_takes_precedence_over_providers() {
 #[tokio::test]
 async fn test_collection_filter_by_provider_no_match() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
@@ -155,7 +155,7 @@ async fn test_collection_filter_by_provider_no_match() {
 #[tokio::test]
 async fn test_collection_filter_and_sort_combined() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg_high".to_string(), "", 5, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"mtg_low".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 99, OLD_TIME, "RiftboundSQLite").await.unwrap();

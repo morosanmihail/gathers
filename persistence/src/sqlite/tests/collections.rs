@@ -4,7 +4,7 @@ use super::*;
 async fn test_collection_management() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
 
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     assert!(!col.is_empty());
 
     let cols = p.list_collections(None).await.unwrap();
@@ -12,7 +12,7 @@ async fn test_collection_management() {
     assert!(cols.contains(&"Test Collection".to_string()));
     assert!(cols.contains(&DEFAULT.into()));
 
-    let col2 = p.add_collection("Another Collection".to_string()).await.unwrap();
+    let col2 = new_collection(&mut p, "Another Collection".to_string()).await;
     assert!(!col2.is_empty());
 
     let cols = p.list_collections(None).await.unwrap();
@@ -29,11 +29,11 @@ async fn test_collection_management() {
 #[tokio::test]
 async fn test_add_collection_duplicate_name_is_idempotent() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    p.add_collection("My Collection".to_string()).await.unwrap();
-    let result = p.add_collection("My Collection".to_string()).await;
+    new_collection(&mut p, "My Collection".to_string()).await;
+    let result = p.add_collection("My Collection".to_string(), CollectionKind::Collection).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "My Collection");
-    let result = p.add_collection(DEFAULT.to_string()).await;
+    let result = p.add_collection(DEFAULT.to_string(), CollectionKind::Collection).await;
     assert!(result.is_ok());
     let cols = p.list_collections(None).await.unwrap();
     assert_eq!(cols.len(), 2);
@@ -42,9 +42,9 @@ async fn test_add_collection_duplicate_name_is_idempotent() {
 #[tokio::test]
 async fn test_list_collections_with_filter() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    p.add_collection("Test Alpha".to_string()).await.unwrap();
-    p.add_collection("Test Beta".to_string()).await.unwrap();
-    p.add_collection("Gamma".to_string()).await.unwrap();
+    new_collection(&mut p, "Test Alpha".to_string()).await;
+    new_collection(&mut p, "Test Beta".to_string()).await;
+    new_collection(&mut p, "Gamma".to_string()).await;
 
     let cols = p.list_collections(Some("Test".to_string())).await.unwrap();
     assert_eq!(cols.len(), 2);
@@ -64,7 +64,7 @@ async fn test_list_collections_with_filter() {
 #[tokio::test]
 async fn test_remove_collection_can_be_removed() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
     p.remove_collection(&col, None).await.unwrap();
     assert!(!p.list_collections(None).await.unwrap().contains(&col));
@@ -73,7 +73,7 @@ async fn test_remove_collection_can_be_removed() {
 #[tokio::test]
 async fn test_remove_collection_with_none_move_to() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
     p.remove_collection(&col, None).await.unwrap();
     assert!(!p.list_collections(None).await.unwrap().contains(&col));
@@ -87,7 +87,7 @@ async fn test_remove_collection_with_none_move_to() {
 #[tokio::test]
 async fn test_remove_collection_that_cant_be_removed() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"12345".to_string(), 5, 3).await;
     add_card(&mut p, &DEFAULT.into(), &"12346".to_string(), 2, 8).await;
 
@@ -111,14 +111,14 @@ async fn test_remove_collection_that_cant_be_removed() {
 #[tokio::test]
 async fn test_list_collection_info_marks_default_unremovable() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    p.add_collection("Binder".to_string()).await.unwrap();
+    new_collection(&mut p, "Binder".to_string()).await;
     let mut info = p.list_collection_info().await.unwrap();
     info.sort_by(|a, b| a.name.cmp(&b.name));
     assert_eq!(
         info,
         vec![
-            CollectionInfo { name: "Binder".into(), removable: true },
-            CollectionInfo { name: DEFAULT.into(), removable: false },
+            CollectionInfo { name: "Binder".into(), removable: true, kind: CollectionKind::Collection },
+            CollectionInfo { name: DEFAULT.into(), removable: false, kind: CollectionKind::Collection },
         ]
     );
 }
@@ -136,7 +136,7 @@ async fn test_remove_missing_collection_is_not_found() {
 #[tokio::test]
 async fn test_remove_collection_move_to_missing_target_changes_nothing() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Binder".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 2, 0).await;
 
     let err = p.remove_collection(&col, Some("Ghost".to_string())).await.unwrap_err();
@@ -152,7 +152,7 @@ async fn test_remove_collection_move_to_missing_target_changes_nothing() {
 #[tokio::test]
 async fn test_remove_collection_revokes_share_links_and_history() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Binder".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 2, 0).await;
     record_purchase(&mut p, &col, "card1", 2, 0, Some(1.0)).await;
     let link = p.create_share_link(&col).await.unwrap();
@@ -162,7 +162,7 @@ async fn test_remove_collection_revokes_share_links_and_history() {
 
     // A new collection reusing the name starts clean: no old link reaches
     // it, and no stale purchase history is attached to it.
-    let col = p.add_collection("Binder".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
     assert_eq!(p.resolve_share_link(&link.token).await.unwrap(), None);
     assert!(p.get_all_purchase_history(&col).await.unwrap().is_empty());
 }
@@ -170,8 +170,8 @@ async fn test_remove_collection_revokes_share_links_and_history() {
 #[tokio::test]
 async fn test_remove_collection_move_to_carries_purchase_history() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let a = p.add_collection("A".to_string()).await.unwrap();
-    let b = p.add_collection("B".to_string()).await.unwrap();
+    let a = new_collection(&mut p, "A".to_string()).await;
+    let b = new_collection(&mut p, "B".to_string()).await;
     add_card(&mut p, &a, &"card1".to_string(), 2, 0).await;
     record_purchase(&mut p, &a, "card1", 2, 0, Some(3.0)).await;
 
@@ -184,7 +184,7 @@ async fn test_remove_collection_move_to_carries_purchase_history() {
 #[tokio::test]
 async fn test_rename_collection_keeps_share_links() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Old".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Old".to_string()).await;
     let link = p.create_share_link(&col).await.unwrap();
 
     p.rename_collection(&col, &"New".to_string()).await.unwrap();
@@ -195,7 +195,7 @@ async fn test_rename_collection_keeps_share_links() {
 #[tokio::test]
 async fn test_rename_collection_errors() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let a = p.add_collection("A".to_string()).await.unwrap();
+    let a = new_collection(&mut p, "A".to_string()).await;
     add_card(&mut p, &a, &"card1".to_string(), 1, 0).await;
 
     let err = p.rename_collection(&"Missing".to_string(), &"X".to_string()).await.unwrap_err();
@@ -218,8 +218,8 @@ async fn test_rename_collection_errors() {
 #[tokio::test]
 async fn test_remove_collection_with_move_to() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col1 = p.add_collection("Collection 1".to_string()).await.unwrap();
-    let col2 = p.add_collection("Collection 2".to_string()).await.unwrap();
+    let col1 = new_collection(&mut p, "Collection 1".to_string()).await;
+    let col2 = new_collection(&mut p, "Collection 2".to_string()).await;
 
     let cid1 = add_card(&mut p, &col1, &"card1".to_string(), 5, 2).await;
     let cid2 = add_card(&mut p, &col1, &"card2".to_string(), 3, 1).await;
@@ -240,7 +240,7 @@ async fn test_remove_collection_with_move_to() {
 #[tokio::test]
 async fn test_remove_default_collection_with_move_to() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
     let cid = add_card(&mut p, &DEFAULT.into(), &"default_card".to_string(), 3, 1).await;
 
@@ -267,8 +267,8 @@ async fn test_remove_default_collection_with_move_to() {
 #[tokio::test]
 async fn test_remove_collection_move_to_merges_quantities() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col1 = p.add_collection("Collection 1".to_string()).await.unwrap();
-    let col2 = p.add_collection("Collection 2".to_string()).await.unwrap();
+    let col1 = new_collection(&mut p, "Collection 1".to_string()).await;
+    let col2 = new_collection(&mut p, "Collection 2".to_string()).await;
 
     add_card(&mut p, &col1, &"shared_card".to_string(), 3, 1).await;
     add_card(&mut p, &col2, &"shared_card".to_string(), 2, 4).await;
@@ -296,7 +296,7 @@ async fn test_remove_collection_move_to_merges_quantities() {
 #[tokio::test]
 async fn test_cards_count_matches_paginated_entry_count() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Binder".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
 
     // One card owned in two finishes, plus a second card in one finish: 2 distinct cards, 3
     // entries

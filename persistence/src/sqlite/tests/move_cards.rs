@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn test_move_cards_between_collections() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     let cid = add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
     add_card(&mut p, &DEFAULT.into(), &"default_card".to_string(), 3, 1).await;
 
@@ -28,7 +28,7 @@ async fn test_move_cards_between_collections() {
 #[tokio::test]
 async fn test_move_cards_between_collections_skips_zero_quantity() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 5, 2).await;
 
     p.move_cards_between_collections(
@@ -46,8 +46,8 @@ async fn test_move_cards_between_collections_skips_zero_quantity() {
 #[tokio::test]
 async fn test_move_partial_preserves_provider() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 5, OLD_TIME, "mtg").await.unwrap();
     p.add_card_to_collection(&col_a, &"card1".to_string(), "foil", 2, OLD_TIME, "mtg").await.unwrap();
 
@@ -70,8 +70,8 @@ async fn test_move_partial_preserves_provider() {
 #[tokio::test]
 async fn test_move_all_copies_preserves_provider() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 4, OLD_TIME, "riftbound").await.unwrap();
     p.add_card_to_collection(&col_a, &"card1".to_string(), "foil", 1, OLD_TIME, "riftbound").await.unwrap();
 
@@ -97,8 +97,8 @@ async fn test_move_all_copies_preserves_provider() {
 #[tokio::test]
 async fn test_move_wanted_only_card() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.adjust_want_quantity(&col_a, &"card1".to_string(), 4, "mtg").await.unwrap();
 
     p.move_cards_between_collections(
@@ -117,8 +117,8 @@ async fn test_move_wanted_only_card() {
 #[tokio::test]
 async fn test_move_card_with_owned_and_wanted_quantities() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "mtg").await.unwrap();
     p.adjust_want_quantity(&col_a, &"card1".to_string(), 2, "mtg").await.unwrap();
 
@@ -138,7 +138,7 @@ async fn test_move_card_with_owned_and_wanted_quantities() {
 #[tokio::test]
 async fn test_move_same_collection_is_noop() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("My Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "My Collection".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 5, OLD_TIME, "mtg").await.unwrap();
     p.add_card_to_collection(&col, &"card1".to_string(), "foil", 2, OLD_TIME, "mtg").await.unwrap();
 
@@ -160,8 +160,8 @@ async fn test_move_same_collection_is_noop() {
 #[tokio::test]
 async fn test_move_clamps_to_what_source_holds() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 1, OLD_TIME, "mtg").await.unwrap();
 
     p.move_cards_between_collections(
@@ -179,8 +179,8 @@ async fn test_move_clamps_to_what_source_holds() {
 #[tokio::test]
 async fn test_move_cannot_create_cards() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "mtg").await.unwrap();
 
     p.move_cards_between_collections(
@@ -201,7 +201,7 @@ async fn test_move_cannot_create_cards() {
 #[tokio::test]
 async fn test_move_to_missing_collection_is_not_found() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "mtg").await.unwrap();
 
     let err = p.move_cards_between_collections(

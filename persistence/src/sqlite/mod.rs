@@ -1,6 +1,7 @@
 mod backup;
 mod cards;
 mod collections;
+mod deck_cards;
 mod price_history;
 mod purchase_history;
 mod share_links;
@@ -10,6 +11,7 @@ mod tests;
 use include_dir::{Dir, include_dir};
 use models::CardID;
 use models::CollectionID;
+use models::{CollectionKind, DeckCard};
 use rusqlite::Connection;
 use rusqlite_migration::Migrations;
 use std::sync::Arc;
@@ -62,6 +64,52 @@ pub fn default_price_history_path(storage_db_path: &str) -> String {
         .into_owned()
 }
 
+/// Deck operations, reached through the [`crate::Deck`] and [`crate::DeckMut`] handles rather
+/// than `PersistenceSystemTrait`; see those types for why.
+impl SQLitePersistenceSystem {
+    pub(crate) async fn deck_cards(&self, deck: &CollectionID) -> eyre::Result<Vec<DeckCard>> {
+        let conn = self.connection.lock().await;
+        deck_cards::list_cards(&conn, deck)
+    }
+
+    pub(crate) async fn deck_card_count(&self, deck: &CollectionID) -> eyre::Result<i64> {
+        let conn = self.connection.lock().await;
+        deck_cards::count_cards(&conn, deck)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn adjust_deck_card(
+        &mut self,
+        deck: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+        time_added: &str,
+        provider: &str,
+    ) -> eyre::Result<Option<DeckCard>> {
+        let conn = self.connection.lock().await;
+        deck_cards::adjust_card(
+            &conn, deck, card_uuid, finish, board, quantity, time_added, provider,
+        )
+    }
+
+    pub(crate) async fn move_deck_card(
+        &mut self,
+        deck: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        from_board: &str,
+        to_board: &str,
+        quantity: i32,
+    ) -> eyre::Result<()> {
+        let mut conn = self.connection.lock().await;
+        deck_cards::move_between_boards(
+            &mut conn, deck, card_uuid, finish, from_board, to_board, quantity,
+        )
+    }
+}
+
 impl SQLitePersistenceSystem {
     pub fn new(in_memory: bool, db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "storage.db".to_string());
@@ -82,9 +130,21 @@ impl SQLitePersistenceSystem {
 }
 
 impl PersistenceSystemTrait for SQLitePersistenceSystem {
-    async fn add_collection(&mut self, name: CollectionID) -> eyre::Result<CollectionID> {
+    async fn add_collection(
+        &mut self,
+        name: CollectionID,
+        kind: CollectionKind,
+    ) -> eyre::Result<CollectionID> {
         let conn = self.connection.lock().await;
-        collections::add_collection(&conn, &name)
+        collections::add_collection(&conn, &name, kind)
+    }
+
+    async fn get_collection_kind(
+        &self,
+        name: &CollectionID,
+    ) -> eyre::Result<Option<CollectionKind>> {
+        let conn = self.connection.lock().await;
+        collections::get_collection_kind(&conn, name)
     }
 
     async fn remove_collection(

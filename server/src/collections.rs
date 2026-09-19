@@ -791,7 +791,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             ));
         }
         let collection_id = storage
-            .add_collection(input.id.clone())
+            .add_collection(input.id.clone(), models::CollectionKind::Collection)
             .await
             .map_err(|e| crate::storage_error("Failed to add collection", e))?;
         Ok(Json(CollectionAddResponse { id: collection_id, name: input.id }))

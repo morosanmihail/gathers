@@ -79,3 +79,65 @@ pub struct CollectionCard {
     pub provider: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectionKind {
+    /// A set of *owned* cards.
+    #[default]
+    Collection,
+    /// A set of *allocated* cards (intended to be played in a given format).
+    Deck,
+}
+
+impl CollectionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Collection => "collection",
+            Self::Deck => "deck",
+        }
+    }
+}
+
+/// Returned when a stored `kind` doesn't match any known variant.
+#[derive(Debug, Clone)]
+pub struct UnknownCollectionKind(pub String);
+
+impl std::fmt::Display for UnknownCollectionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown collection kind: {:?}", self.0)
+    }
+}
+
+impl std::error::Error for UnknownCollectionKind {}
+
+impl std::str::FromStr for CollectionKind {
+    type Err = UnknownCollectionKind;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "collection" => Ok(Self::Collection),
+            "deck" => Ok(Self::Deck),
+            other => Err(UnknownCollectionKind(other.to_string())),
+        }
+    }
+}
+
+/// A card allocated to one zone of one deck.
+///
+/// The `(deck, uuid, finish, board)` key means the same card can appear on multiple boards of the
+/// same deck with independent quantities. There is no `want_quantity`: a deck is a list to be
+/// played, not a wishlist.
+#[derive(Debug, Clone)]
+pub struct DeckCard {
+    pub deck: CollectionID,
+    pub uuid: CardID,
+    /// Which finish this allocation is for; same meaning as `CollectionCard::finish`.
+    pub finish: String,
+    /// Which zone of the deck: `""` (default), MTG's `"main"`/`"side"`, Riftbound's
+    /// `"legend"`/`"runes"`/`"battlefield"`, and so on. Open-ended per game, like `finish`.
+    pub board: String,
+    pub quantity: i32,
+    pub provider: String,
+    pub time_added: String,
+    pub time_updated: String,
+}

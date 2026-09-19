@@ -5,6 +5,7 @@ mod sqlite;
 use enum_dispatch::enum_dispatch;
 use models::CardID;
 use models::CollectionCard;
+use models::{CollectionKind, DeckCard};
 use models::CollectionID;
 use models::filters::SortOrder;
 
@@ -72,6 +73,8 @@ pub fn validate_currency(currency: &str) -> Result<(), String> {
 pub struct CollectionInfo {
     pub name: CollectionID,
     pub removable: bool,
+    /// Whether this holds owned cards or is a deck list.
+    pub kind: CollectionKind,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -129,6 +132,7 @@ pub trait PersistenceSystemTrait {
     fn add_collection(
         &mut self,
         name: CollectionID,
+        kind: CollectionKind,
     ) -> impl std::future::Future<Output = eyre::Result<String>>;
 
     /// Deletes a collection along with its cards, purchase history and share
@@ -155,6 +159,16 @@ pub trait PersistenceSystemTrait {
         &self,
         filter: Option<String>,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<CollectionID>>>;
+
+    /// Whether a collection is a plain collection or a deck, or `None` if there is no such
+    /// collection.
+    ///
+    /// Callers that mutate a collection's cards should check this: a deck's cards live in a
+    /// separate table, so writing to `cards` under a deck's name would create orphaned rows.
+    fn get_collection_kind(
+        &self,
+        name: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionKind>>>;
 
     fn list_collection_info(
         &self,
@@ -408,4 +422,103 @@ pub struct PurchaseHistoryEntry {
     pub currency: String,
     pub provider: String,
     pub recorded_at: String,
+}
+
+/// Scoped read access to one deck, from [`PersistenceSystem::deck`].
+pub struct Deck<'a> {
+    storage: &'a SQLitePersistenceSystem,
+    name: CollectionID,
+}
+
+/// Scoped write access to one deck, from [`PersistenceSystem::deck_mut`].
+pub struct DeckMut<'a> {
+    storage: &'a mut SQLitePersistenceSystem,
+    name: CollectionID,
+}
+
+impl PersistenceSystem {
+    pub fn deck(&self, name: impl Into<CollectionID>) -> Deck<'_> {
+        match self {
+            Self::SQLitePersistenceSystem(storage) => storage.deck(name),
+        }
+    }
+
+    pub fn deck_mut(&mut self, name: impl Into<CollectionID>) -> DeckMut<'_> {
+        match self {
+            Self::SQLitePersistenceSystem(storage) => storage.deck_mut(name),
+        }
+    }
+}
+
+impl SQLitePersistenceSystem {
+    pub fn deck(&self, name: impl Into<CollectionID>) -> Deck<'_> {
+        Deck {
+            storage: self,
+            name: name.into(),
+        }
+    }
+
+    pub fn deck_mut(&mut self, name: impl Into<CollectionID>) -> DeckMut<'_> {
+        DeckMut {
+            storage: self,
+            name: name.into(),
+        }
+    }
+}
+
+impl Deck<'_> {
+    /// Every card in the deck, across all boards.
+    ///
+    /// Decks are bounded lists, so this is deliberately unpaginated.
+    pub async fn cards(&self) -> eyre::Result<Vec<DeckCard>> {
+        self.storage.deck_cards(&self.name).await
+    }
+
+    /// Copies in the deck, summed across all boards and finishes.
+    pub async fn card_count(&self) -> eyre::Result<i64> {
+        self.storage.deck_card_count(&self.name).await
+    }
+}
+
+impl DeckMut<'_> {
+    /// Every card in the deck; see [`Deck::cards`].
+    pub async fn cards(&self) -> eyre::Result<Vec<DeckCard>> {
+        self.storage.deck_cards(&self.name).await
+    }
+
+    /// Changes one card's quantity on one board.
+    ///
+    /// Additive with respect to ownership: never touches `cards`, so putting a card in a deck
+    /// doesn't deduct it from any collection. Returns `None` if the row reached zero and was
+    /// removed.
+    pub async fn adjust_card(
+        &mut self,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+        time_added: &str,
+        provider: &str,
+    ) -> eyre::Result<Option<DeckCard>> {
+        self.storage
+            .adjust_deck_card(&self.name, card_uuid, finish, board, quantity, time_added, provider)
+            .await
+    }
+
+    /// Moves copies of a card between two of the deck's boards, in one transaction so they can't
+    /// be duplicated or lost midway.
+    ///
+    /// Moving more than the source board holds moves what's there.
+    pub async fn move_card(
+        &mut self,
+        card_uuid: &CardID,
+        finish: &str,
+        from_board: &str,
+        to_board: &str,
+        quantity: i32,
+    ) -> eyre::Result<()> {
+        self.storage
+            .move_deck_card(&self.name, card_uuid, finish, from_board, to_board, quantity)
+            .await
+    }
 }

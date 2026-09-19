@@ -1,6 +1,6 @@
 // Re-export everything submodules need via `use super::*`
 pub use super::SQLitePersistenceSystem;
-pub use models::{CardID, CollectionCard, CollectionID};
+pub use models::{CardID, CollectionCard, CollectionID, CollectionKind};
 pub use models::filters::SortOrder;
 pub use crate::{CollectionCardsParams, CollectionInfo, CollectionSortField, PersistenceError, PersistenceSystemTrait, UpdateEntryResult};
 pub use rusqlite::params;
@@ -21,6 +21,15 @@ pub async fn get_time_updated(
         |row| row.get(0),
     )
     .ok()
+}
+
+/// Creates a plain collection, absorbing the `kind` parameter that only deck
+/// tests care about; same idea as the `add_card` wrapper below.
+pub async fn new_collection(
+    p: &mut SQLitePersistenceSystem,
+    name: CollectionID,
+) -> CollectionID {
+    p.add_collection(name, CollectionKind::Collection).await.unwrap()
 }
 
 /// Convenience wrapper over the new per-finish `add_card_to_collection`,
@@ -65,6 +74,7 @@ pub async fn record_purchase(
 mod backup;
 mod cards;
 mod collections;
+mod decks;
 mod move_cards;
 mod price_history;
 mod purchase;

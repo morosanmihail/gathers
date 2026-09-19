@@ -45,13 +45,13 @@ fn invalid_input(e: eyre::Report) -> String {
 async fn restore_replaces_both_databases() {
     let dir = tempfile::tempdir().unwrap();
     let mut source = open(dir.path(), "source");
-    source.add_collection("Binder".to_string()).await.unwrap();
+    source.add_collection("Binder".to_string(), CollectionKind::Collection).await.unwrap();
     add_card(&mut source, &"Binder".to_string(), &"card-1".to_string(), 3, 1).await;
     source.record_prices("", &[price("card-1", 2.5)]).await.unwrap();
     let (storage, prices) = export(&source, dir.path()).await;
 
     let mut target = open(dir.path(), "target");
-    target.add_collection("Doomed".to_string()).await.unwrap();
+    target.add_collection("Doomed".to_string(), CollectionKind::Collection).await.unwrap();
     target.record_prices("", &[price("card-2", 9.0)]).await.unwrap();
     target.restore(&storage, Some(&prices)).await.unwrap();
 
@@ -65,7 +65,7 @@ async fn restore_replaces_both_databases() {
     assert!(target.get_price_history("", &"card-2".to_string()).await.unwrap().is_empty());
 
     // Still usable and still in WAL mode afterwards.
-    target.add_collection("After".to_string()).await.unwrap();
+    target.add_collection("After".to_string(), CollectionKind::Collection).await.unwrap();
     let mode: String = target.connection.lock().await.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
 
@@ -116,7 +116,7 @@ async fn restore_rejects_newer_schema() {
         .unwrap();
 
     let mut target = open(dir.path(), "target");
-    target.add_collection("Kept".to_string()).await.unwrap();
+    target.add_collection("Kept".to_string(), CollectionKind::Collection).await.unwrap();
     let msg = invalid_input(target.restore(&storage, None).await.unwrap_err());
     assert!(msg.contains("newer"), "{msg}");
     assert!(collections(&target).await.contains(&"Kept".to_string()));
@@ -131,7 +131,7 @@ async fn restore_rejects_bad_files_without_changing_anything() {
     std::fs::write(&garbage, b"definitely not a database, just some text padding it out").unwrap();
 
     let mut target = open(dir.path(), "target");
-    target.add_collection("Kept".to_string()).await.unwrap();
+    target.add_collection("Kept".to_string(), CollectionKind::Collection).await.unwrap();
 
     invalid_input(target.restore(&garbage, None).await.unwrap_err());
     // The wrong kind of database in either slot.

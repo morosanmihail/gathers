@@ -228,7 +228,11 @@ impl PersistenceSystem {
 
         let now = chrono::Utc::now();
         let time_added = now.to_rfc3339();
-        let collection_id = self.add_collection(collection_name).await?;
+        // CSV import always lands in a plain collection: the interchange format has no notion of
+        // deck boards.
+        let collection_id = self
+            .add_collection(collection_name, models::CollectionKind::Collection)
+            .await?;
         let total = cta.len() as f32;
         let mut i: f32 = 0.0;
 
@@ -435,7 +439,7 @@ mod tests {
 
         let collections = s.list_collections(None).await.unwrap();
         assert_eq!(collections.len(), 2); // Default and the new one
-        let new_collection = collections.iter().find(|c| !"Default".eq(*c)).unwrap();
+        let new_collection = collections.iter().find(|c| *c != "Default").unwrap();
 
         // 3 rows: M13/39 gets a normal row (qty 2) + a foil row (qty 1);
         // ISD/173 gets only a foil row (qty 4) since its normal qty is 0.
@@ -681,7 +685,7 @@ mod tests {
         const B: &str = "0003caab-9ff5-5d1a-bc06-976dd0457f19"; // ISD 173
         let mut s = PersistenceSystem::SQLitePersistenceSystem(SQLitePersistenceSystem::new(true, None).unwrap());
         let r = RetrievalSystem::MagicSQLiteRetrievalSystem(MagicSQLiteRetrievalSystem::new(None, None).unwrap());
-        let col = s.add_collection("Source".to_string()).await.unwrap();
+        let col = s.add_collection("Source".to_string(), models::CollectionKind::Collection).await.unwrap();
         let p = "MagicSQLite";
         let t = "2026-01-01T00:00:00Z";
         s.add_card_to_collection(&col, &A.to_string(), "", 2, t, p).await.unwrap();
