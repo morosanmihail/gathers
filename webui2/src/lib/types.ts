@@ -32,6 +32,8 @@ export type PluginResultCard = {
 	description?: string;
 	image?: string;
 	rarity?: string;
+	/** The plugin's freeform, domain-specific fields (e.g. "author"). Absent when empty. */
+	extra?: Record<string, string>;
 	/** Name of the plugin this card came from — distinguishes it from a real system. */
 	provider: string;
 };
@@ -62,6 +64,9 @@ export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' |
 	domain?: string;
 	imageUrl?: string;
 	energyTypes?: string[];
+	// Plugin cards only: the plugin's freeform `extra` fields, shown as-is in
+	// the card detail.
+	extra?: Record<string, string>;
 	mtGCard?: MtgCard;
 	// The finishes this card is actually printed in — mtgjson's for MTG
 	// (e.g. ["nonfoil", "foil"], sometimes "etched") or the scraped

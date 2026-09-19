@@ -41,6 +41,14 @@
 	// collector number — see docs/plugins.md).
 	const isKnownSystem = $derived(isMtg || isRift || isPoke);
 
+	// A plugin card's freeform `extra` fields (e.g. a book's "author"), shown
+	// as label/value rows, sorted by key.
+	const extraFields = $derived(
+		Object.entries((card as CollectionCard).extra ?? {})
+			.filter(([, value]) => value !== '')
+			.sort(([a], [b]) => a.localeCompare(b))
+	);
+
 	const setName = $derived(
 		mtg.setName ||
 		(card.setCode ? app.cardSets.find(s => s.code.toLowerCase() === card.setCode!.toLowerCase())?.name : '') ||
@@ -125,6 +133,12 @@
 						<span class={rarityClass(card.rarity)}>{card.rarity}</span>
 					</div>
 				{/if}
+				{#each extraFields as [key, value] (key)}
+					<div class="card-detail-row">
+						<span class="card-detail-label">{key.replace(/[_-]+/g, ' ')}</span>
+						<span>{value}</span>
+					</div>
+				{/each}
 				{#if printedFinishes.length > 1}
 					<div class="card-detail-row">
 						<span class="card-detail-label">Finishes</span>
