@@ -3,8 +3,11 @@ use reqwest::StatusCode;
 
 use crate::models::{
     AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, MtgCard, SystemMeta, CollectionValueCards, CollectionValueHistory, CollectionRemoveResponse, PublicCollectionPage,
-    PriceHistoryResponse, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo,
+    CollectionAddResponse, CollectionCard, CollectionKind, CollectionRemoveResponse,
+    CollectionRenameRequest, CollectionToAdd, CollectionValueCards, CollectionValueHistory,
+    DeckCard, DeckCardAdjustment, DeckCardMove, MtgCard, PriceHistoryResponse,
+    PublicCollectionPage, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse,
+    SystemInfo, SystemMeta,
 };
 
 /// HTTP client for the GatheRs server.
@@ -35,8 +38,20 @@ impl GathersClient {
     }
 
     pub async fn add_collection(&self, name: &str) -> eyre::Result<CollectionAddResponse> {
-        self.post("/api/collection/add", &Collection { id: name.to_string() })
-            .await
+        self.post(
+            "/api/collection/add",
+            &Collection { id: name.to_string(), kind: None },
+        )
+        .await
+    }
+
+    /// Renames a collection or deck. A deck stays a deck, and its cards follow it.
+    pub async fn rename_collection(&self, id: &str, new_id: &str) -> eyre::Result<Collection> {
+        self.post(
+            &format!("/api/collection/rename/{}", urlenc(id)),
+            &CollectionRenameRequest { new_id: new_id.to_string() },
+        )
+        .await
     }
 
     pub async fn remove_collection(&self, id: &str) -> eyre::Result<CollectionRemoveResponse> {
@@ -378,6 +393,76 @@ impl GathersClient {
     }
 
     // ── low-level helpers ─────────────────────────────────────────────────────
+
+    // ── decks ────────────────────────────────────────────────────────────────
+
+    /// Creates a deck: a collection with `kind = "deck"`, whose cards live in `deck_cards` and are
+    /// reached through `/api/deck` rather than `/api/collection`.
+    pub async fn add_deck(&self, name: &str) -> eyre::Result<CollectionAddResponse> {
+        self.post(
+            "/api/collection/add",
+            &CollectionToAdd {
+                id: name.to_string(),
+                kind: CollectionKind::Deck,
+            },
+        )
+        .await
+    }
+
+    pub async fn deck_cards(&self, deck: &str) -> eyre::Result<Vec<DeckCard>> {
+        self.get(&format!("/api/deck/cards/{}/list", urlenc(deck))).await
+    }
+
+    /// Copies in the deck, summed across boards; the server's count, not a sum of `deck_cards`.
+    pub async fn deck_card_count(&self, deck: &str) -> eyre::Result<i64> {
+        self.get(&format!("/api/deck/cards/{}/count", urlenc(deck))).await
+    }
+
+    /// Changes one card's quantity on one board.
+    ///
+    /// Never changes what any collection says is owned.
+    pub async fn adjust_deck_card(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+    ) -> eyre::Result<Option<DeckCard>> {
+        self.post(
+            &format!("/api/deck/cards/{}/adjust", urlenc(deck)),
+            &DeckCardAdjustment {
+                id: card_id.to_string(),
+                finish: finish.to_string(),
+                board: board.to_string(),
+                quantity,
+            },
+        )
+        .await
+    }
+
+    pub async fn move_deck_card(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        from_board: &str,
+        to_board: &str,
+        quantity: i32,
+    ) -> eyre::Result<Vec<DeckCard>> {
+        self.post(
+            &format!("/api/deck/cards/{}/move", urlenc(deck)),
+            &DeckCardMove {
+                id: card_id.to_string(),
+                finish: finish.to_string(),
+                from_board: from_board.to_string(),
+                to_board: to_board.to_string(),
+                quantity,
+            },
+        )
+        .await
+    }
+
 
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {
         let url = format!("{}{path}", self.base_url);

@@ -342,6 +342,38 @@ async fn test_deck_cards_require_an_existing_collection() {
         "foreign keys are not being enforced; the cascade tests are vacuous"
     );
 }
+
+/// The other direction is refused for a different reason: `cards` rows written under a deck's name
+/// would never be read again, since a deck's contents come from `deck_cards`.
+#[tokio::test]
+async fn test_merging_a_collection_into_a_deck_is_refused() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
+    let deck = new_deck(&mut p, "Burn").await;
+    add_card(&mut p, &col, &"bolt".to_string(), 4, 0).await;
+
+    let result = p.remove_collection(&col, Some(deck.clone())).await;
+    assert!(result.is_err(), "a deck cannot receive owned copies");
+
+    let owned = p
+        .get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100))
+        .await
+        .unwrap();
+    assert_eq!(owned.len(), 1, "the collection survives a refused merge");
+}
+
+/// Deleting a deck outright is still fine; it just takes its list with it.
+#[tokio::test]
+async fn test_deleting_a_deck_without_a_merge_target_succeeds() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let deck = new_deck(&mut p, "Burn").await;
+    deck_add(&mut p, &deck, "bolt", "main", 4).await;
+
+    p.remove_collection(&deck, None).await.unwrap();
+
+    assert!(p.deck(&deck).cards().await.unwrap().is_empty());
+}
+
 /// Mirrors `test_quantities_saturate_instead_of_breaking_the_collection` for deck rows. SQLite
 /// stores the 64-bit sum happily, but every read of this column is an i32, so without the clamp
 /// one overflowing row makes the whole deck unreadable, and unrepairable through the API, since

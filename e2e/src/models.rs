@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: String,
+    /// Whether this is a plain collection or a deck. Optional on the way out so older servers
+    /// deserialise, and skipped on the way in so `add_collection` keeps sending the pre-deck body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CollectionKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,4 +234,67 @@ pub struct MtgCard {
     pub type_line: String,
     #[serde(rename = "setName", default)]
     pub set_name: String,
+}
+
+// ── decks ────────────────────────────────────────────────────────────────────
+
+/// Whether a collection holds owned cards or is a deck list.
+///
+/// Serialised lowercase to match `APICollectionKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectionKind {
+    Collection,
+    Deck,
+}
+
+/// Body for `/api/collection/add` when the kind matters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionToAdd {
+    pub id: String,
+    pub kind: CollectionKind,
+}
+
+/// A card allocated to one board of a deck.
+///
+/// No want quantity: a deck is a list to be played, not a wishlist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCard {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    /// Which zone of the deck: `""` (default), `"main"`, `"side"`, or whatever a given game calls
+    /// its zones.
+    #[serde(default)]
+    pub board: String,
+    pub quantity: i32,
+    #[serde(default)]
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCardAdjustment {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    #[serde(default)]
+    pub board: String,
+    pub quantity: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCardMove {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    #[serde(rename = "fromBoard")]
+    pub from_board: String,
+    #[serde(rename = "toBoard")]
+    pub to_board: String,
+    pub quantity: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionRenameRequest {
+    pub new_id: String,
 }

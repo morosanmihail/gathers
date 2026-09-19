@@ -12,6 +12,7 @@ e2e:
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example collection_lifecycle
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example share_view
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example finishes
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example decks
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example plugin_provider_resolution
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history_weeks
