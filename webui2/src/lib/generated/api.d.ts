@@ -1820,6 +1820,12 @@ export interface components {
             collectorNumber: string;
             description?: string | null;
             energyTypes: components["schemas"]["APIEnergyType"][];
+            /**
+             * @description The finishes/variants this card is printed in (e.g. `["Normal", "Reverse
+             *     Holofoil"]`), sourced from the scraper's `variants` data. Drives which
+             *     finishes the "add another version" picker offers.
+             */
+            finishes: string[];
             id: string;
             image: string;
             name: string;

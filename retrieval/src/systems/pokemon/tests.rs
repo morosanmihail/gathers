@@ -40,6 +40,21 @@ async fn test_search_by_name() {
 }
 
 #[tokio::test]
+async fn test_finishes_sourced_from_variants() {
+    let system = setup_test_db().await;
+    let cards = system
+        .get_cards_by_ids(vec!["Pokemon-Go-Bulbasaur-001".to_string()])
+        .await
+        .unwrap();
+    let card = cards.get("Pokemon-Go-Bulbasaur-001").unwrap();
+    if let Card::Pokemon(p) = card {
+        assert_eq!(p.finishes, vec!["Normal".to_string(), "Reverse Holofoil".to_string()]);
+    } else {
+        panic!("expected Pokemon card");
+    }
+}
+
+#[tokio::test]
 async fn test_search_by_name_partial() {
     let system = setup_test_db().await;
     let filters = CardSearchFilters {

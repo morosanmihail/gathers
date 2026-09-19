@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { AnyCard, CollectionCard, CardGroup, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
-	import { cardImageUrl, rarityClass, finishLabel } from '$lib/types';
+	import { cardImageUrl, rarityClass, finishLabel, catalogFinishes } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
 	import MtgCardDetail from './MtgCardDetail.svelte';
@@ -19,6 +19,10 @@
 	// Only present when opened from the collection view (a CardGroup) —
 	// a search-result card has no owned finishes to list.
 	const ownedFinishes = $derived((card as CardGroup).entries?.filter(e => (e.quantity ?? 0) > 0) ?? []);
+
+	// Catalog finishes this card is actually printed in (MTG, Pokemon — see
+	// `CollectionCard.finishes`). Only worth a row when there's a real choice.
+	const printedFinishes = $derived(catalogFinishes(card as { finishes?: string[] }));
 
 	// Duck-type the system from whichever fields are present — cards from search
 	// results and from a collection listing (which merges card detail + entry
@@ -119,6 +123,12 @@
 					<div class="card-detail-row">
 						<span class="card-detail-label">Rarity</span>
 						<span class={rarityClass(card.rarity)}>{card.rarity}</span>
+					</div>
+				{/if}
+				{#if printedFinishes.length > 1}
+					<div class="card-detail-row">
+						<span class="card-detail-label">Finishes</span>
+						<span>{printedFinishes.map(finishLabel).join(', ')}</span>
 					</div>
 				{/if}
 				{#if (card as CardGroup).entries}

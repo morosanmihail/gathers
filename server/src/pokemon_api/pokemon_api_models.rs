@@ -141,6 +141,10 @@ pub struct APIPokemonCard {
     #[serde(rename = "releaseDate")]
     pub release_date: Option<String>,
     pub pokedex: Option<i64>,
+    /// The finishes/variants this card is printed in (e.g. `["Normal", "Reverse
+    /// Holofoil"]`), sourced from the scraper's `variants` data. Drives which
+    /// finishes the "add another version" picker offers.
+    pub finishes: Vec<String>,
 }
 
 impl From<PokemonCard> for APIPokemonCard {
@@ -158,6 +162,7 @@ impl From<PokemonCard> for APIPokemonCard {
             description: value.description,
             release_date: value.release_date,
             pokedex: value.pokedex,
+            finishes: value.finishes,
         }
     }
 }

@@ -63,10 +63,11 @@ export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' |
 	imageUrl?: string;
 	energyTypes?: string[];
 	mtGCard?: MtgCard;
-	// MTG only — the finishes mtgjson actually prints this card in (e.g.
-	// ["nonfoil", "foil"], sometimes "etched"). Drives which finishes the
-	// "add another version" picker offers. Absent for other games, which
-	// have no such catalog data yet.
+	// The finishes this card is actually printed in — mtgjson's for MTG
+	// (e.g. ["nonfoil", "foil"], sometimes "etched") or the scraped
+	// `variants` for Pokemon (e.g. ["Normal", "Reverse Holofoil"]). Drives
+	// which finishes the "add another version" picker offers. Absent for
+	// games with no such catalog data yet (Riftbound).
 	finishes?: string[];
 }
 
@@ -101,25 +102,26 @@ export function finishLabel(finish: string): string {
 	return finish.charAt(0).toUpperCase() + finish.slice(1);
 }
 
-// Maps a catalog finish value (mtgjson's "nonfoil", or another game's own
-// finish name) to gathers' internal convention, where "" means the
-// default/primary finish.
+// Maps a catalog finish value (mtgjson's "nonfoil", Pokemon's "Normal", or
+// another game's own finish name) to gathers' internal convention, where ""
+// means the default/primary finish.
 export function toInternalFinish(catalogFinish: string): string {
-	return catalogFinish === 'nonfoil' ? '' : catalogFinish;
+	const lower = catalogFinish.toLowerCase();
+	return lower === 'nonfoil' || lower === 'normal' ? '' : catalogFinish;
 }
 
-// A card's own catalog finishes (MTG only, for now — see
-// `CollectionCard.finishes`), mapped to gathers' internal finish values.
-// Empty when the game has no such catalog data (Riftbound, Pokemon).
+// A card's own catalog finishes (MTG, Pokemon — see `CollectionCard.finishes`),
+// mapped to gathers' internal finish values. Empty when the game has no such
+// catalog data yet (Riftbound).
 export function catalogFinishes(card: { finishes?: string[] }): string[] {
 	return (card.finishes ?? []).map(toInternalFinish);
 }
 
 // Finishes that could still be added to this card group — from its own
-// `finishes` catalog data (MTG) when available, otherwise falling back to
-// a generic Normal/Foil choice (the common case for games without
-// per-card finish data yet — see `finishes` field doc above). Already-owned
-// finishes (quantity > 0) are excluded.
+// `finishes` catalog data when available, otherwise falling back to a
+// generic Normal/Foil choice (the common case for games without per-card
+// finish data yet — see `finishes` field doc above). Already-owned finishes
+// (quantity > 0) are excluded.
 export function availableFinishesToAdd(group: CardGroup): string[] {
 	const owned = new Set(group.entries.filter(e => (e.quantity ?? 0) > 0).map(e => e.finish ?? ''));
 	const catalog = group.finishes?.length ? catalogFinishes(group) : ['', 'foil'];

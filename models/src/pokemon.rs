@@ -17,6 +17,11 @@ pub struct PokemonCard {
     pub pokedex: Option<i64>,
     pub description: Option<String>,
     pub release_date: Option<String>,
+    /// The finishes/variants this card is actually printed in (e.g. `["Normal",
+    /// "Reverse Holofoil"]`, sometimes just `["Holofoil"]`), as scraped into
+    /// the `variants` column. Drives which finishes the "add another version"
+    /// picker offers, mirroring MTG's `finishes`.
+    pub finishes: Vec<String>,
 }
 
 impl CardTrait for PokemonCard {

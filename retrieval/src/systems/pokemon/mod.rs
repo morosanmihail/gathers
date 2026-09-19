@@ -94,7 +94,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let conn = self.connection.lock().await;
         let mut query =
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards"
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP, variants FROM cards"
                 .to_string();
         let mut conditions = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -204,7 +204,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         }
         let conn = self.connection.lock().await;
         let query = format!(
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards WHERE cardId IN ({})",
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP, variants FROM cards WHERE cardId IN ({})",
             sql_placeholders(ids.len())
         );
         let mut stmt = conn.prepare(&query)?;
@@ -238,7 +238,7 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         // `.flatten()`), so pick the first parseable row out of a
         // randomly-ordered batch rather than erroring on a single bad draw.
         let query =
-            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP FROM cards \
+            "SELECT cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, description, releaseDate, expCodeTCGP, variants FROM cards \
              ORDER BY RANDOM() LIMIT 50";
         let mut stmt = conn.prepare(query)?;
         let iter = stmt.query_map([], SqlPokemonCard::from_row)?;

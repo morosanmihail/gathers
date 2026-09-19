@@ -14,6 +14,8 @@ pub struct SqlPokemonCard {
     pub pokedex: Option<i64>,
     pub description: Option<String>,
     pub release_date: Option<String>,
+    /// Raw JSON array from the `variants` column, e.g. `["Normal","Reverse Holofoil"]`.
+    pub variants: Option<String>,
 }
 
 impl SqlPokemonCard {
@@ -31,6 +33,7 @@ impl SqlPokemonCard {
             description: row.get(9).ok(),
             release_date: row.get(10).ok(),
             set_short_code: row.get(11).ok(),
+            variants: row.get(12).ok(),
         })
     }
 }
@@ -42,6 +45,11 @@ impl From<SqlPokemonCard> for PokemonCard {
             .split(',')
             .map(|s| EnergyType::from(s.to_string()))
             .collect();
+        let finishes: Vec<String> = value
+            .variants
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
 
         PokemonCard {
             id: value.id,
@@ -59,6 +67,7 @@ impl From<SqlPokemonCard> for PokemonCard {
             },
             description: value.description.filter(|d| !d.is_empty()),
             release_date: value.release_date.filter(|d| !d.is_empty()),
+            finishes,
         }
     }
 }
