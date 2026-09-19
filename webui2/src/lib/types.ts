@@ -122,14 +122,13 @@ export function catalogFinishes(card: { finishes?: string[] }): string[] {
 	return (card.finishes ?? []).map(toInternalFinish);
 }
 
-// Finishes that could still be added to this card group — from its own
-// `finishes` catalog data when available, otherwise falling back to a
-// generic Normal/Foil choice (the common case for games without per-card
-// finish data yet — see `finishes` field doc above). Already-owned finishes
-// (quantity > 0) are excluded.
+// Finishes that could still be added to this card group — only those in its
+// own `finishes` catalog data. A card with none (Riftbound, plugins) has
+// nothing to offer: there's no known second finish to add, so no
+// "+ version" option. Already-owned finishes (quantity > 0) are excluded.
 export function availableFinishesToAdd(group: CardGroup): string[] {
 	const owned = new Set(group.entries.filter(e => (e.quantity ?? 0) > 0).map(e => e.finish ?? ''));
-	const catalog = group.finishes?.length ? catalogFinishes(group) : ['', 'foil'];
+	const catalog = catalogFinishes(group);
 	const seen = new Set<string>();
 	return catalog.filter(f => {
 		if (owned.has(f) || seen.has(f)) return false;
