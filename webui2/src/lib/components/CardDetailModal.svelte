@@ -38,7 +38,7 @@
 	// name and image rather than a "Set"/"Collector #" row that's either
 	// blank or, worse, shows a value the fallback happened to duck-type its
 	// way into (e.g. a plugin's own `collectorNumber` meaning isn't a real
-	// collector number — see docs/plugins.md).
+	// collector number — see https://codeberg.org/morosanmihail/gathers/wiki/Plugins).
 	const isKnownSystem = $derived(isMtg || isRift || isPoke);
 
 	// A plugin card's freeform `extra` fields (e.g. a book's "author"), shown
