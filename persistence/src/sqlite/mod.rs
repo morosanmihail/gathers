@@ -163,6 +163,11 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         collections::get_collection_kind(&conn, name)
     }
 
+    async fn uuids_in_use(&self) -> eyre::Result<Vec<(CardID, String)>> {
+        let conn = self.connection.lock().await;
+        deck_cards::uuids_in_use(&conn)
+    }
+
     async fn card_availability(&self, uuids: &[CardID]) -> eyre::Result<Vec<CardAvailability>> {
         let conn = self.connection.lock().await;
         deck_cards::card_availability(&conn, uuids)

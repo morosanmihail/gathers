@@ -21,6 +21,11 @@
 //!  10. over-commitment is reported, never refused
 //!  11. build state and location survive a rename
 //!
+//! Cross-printing matching (owning the Revised printing satisfying a deck that
+//! lists the M13 one) is covered by unit tests in `server::decks` instead: the
+//! bundled `data/testPrintings.db` has only one *hydratable* printing of any
+//! card name, so there is nothing here to match across.
+//!
 //! Deploys its own server (see `e2e::harness`), on a copy of
 //! `data/testPrintings.db`:
 //!   cargo run --example decks

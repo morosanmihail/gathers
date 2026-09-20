@@ -170,6 +170,13 @@ pub trait PersistenceSystemTrait {
         name: &CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionKind>>>;
 
+    /// Every `(uuid, provider)` that appears in a collection or a deck, so a caller with access to
+    /// card names can work out which stored printings are the same card as the one being asked
+    /// about.
+    fn uuids_in_use(
+        &self,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<(CardID, String)>>>;
+
     /// Where the copies of each requested card currently are.
     ///
     /// How many are owned, how many are committed to *built* decks, and which decks those are.

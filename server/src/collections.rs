@@ -289,7 +289,7 @@ async fn lookup_unit_prices(
 
 /// Returns all configured retrieval systems, cloned out of the state lock,
 /// keyed by their provider name.
-async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
+pub(crate) async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
     let guard = state.0.lock().await;
     [
         guard.mtg.clone(),
@@ -661,7 +661,15 @@ pub(crate) fn card_not_found(card_id: &str) -> ApiError {
     )
 }
 
-fn card_name(card: &Card) -> &str {
+pub(crate) fn card_id(card: &Card) -> &str {
+    match card {
+        Card::Magic(m) => &m.id,
+        Card::Riftbound(r) => &r.id,
+        Card::Pokemon(p) => &p.id,
+    }
+}
+
+pub(crate) fn card_name(card: &Card) -> &str {
     match card {
         Card::Magic(m) => &m.name,
         Card::Riftbound(r) => &r.name,

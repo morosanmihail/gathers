@@ -286,3 +286,23 @@ fn row_to_deck_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeckCard> {
         time_updated: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
     })
 }
+
+/// Every `(uuid, provider)` that appears in a collection or a deck.
+///
+/// Availability has to know which stored cards are *the same card* as the one being asked about,
+/// and the only cross-printing handle in the data is the card's name, which lives in `retrieval`
+/// rather than here. Rather than resolve names in the persistence layer, this hands back the ids
+/// in play so the caller (which has retrieval) can group them.
+///
+/// Ids only, so this stays a cheap index scan rather than a full row read.
+pub(super) fn uuids_in_use(conn: &Connection) -> eyre::Result<Vec<(CardID, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT uuid, provider FROM cards
+         UNION
+         SELECT uuid, provider FROM deck_cards",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
