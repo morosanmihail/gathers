@@ -86,6 +86,15 @@ jobs:
 
       - uses: https://data.forgejo.org/actions/checkout@v4
         if: matrix.enabled == 'true'
+        with:
+          # Full history + tags so `git describe` can name the version.
+          fetch-depth: 0
+
+      - name: Compute version
+        if: matrix.enabled == 'true'
+        id: version
+        shell: bash
+        run: echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         if: matrix.enabled == 'true'
@@ -123,6 +132,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
+          build-args: |
+            GATHERS_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
           cache-to: type=registry,ref=docker.genesisdei.com/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max

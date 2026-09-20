@@ -80,6 +80,9 @@ pub struct SystemInfo {
     /// Whether settings were saved that only take effect after a server
     /// restart. Stays set until the server restarts.
     pub restart_required: bool,
+    /// Server version: the git tag it was built from (e.g. `v0.6.4`, or
+    /// `v0.6.4-18-ga2de264` for a build past a tag).
+    pub version: String,
 }
 
 type GathersState = (Arc<Mutex<RetrievalState>>, Arc<Mutex<StorageState>>);
@@ -269,7 +272,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required }
+        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -461,7 +464,7 @@ impl ServerConfig {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about)]
+#[command(version = env!("GATHERS_VERSION"), about)]
 struct Args {
     /// Retrieval systems to enable. May be specified multiple times.
     /// Required when no config file exists. Supported values: scryfall, sql, riftbound-sql, pokemon-sql.
@@ -492,7 +495,7 @@ fn openapi_doc() -> OpenApi {
     OpenApi {
         info: Info {
             title: "GatheRs API".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("GATHERS_VERSION").to_string(),
             ..Info::default()
         },
         ..OpenApi::default()
@@ -533,7 +536,7 @@ async fn main() -> eyre::Result<()> {
         )
         .init();
 
-    info!(version = env!("CARGO_PKG_VERSION"), "GatheRs server starting");
+    info!(version = env!("GATHERS_VERSION"), "GatheRs server starting");
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let gathers_dir = std::path::Path::new(&home).join(".local/share/gathers");

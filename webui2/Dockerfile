@@ -5,8 +5,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY svelte.config.js tsconfig.json vite.config.ts ./
+COPY svelte.config.js tsconfig.json vite.config.ts version.js ./
 COPY src ./src
+
+# The build context has no .git, so the version (git tag) is passed in by CI.
+ARG GATHERS_VERSION
+ENV GATHERS_VERSION=$GATHERS_VERSION
 
 RUN npm run build
 
