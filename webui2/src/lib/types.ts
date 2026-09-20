@@ -8,6 +8,69 @@ export type ViewMode = 'grid' | 'list';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
 
 export type Collection = components['schemas']['CollectionListEntry'];
+export type CollectionKind = components['schemas']['APICollectionKind'];
+
+export function isDeck(collection: { kind: CollectionKind }): boolean {
+	return collection.kind === 'deck';
+}
+
+// Raw response from /api/deck/{id}/cards: no card details, one row per (uuid, finish, board).
+// Unlike a collection entry there's no want quantity: a deck is a list to be played, not a
+// wishlist.
+export type DeckEntry = components['schemas']['DeckCard'];
+
+/** A deck entry merged with its card detail fields, ready to render. */
+export interface DeckCard extends PartialBy<DeckEntry, 'timeAdded' | 'timeUpdated' | 'provider' | 'finish' | 'board'> {
+	name: string;
+	image?: string;
+	setCode?: string;
+	collectorNumber?: string;
+	rarity?: string;
+	imageUrl?: string;
+	finishes?: string[];
+}
+
+
+/**
+ * Human label for a board value. `""` is a deck's default zone, which for a
+ * game with only one (Pokemon) is the whole deck; games with several name
+ * them, and since `board` is an open string those names come through as-is.
+ */
+export function boardLabel(board: string): string {
+	if (!board) return 'Deck';
+	if (board === 'main') return 'Mainboard';
+	if (board === 'side') return 'Sideboard';
+	return board.charAt(0).toUpperCase() + board.slice(1);
+}
+
+/**
+ * Boards a deck's cards are spread across, in a stable order: the conventional
+ * MTG pair first (that's what the add controls offer), then any other zone the
+ * deck actually uses, so a Riftbound legend or a Commander command zone shows
+ * up without the UI having to know the game.
+ */
+export function boardsInUse(cards: DeckCard[]): string[] {
+	const known = ['main', 'side'];
+	const present = new Set(cards.map(c => c.board ?? ''));
+	const extra = [...present].filter(b => !known.includes(b)).sort();
+	// Only boards actually holding cards: a deck whose rows all sit on the default board `''`
+	// shouldn't render two empty sections above its real one. See `boardsToOffer` for what the add
+	// control lists.
+	return [...known.filter(b => present.has(b)), ...extra];
+}
+
+/**
+ * Boards the add control offers: the conventional MTG pair plus any zone the
+ * deck already uses.
+ *
+ * Wider than `boardsInUse` on purpose, so the first sideboard card can be added
+ * to a deck that has none yet.
+ */
+export function boardsToOffer(cards: DeckCard[]): string[] {
+	const inUse = boardsInUse(cards);
+	const known = ['main', 'side'];
+	return [...known, ...inUse.filter(b => !known.includes(b))];
+}
 
 export type SystemInfo = components['schemas']['SystemInfo'];
 // One way a system can collapse search results that share a card (MTG: prints / cards / art).

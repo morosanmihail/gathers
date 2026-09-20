@@ -2,7 +2,7 @@
 	import SearchPanel from './SearchPanel.svelte';
 	import CardResultsList from './CardResultsList.svelte';
 	import CardDetailModal from './CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustWantQuantity, providerFromActiveSystem, pricesFetcher, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustDeckCard, adjustWantQuantity, providerFromActiveSystem, pricesFetcher, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
@@ -10,11 +10,15 @@
 
 	interface Props {
 		collection: string;
+		/** Set when the target is a deck: which board an added card lands on.
+		 *  Switches adds to the deck endpoint and hides the wantlist action,
+		 *  since a deck has no want quantity. */
+		deckBoard?: string | null;
 		onclose: () => void;
 		onAdded?: () => void;
 	}
 
-	let { collection, onclose, onAdded }: Props = $props();
+	let { collection, deckBoard = null, onclose, onAdded }: Props = $props();
 
 	let filters = $state(defaultFilters());
 	let results = $state<AnyCard[]>([]);
@@ -90,7 +94,11 @@
 		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id, finish, 1, purchase, providerFromActiveSystem(activeSystem))
+				deckBoard === null
+					? addCardToCollection(collection, card.id, finish, 1, purchase, providerFromActiveSystem(activeSystem))
+					// A deck records what is to be played, not a purchase, so the price the
+					// collection flow collects is dropped here
+					: adjustDeckCard(collection, card.id, finish, deckBoard, 1, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added ${card.name}${finish ? ` (${finishLabel(finish)})` : ''}`;
 			setTimeout(() => toast = '', 2000);
@@ -156,7 +164,9 @@
 				</div>
 			<button class="btn btn-ghost btn-icon" onclick={onclose} title="Close">✕</button>
 		</div>
-		<!-- Purchase price bar -->
+		<!-- Purchase price bar. Hidden for a deck: adding a card to a deck
+		     records an intention to play it, not a purchase. -->
+		{#if deckBoard === null}
 		<div style="padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
 			<span style="font-size:0.82rem; color:var(--text2);">Purchase price for next add:</span>
 			<span style="color:var(--text2);">{currencySymbol()}</span>
@@ -169,6 +179,7 @@
 				<button class="btn btn-ghost btn-sm" onclick={() => addPrice = ''}>Clear</button>
 			{/if}
 		</div>
+		{/if}
 		<div class="modal-body search-modal-body">
 			<SearchPanel
 				{filters}
@@ -222,7 +233,7 @@
 						{prices}
 						onAdd={(c) => addCard(c)}
 						onAddFinish={(c, finish) => addCard(c, finish)}
-						onAddWanted={(c) => addWanted(c)}
+						onAddWanted={deckBoard === null ? (c) => addWanted(c) : undefined}
 						onclick={(c) => detailCard = c as AnyCard}
 						{total}
 						{page}

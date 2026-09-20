@@ -15,7 +15,10 @@ import type {
 	ValueBreakdown,
 	Settings,
 	EnvOverride,
-	PartialBy
+	PartialBy,
+	CollectionKind,
+	DeckEntry,
+	DeckCard
 } from './types';
 import type { components } from './generated/api';
 import { demoAlert } from './demoAlert.svelte';
@@ -118,11 +121,11 @@ export async function listCollections(): Promise<Collection[]> {
 	return cachedFetch('collections', () => fetchJSON<Collection[]>('/api/collection/list'));
 }
 
-export async function addCollection(id: string): Promise<void> {
+export async function addCollection(id: string, kind: CollectionKind = 'collection'): Promise<void> {
 	await fetchJSON('/api/collection/add', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id })
+		body: JSON.stringify({ id, kind })
 	});
 	invalidateCache('collections');
 }
@@ -143,6 +146,68 @@ export async function deleteCollection(id: string, keepCardsIn = ''): Promise<vo
 		headers: { 'Content-Type': 'application/json' }
 	});
 	invalidateCache('collections');
+}
+
+// Decks
+//
+// A deck's cards come from /api/deck rather than /api/collection; its identity (create, rename,
+// delete, list) is still a collection concern, so the functions above cover it. See `deck_routes`
+// on the server for why the two are split.
+
+export async function getDeckCards(deck: string): Promise<DeckCard[]> {
+	const entries = await fetchJSON<DeckEntry[]>(`/api/deck/cards/${encodeURIComponent(deck)}/list`);
+	return enrichDeckEntries(entries);
+}
+
+/**
+ * How many cards a deck holds, counting copies rather than distinct cards:
+ * a deck is described by how many cards are in it.
+ *
+ * Cached alongside the collection counts, and answered by the server, so the
+ * overview doesn't download every deck's card list to size it.
+ */
+export async function getDeckCardCount(deck: string): Promise<number> {
+	const key = `stats:${deck}:count:`;
+	return cachedStats(key, () =>
+		fetchJSON(`/api/deck/cards/${encodeURIComponent(deck)}/count`)
+	);
+}
+
+/**
+ * Changes one card's quantity on one board.
+ *
+ * Additive with respect to ownership: this never changes what any collection
+ * says is owned.
+ */
+export async function adjustDeckCard(
+	deck: string,
+	id: string,
+	finish: string,
+	board: string,
+	quantity: number,
+	provider?: string
+): Promise<void> {
+	await fetchJSON(`/api/deck/cards/${encodeURIComponent(deck)}/adjust`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ id, finish, board, quantity, ...(provider ? { provider } : {}) })
+	});
+	invalidateCollectionStats(deck);
+}
+
+export async function moveDeckCard(
+	deck: string,
+	id: string,
+	finish: string,
+	fromBoard: string,
+	toBoard: string,
+	quantity: number
+): Promise<DeckEntry[]> {
+	return fetchJSON(`/api/deck/cards/${encodeURIComponent(deck)}/move`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ id, finish, fromBoard, toBoard, quantity })
+	});
 }
 
 // Collection cards — raw entries (id + quantities only)
@@ -289,6 +354,47 @@ async function enrichEntries(entries: CollectionEntry[]): Promise<CollectionCard
 				provider: entry.provider || 'MagicSQLite',
 			} as CollectionCard;
 		});
+}
+
+// Same shape as `enrichEntries`, for deck rows: batch the detail lookup by provider and merge. Kept
+// separate rather than generalised because a deck entry carries a board and no want quantity, so
+// neither the input nor the output type lines up with the collection version.
+async function enrichDeckEntries(entries: DeckEntry[]): Promise<DeckCard[]> {
+	const byProvider: Record<string, string[]> = {};
+	for (const entry of entries) {
+		const p = entry.provider || 'MagicSQLite';
+		if (!byProvider[p]) byProvider[p] = [];
+		byProvider[p].push(entry.id);
+	}
+
+	const detailMaps = await Promise.all(
+		Object.entries(byProvider).map(([provider, ids]) =>
+			fetchCardDetails(ids, provider).then(details => ({ provider, details }))
+		)
+	);
+
+	const allDetails: Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = {};
+	for (const { details } of detailMaps) {
+		Object.assign(allDetails, details);
+	}
+
+	// Same reasoning as `enrichEntries`: a row from a plugin that's since been disabled can't be
+	// hydrated, and a nameless row is worse than no row.
+	return entries
+		.filter(entry => {
+			const p = entry.provider || 'MagicSQLite';
+			return !(p.startsWith('plugin-') && allDetails[entry.id] === undefined);
+		})
+		.map(entry => ({
+			...(allDetails[entry.id] ?? {}),
+			id: entry.id,
+			finish: entry.finish ?? '',
+			board: entry.board ?? '',
+			quantity: entry.quantity,
+			provider: entry.provider || 'MagicSQLite',
+			timeAdded: entry.timeAdded,
+			timeUpdated: entry.timeUpdated
+		}) as DeckCard);
 }
 
 export async function getCollectionCards(

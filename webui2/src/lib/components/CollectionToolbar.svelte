@@ -11,6 +11,7 @@
 		renameCollection,
 		invalidateCache
 	} from '$lib/api';
+	import { isDeck } from '$lib/types';
 	import type { CardGroup } from '$lib/types';
 
 	interface Props {
@@ -46,8 +47,11 @@
 		app.collections.find(c => c.id === collection)?.removable ?? true
 	);
 
+	// Decks are excluded: cards move between things that record ownership, and moving into a deck
+	// would write rows the deck view never reads, so they'd leave this collection and appear
+	// nowhere. The server refuses it too.
 	const otherCollections = $derived(
-		app.collections.filter(c => c.id !== collection)
+		app.collections.filter(c => c.id !== collection && !isDeck(c))
 	);
 
 	$effect(() => {

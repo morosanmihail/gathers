@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { portal } from '$lib/portal';
-	import type { AnyCard, CollectionCard, MtgCard } from '$lib/types';
+	import type { AnyCard, CollectionCard, DeckCard, MtgCard } from '$lib/types';
 	import { cardImageUrl, catalogFinishes, finishLabel } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { createHoverTooltip } from '$lib/tooltip.svelte';
 
 	interface Props {
-		card: AnyCard | CollectionCard;
+		// Deck rows render through here too; only `name` and the image/finish helpers below
+		// are read
+		card: AnyCard | CollectionCard | DeckCard;
 	}
 
 	let { card }: Props = $props();

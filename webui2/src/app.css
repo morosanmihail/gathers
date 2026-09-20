@@ -1335,6 +1335,100 @@ label.field-label {
 .rarity-M { color: #c06060; }
 
 /* ─── Responsive ───────────────────────────────────────── */
+/* ─── Decks ─────────────────────────────────────────────────────────────── */
+
+.tab-kind-glyph { margin-right: 4px; opacity: 0.75; }
+
+.add-collection-kind { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
+
+.deck-add-board {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.82rem;
+	color: var(--text2);
+	white-space: nowrap;
+}
+
+.deck-add-board .select { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
+
+.deck-boards {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	padding: 8px 0;
+}
+
+.deck-board-header {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	padding: 0 4px 6px;
+	border-bottom: 1px solid var(--border);
+}
+
+.deck-board-title { font-size: 0.96rem; font-weight: 600; margin: 0; }
+.deck-board-count { font-size: 0.78rem; color: var(--text2); }
+.deck-board-empty { font-size: 0.82rem; color: var(--text2); padding: 10px 4px; }
+
+.deck-row-list { display: flex; flex-direction: column; }
+
+.deck-row {
+	display: grid;
+	grid-template-columns: 1fr 110px 200px;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 4px;
+	border-bottom: 1px solid var(--border);
+	cursor: pointer;
+}
+
+.deck-row:hover { background: var(--surface2); }
+
+.deck-row-name { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.deck-row-finish { font-size: 0.7rem; color: var(--text2); text-transform: lowercase; }
+.deck-row-set { font-size: 0.78rem; color: var(--text2); }
+.deck-row-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+
+.deck-move-select { height: 24px; padding: 1px 4px; font-size: 0.72rem; }
+
+/* Grid form of a deck board. The stepper is always visible, since changing a count is the
+   common edit; the move control appears on hover or keyboard focus, so a wall of tiles isn't
+   also a wall of dropdowns. */
+.deck-tile-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 4px 8px 6px;
+	border-top: 1px solid var(--border);
+}
+
+.deck-tile-move {
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+
+.deck-tile:hover .deck-tile-move,
+.deck-tile:focus-within .deck-tile-move { opacity: 1; }
+
+/* Coarse pointers have no hover, so the control would be unreachable. */
+@media (hover: none) {
+	.deck-tile-move { opacity: 1; }
+}
+
+.deck-action-error {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 20px 8px;
+	padding: 6px 10px;
+	border-radius: var(--radius);
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--danger);
+	font-size: 0.8rem;
+}
+
 @media (max-width: 860px) {
 	.search-layout { grid-template-columns: 1fr; min-height: 0; }
 	.search-sidebar {
