@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . .
 
+# The build context has no .git, so the version (git tag) is passed in by CI.
+ARG GATHERS_VERSION
+ENV GATHERS_VERSION=$GATHERS_VERSION
+
 RUN --mount=type=cache,target=/app/target \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked --bin server \

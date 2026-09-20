@@ -230,6 +230,10 @@
 	</div>
 
 	<div class="settings-page">
+		<p class="version-info">
+			webui {__APP_VERSION__}{#if app.systemInfo?.version} · server {app.systemInfo.version}{/if}
+		</p>
+
 		{#if restartRequired && !demoMode}
 			<div class="restart-banner" role="status">
 				<span>
@@ -519,6 +523,12 @@
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
+		color: var(--text2);
+	}
+
+	.version-info {
+		margin: 0 0 16px;
+		font-size: 0.8rem;
 		color: var(--text2);
 	}
 

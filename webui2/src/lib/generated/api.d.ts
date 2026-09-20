@@ -2296,6 +2296,11 @@ export interface components {
              *     These strings also match the `provider` field stored on collection cards.
              */
             systems: string[];
+            /**
+             * @description Server version: the git tag it was built from (e.g. `v0.6.4`, or
+             *     `v0.6.4-18-ga2de264` for a build past a tag).
+             */
+            version: string;
         };
         /** @enum {string} */
         Systems: "Scryfall" | "Sql" | "RiftboundSql" | "PokemonSql";
