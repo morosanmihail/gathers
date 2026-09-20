@@ -17,6 +17,7 @@ pkgs.mkShell {
     pkgs.openssl
     pkgs.pkg-config
     pkgs.pnpm
+    pkgs.nodejs_22
     pkgs.tilt
     pkgs.sqlite
   ];
