@@ -97,6 +97,15 @@ impl MagicSQLiteRetrievalSystem {
     }
 }
 
+/// SQL expression (over a `cards AS a` row) giving the uuid of the front face of the printing
+/// `a` belongs to. MTGJSON stores every face of a double-faced, split or adventure card as its
+/// own `cards` row; the faces share `setCode` and `number` and differ by `side` ('a' is the
+/// front). Rows without a `number`, or with no siblings, are their own front face. Most cards
+/// have no `side` at all, so those skip the sibling lookup.
+const FRONT_FACE_UUID: &str = "CASE WHEN a.side IS NULL THEN a.uuid ELSE \
+     COALESCE((SELECT f.uuid FROM cards AS f \
+     WHERE f.setCode = a.setCode AND f.number = a.number ORDER BY f.side LIMIT 1), a.uuid) END";
+
 /// `SELECT ... FROM ...` clause shared by `search_cards` and `get_cards_by_ids`, kept in
 /// sync with the column names `SqlCard::from_row` reads by name.
 fn select_base() -> String {
@@ -147,13 +156,6 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             fts_parts.push(format!("text:\"{}\"", text.replace('"', "\"\"")));
         }
         let use_fts = !fts_parts.is_empty();
-
-        let base = select_base();
-        let mut query = if use_fts {
-            format!("{base} JOIN cards_fts ON cards_fts.rowid = a.rowid")
-        } else {
-            base
-        };
 
         let mut conditions = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -314,9 +316,24 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                 params.push("Legal".to_string());
             }
         }
-        if !conditions.is_empty() {
-            query.push_str(" WHERE ");
-            query.push_str(&conditions.join(" AND "));
+        // Each face of a double-faced card is its own row, but a card should be listed once.
+        // Filters may match any face (e.g. a back-face type or text), so match on all rows in
+        // the subquery and return only the front face of each matching printing. The subquery
+        // deliberately reuses the `a` / `l` aliases the conditions above are written against.
+        let mut query = select_base();
+        if conditions.is_empty() {
+            query.push_str(&format!(" WHERE a.uuid = {FRONT_FACE_UUID}"));
+        } else {
+            let fts_join = if use_fts {
+                " JOIN cards_fts ON cards_fts.rowid = a.rowid"
+            } else {
+                ""
+            };
+            query.push_str(&format!(
+                " WHERE a.uuid IN (SELECT {FRONT_FACE_UUID} FROM cards AS a \
+                 LEFT JOIN cardLegalities AS l ON l.uuid = a.uuid{fts_join} WHERE {})",
+                conditions.join(" AND ")
+            ));
         }
         let sort_col = match &filters.sort_by {
             Some(SortField::Rarity) => "a.rarity",
@@ -373,7 +390,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         // fail to parse (same tolerance `search_cards` relies on via
         // `.flatten()`), so pick the first parseable row out of a
         // randomly-ordered batch rather than erroring on a single bad draw.
-        let query = format!("{base} ORDER BY RANDOM() LIMIT 50");
+        let query = format!("{base} WHERE a.uuid = {FRONT_FACE_UUID} ORDER BY RANDOM() LIMIT 50");
         let mut stmt = conn.prepare(&query)?;
         let user_iter = stmt.query_map([], SqlCard::from_row)?;
         Ok(user_iter.flatten().next().map(|c| Card::Magic(c.into())))
@@ -393,7 +410,8 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             params.push(c.1.clone());
         });
         let query = format!(
-            "SELECT uuid, setCode, number FROM cards WHERE (setCode, number) IN (VALUES {});",
+            "SELECT a.uuid, a.setCode, a.number FROM cards AS a \
+             WHERE (a.setCode, a.number) IN (VALUES {}) AND a.uuid = {FRONT_FACE_UUID};",
             sql_pair_placeholders(cards.len())
         );
         let mut stmt = conn.prepare(&query)?;

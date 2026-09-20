@@ -1173,3 +1173,242 @@ async fn test_real_snapshot_buylist_not_in_retail() {
     assert_eq!(ck.normal, Some(0.35));
     assert_eq!(ck.foil, Some(2.49));
 }
+
+// ── Double-faced card tests ───────────────────────────────────────────────
+// MTGJSON stores each face of a double-faced card as its own `cards` row (same set code and
+// collector number, different uuid and `side`). The bundled fixture has none, so add some.
+// These tests pass an explicit limit because `search_cards` treats a `None` limit as LIMIT 1.
+
+const MAYOR_ISD_FRONT: &str = "dfc-mayor-isd-a";
+const MAYOR_ISD_BACK: &str = "dfc-mayor-isd-b";
+const MAYOR_M20_FRONT: &str = "dfc-mayor-m20-a";
+const MAYOR_M20_BACK: &str = "dfc-mayor-m20-b";
+const BRISELA_MELD: &str = "dfc-brisela-b";
+
+/// A system over a copy of the fixture DB with Mayor of Avabruck // Howlpack Alpha in two
+/// printings (ISD 193, M20 207), plus a meld-style back face (Brisela) that has its own
+/// collector number and no front-face sibling.
+fn system_with_dfcs(dir: &TempDir) -> MagicSQLiteRetrievalSystem {
+    let path = dir.path().join("dfc.db");
+    std::fs::copy("../data/testPrintings.db", &path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+
+    // (uuid, name, faceName, side, set, number, power)
+    let rows = [
+        (
+            MAYOR_ISD_FRONT,
+            "Mayor of Avabruck // Howlpack Alpha",
+            "Mayor of Avabruck",
+            "a",
+            "ISD",
+            "193",
+            "1",
+        ),
+        (
+            MAYOR_ISD_BACK,
+            "Mayor of Avabruck // Howlpack Alpha",
+            "Howlpack Alpha",
+            "b",
+            "ISD",
+            "193",
+            "3",
+        ),
+        (
+            MAYOR_M20_FRONT,
+            "Mayor of Avabruck // Howlpack Alpha",
+            "Mayor of Avabruck",
+            "a",
+            "M20",
+            "207",
+            "1",
+        ),
+        (
+            MAYOR_M20_BACK,
+            "Mayor of Avabruck // Howlpack Alpha",
+            "Howlpack Alpha",
+            "b",
+            "M20",
+            "207",
+            "3",
+        ),
+        (
+            BRISELA_MELD,
+            "Brisela, Voice of Nightmares",
+            "Brisela, Voice of Nightmares",
+            "b",
+            "EMN",
+            "15b",
+            "9",
+        ),
+    ];
+    for (uuid, name, face, side, set, number, power) in rows {
+        // Clone a known-parseable row so every column `SqlCard::from_row` needs is populated.
+        conn.execute(
+            "INSERT INTO cards SELECT * FROM cards WHERE name = 'Goblin King'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE cards SET uuid = ?1, name = ?2, faceName = ?3, side = ?4, setCode = ?5, \
+             number = ?6, power = ?7 WHERE rowid = last_insert_rowid()",
+            rusqlite::params![uuid, name, face, side, set, number, power],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cardIdentifiers SELECT * FROM cardIdentifiers \
+             WHERE uuid = '0001e0d0-2dcd-5640-aadc-a84765cf5fc9'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE cardIdentifiers SET uuid = ?1 WHERE rowid = last_insert_rowid()",
+            [uuid],
+        )
+        .unwrap();
+    }
+    conn.execute("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')", [])
+        .unwrap();
+    drop(conn);
+
+    MagicSQLiteRetrievalSystem::new(Some(path.to_string_lossy().into_owned()), None).unwrap()
+}
+
+fn card_ids(cards: &[::models::Card]) -> Vec<String> {
+    let mut ids: Vec<String> = cards
+        .iter()
+        .map(|c| match c {
+            ::models::Card::Magic(m) => m.id.clone(),
+            _ => unreachable!("magic system returned a non-magic card"),
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn test_search_lists_double_faced_card_once_per_printing() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let filters = CardSearchFilters {
+        name: Some("Mayor of Avabruck".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(100)).await.unwrap();
+    // Two printings, one row each, and it's the front face.
+    assert_eq!(card_ids(&cards), vec![MAYOR_ISD_FRONT, MAYOR_M20_FRONT]);
+}
+
+#[tokio::test]
+async fn test_unfiltered_search_never_returns_back_faces() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let cards = system
+        .search_cards(CardSearchFilters::default(), None, Some(100))
+        .await
+        .unwrap();
+    let ids = card_ids(&cards);
+    assert!(ids.contains(&MAYOR_ISD_FRONT.to_string()));
+    assert!(ids.contains(&MAYOR_M20_FRONT.to_string()));
+    assert!(!ids.contains(&MAYOR_ISD_BACK.to_string()));
+    assert!(!ids.contains(&MAYOR_M20_BACK.to_string()));
+}
+
+#[tokio::test]
+async fn test_search_matching_only_the_back_face_returns_the_front_face() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    // Only Howlpack Alpha (the back) has power 3.
+    let filters = CardSearchFilters {
+        name: Some("Mayor of Avabruck".to_string()),
+        power: Some("3".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(100)).await.unwrap();
+    assert_eq!(card_ids(&cards), vec![MAYOR_ISD_FRONT, MAYOR_M20_FRONT]);
+}
+
+#[tokio::test]
+async fn test_back_face_with_its_own_collector_number_is_kept() {
+    // Meld results like Brisela have no front-face sibling at their collector number.
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let filters = CardSearchFilters {
+        name: Some("Brisela".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(100)).await.unwrap();
+    assert_eq!(card_ids(&cards), vec![BRISELA_MELD]);
+}
+
+#[tokio::test]
+async fn test_pagination_counts_double_faced_cards_once() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let filters = || CardSearchFilters {
+        name: Some("Mayor of Avabruck".to_string()),
+        ..Default::default()
+    };
+    let page1 = system
+        .search_cards(filters(), Some(0), Some(1))
+        .await
+        .unwrap();
+    let page2 = system
+        .search_cards(filters(), Some(1), Some(1))
+        .await
+        .unwrap();
+    let page3 = system
+        .search_cards(filters(), Some(2), Some(1))
+        .await
+        .unwrap();
+    assert_eq!(page1.len(), 1);
+    assert_eq!(page2.len(), 1);
+    assert!(page3.is_empty());
+    assert_ne!(card_ids(&page1), card_ids(&page2));
+}
+
+#[tokio::test]
+async fn test_get_cards_by_ids_still_resolves_back_face_uuids() {
+    // Collections may already hold a back-face uuid; direct lookups must not hide it.
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let found = system
+        .get_cards_by_ids(vec![MAYOR_ISD_BACK.to_string()])
+        .await
+        .unwrap();
+    assert!(found.contains_key(MAYOR_ISD_BACK));
+}
+
+#[tokio::test]
+async fn test_bulk_search_resolves_double_faced_card_to_front_face() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let resolved = system
+        .bulk_search_cards(vec![("ISD".to_string(), "193".to_string())])
+        .await
+        .unwrap();
+    assert_eq!(
+        resolved,
+        vec![(
+            "ISD".to_string(),
+            "193".to_string(),
+            MAYOR_ISD_FRONT.to_string()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn test_random_card_is_never_a_back_face() {
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    for _ in 0..40 {
+        let card = system.get_random_card().await.unwrap().unwrap();
+        let ::models::Card::Magic(m) = card else {
+            unreachable!()
+        };
+        assert!(
+            m.id != MAYOR_ISD_BACK && m.id != MAYOR_M20_BACK,
+            "random card returned back face {}",
+            m.id
+        );
+    }
+}
