@@ -1,5 +1,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use models::{CardColour, Rarity, filters::CardSearchFilters};
+use models::{
+    CardColour, Rarity,
+    filters::{CardSearchFilters, SortField},
+};
 use retrieval::{MagicSQLiteRetrievalSystem, RetrievalSystemTrait};
 use std::hint::black_box;
 
@@ -97,6 +100,44 @@ fn bench_card_search_benchmark(c: &mut Criterion) {
                 .await;
             let _ = black_box(result);
         })
+    });
+
+    // Page-of-24 searches, the size the web UI requests. The tests above mostly pass no limit
+    // (i.e. one row), which hides the cost of sorting and skipping through a whole result set.
+    let mut page = |name: &str, filters: fn() -> CardSearchFilters| {
+        group.bench_function(name, |b| {
+            b.to_async(&rt).iter(|| async {
+                let result = system
+                    .search_cards(black_box(filters()), None, Some(24))
+                    .await;
+                let _ = black_box(result);
+            })
+        });
+    };
+    page("page_browse", CardSearchFilters::new);
+    page("page_legal_in_format", || {
+        CardSearchFilters::new()
+            .with_legal_in("modern")
+            .with_rarity(Rarity::Rare)
+    });
+    page("page_sorted_by_artist", || {
+        CardSearchFilters::new().with_sort_by(SortField::Artist)
+    });
+    page("page_sorted_by_rarity", || {
+        CardSearchFilters::new().with_sort_by(SortField::Rarity)
+    });
+    page("page_small_set", || {
+        CardSearchFilters::new().with_set_code("PISD")
+    });
+    page("page_broad_text", || {
+        CardSearchFilters::new().with_text("draw a card")
+    });
+    page("page_broad_name", || {
+        CardSearchFilters::new().with_name("the")
+    });
+    page("page_power", || CardSearchFilters::new().with_power("9"));
+    page("page_loyalty", || {
+        CardSearchFilters::new().with_loyalty("7")
     });
 
     // Test 10: Get cards by IDs
