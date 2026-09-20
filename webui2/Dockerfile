@@ -7,6 +7,8 @@ RUN npm ci
 
 COPY svelte.config.js tsconfig.json vite.config.ts version.js ./
 COPY src ./src
+# Favicon, PWA icons and manifest live here and are served from the site root.
+COPY static ./static
 
 # The build context has no .git, so the version (git tag) is passed in by CI.
 ARG GATHERS_VERSION
