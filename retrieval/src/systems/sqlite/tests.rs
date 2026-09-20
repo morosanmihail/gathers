@@ -1367,6 +1367,26 @@ async fn test_pagination_counts_double_faced_cards_once() {
 }
 
 #[tokio::test]
+async fn test_search_retries_with_a_bigger_window_when_faces_fill_it() {
+    // Asking for 3 fetches only 4 rows at first, which is just the two printings' faces; the
+    // search has to go back for more instead of returning short or wrongly stopping.
+    let dir = TempDir::new().unwrap();
+    let system = system_with_dfcs(&dir);
+    let filters = || CardSearchFilters {
+        name: Some("Mayor of Avabruck".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters(), None, Some(3)).await.unwrap();
+    assert_eq!(card_ids(&cards), vec![MAYOR_ISD_FRONT, MAYOR_M20_FRONT]);
+
+    let cards = system
+        .search_cards(filters(), Some(1), Some(5))
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 1);
+}
+
+#[tokio::test]
 async fn test_get_cards_by_ids_still_resolves_back_face_uuids() {
     // Collections may already hold a back-face uuid; direct lookups must not hide it.
     let dir = TempDir::new().unwrap();
@@ -1411,4 +1431,186 @@ async fn test_random_card_is_never_a_back_face() {
             m.id
         );
     }
+}
+
+// ── Search speed-up behaviour ─────────────────────────────────────────────
+// The sort expressions and set-code / legality filters were rewritten to match indexes;
+// these check the results are still what the plain SQL would give.
+
+/// Filters that match every real card in the fixture but not its NULL-set junk rows.
+fn every_real_card() -> CardSearchFilters {
+    CardSearchFilters {
+        set_code: Some("%".to_string()),
+        ..Default::default()
+    }
+}
+
+fn magic(c: &::models::Card) -> &::models::MagicCard {
+    match c {
+        ::models::Card::Magic(m) => m,
+        _ => unreachable!("magic system returned a non-magic card"),
+    }
+}
+
+#[tokio::test]
+async fn test_open_builds_the_search_indexes() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("indexes.db");
+    std::fs::copy("../data/testPrintings.db", &path).unwrap();
+    let wanted = [
+        "idx_cards_artist_nocase",
+        "idx_cards_rarity_nocase",
+        "idx_cards_setcode_nocase",
+        "idx_cards_number_int",
+        "idx_cards_search_cover",
+    ];
+    {
+        let conn = Connection::open(&path).unwrap();
+        for name in wanted {
+            conn.execute(&format!("DROP INDEX IF EXISTS {name}"), [])
+                .unwrap();
+        }
+    }
+    MagicSQLiteRetrievalSystem::new(Some(path.to_string_lossy().into_owned()), None).unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    for name in wanted {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                [name],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(exists, "{name} was not created on open");
+    }
+}
+
+#[tokio::test]
+async fn test_set_code_filter_is_case_insensitive() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    for code in ["isd", "ISD", "Isd"] {
+        let filters = CardSearchFilters {
+            set_code: Some(code.to_string()),
+            ..Default::default()
+        };
+        let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+        assert_eq!(cards.len(), 1, "set code {code:?}");
+        assert_eq!(magic(&cards[0]).set_code, "ISD");
+    }
+}
+
+#[tokio::test]
+async fn test_set_code_filter_still_supports_wildcards() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        set_code: Some("M%".to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    let mut codes: Vec<_> = cards.iter().map(|c| magic(c).set_code.clone()).collect();
+    codes.sort();
+    assert_eq!(codes, vec!["M13", "M20"]);
+
+    let filters = CardSearchFilters {
+        set_code: Some("NOPE".to_string()),
+        ..Default::default()
+    };
+    assert!(
+        system
+            .search_cards(filters, None, Some(50))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn test_sort_by_collector_number_is_numeric() {
+    // As text "106" < "12" < "155"; numerically 12 < 106 < 155.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = CardSearchFilters {
+        sort_by: Some(SortField::CollectorNumber),
+        ..every_real_card()
+    };
+    let cards = system.search_cards(filters, None, Some(50)).await.unwrap();
+    let numbers: Vec<_> = cards
+        .iter()
+        .map(|c| magic(c).collector_number.clone())
+        .collect();
+    assert_eq!(
+        numbers,
+        vec![
+            "ab89", "12", "35", "39", "42", "52", "63s", "106", "155", "173"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_sort_by_artist_ignores_case_in_both_directions() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let artists = |order| {
+        let system = &system;
+        async move {
+            let filters = CardSearchFilters {
+                sort_by: Some(SortField::Artist),
+                sort_order: Some(order),
+                ..every_real_card()
+            };
+            system
+                .search_cards(filters, None, Some(50))
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| magic(c).artist.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        }
+    };
+    let asc = artists(SortOrder::Asc).await;
+    assert_eq!(asc.len(), 10);
+    let mut expected = asc.clone();
+    expected.sort();
+    assert_eq!(asc, expected);
+
+    let mut desc = artists(SortOrder::Desc).await;
+    desc.reverse();
+    assert_eq!(desc, asc);
+}
+
+#[tokio::test]
+async fn test_sort_by_set_code_and_rarity_are_stable_across_pages() {
+    // Paging through a non-name sort must visit every card exactly once.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    for sort in [SortField::SetCode, SortField::Rarity, SortField::Artist] {
+        let mut seen = Vec::new();
+        for page in 0..5 {
+            let filters = CardSearchFilters {
+                sort_by: Some(sort.clone()),
+                ..every_real_card()
+            };
+            let cards = system
+                .search_cards(filters, Some(page * 2), Some(2))
+                .await
+                .unwrap();
+            seen.extend(cards.iter().map(|c| magic(c).id.clone()));
+        }
+        let mut unique = seen.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(seen.len(), 10, "{sort:?}");
+        assert_eq!(unique.len(), 10, "{sort:?} repeated or skipped a card");
+    }
+}
+
+#[tokio::test]
+async fn test_get_sets_lists_every_set_with_cards_in_code_order() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let sets = system.get_sets().await.unwrap();
+    let codes: Vec<_> = sets.iter().map(|s| s.code.as_str()).collect();
+    assert_eq!(
+        codes,
+        vec![
+            "3ED", "AKH", "ARB", "DRC", "ISD", "M13", "M20", "POGW", "TLE", "WC01"
+        ]
+    );
 }

@@ -4,20 +4,23 @@ pub mod update;
 
 pub use update::{download_mtg_db, download_prices};
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use ::models::{
     Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
     filters::{CardSearchFilters, SortField},
 };
 use models::{LEGALITY_FORMATS, SqlCard};
-use rusqlite::Connection;
+use rusqlite::{Connection, types::Value};
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::systems::sql_helpers::{
-    sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
-};
+use crate::systems::sql_helpers::{sql_pair_placeholders, sql_placeholders, sql_sort_dir};
 use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
 
 impl NamedRetrievalSystem for MagicSQLiteRetrievalSystem {
@@ -34,8 +37,41 @@ pub struct MagicSQLiteRetrievalSystem {
     prices_cache: Arc<Mutex<Option<HashMap<String, CardPrices>>>>,
 }
 
+/// Indexes that keep searches off full-table scans and sorts. `CREATE INDEX IF NOT EXISTS`, so
+/// a freshly downloaded DB gets them on first open (~1s) and an existing one pays nothing.
+const SEARCH_INDEXES: &str = "
+    CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards (name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards (setCode, number);
+    -- One per sortable column, in the collation `search_cards` sorts with, so ORDER BY streams
+    -- off the index instead of sorting every matching card.
+    CREATE INDEX IF NOT EXISTS idx_cards_artist_nocase ON cards (artist COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_cards_rarity_nocase ON cards (rarity COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_cards_setcode_nocase ON cards (setCode COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_cards_number_int ON cards (CAST(number AS INTEGER));
+    -- Covers every column a filter can test (plus what `FRONT_FACE_UUID` reads), in name order.
+    -- A filtered search walks this in name order and stops at the first page of matches, so
+    -- covering it means filters like `power = 9` never touch the wide `cards` rows.
+    CREATE INDEX IF NOT EXISTS idx_cards_search_cover ON cards (
+        name COLLATE NOCASE, rarity, setCode, colorIdentity, colors, types, subtypes,
+        supertypes, keywords, manaValue, power, toughness, loyalty, defense, borderColor,
+        isReserved, isPromo, isReprint, isFullArt, side, number, uuid
+    );";
+
 fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
     let conn = Connection::open(path)?;
+    // Several connections can open the same file at once (tests, mirror); wait out a
+    // concurrent index build rather than failing with SQLITE_BUSY.
+    conn.busy_timeout(Duration::from_secs(5))?;
+    // Search statements come in a handful of shapes; keep them prepared.
+    conn.set_prepared_statement_cache_capacity(64);
+    // The DB is ~750MB and read-mostly: a bigger page cache and memory-mapped reads keep hot
+    // pages out of read() calls, and in-memory temp storage keeps sorts off disk. The default
+    // 2MB cache thrashes on a broad search.
+    conn.execute_batch(
+        "PRAGMA cache_size = -65536;
+         PRAGMA mmap_size = 1073741824;
+         PRAGMA temp_store = MEMORY;",
+    )?;
 
     // Blank DBs (e.g. tests) won't have a cards table; nothing to index.
     let cards_exists: bool = conn.query_row(
@@ -47,10 +83,15 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
         return Ok(conn);
     }
 
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards (name COLLATE NOCASE);
-         CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards (setCode, number);",
+    let indexed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_cards_search_cover')",
+        [],
+        |row| row.get(0),
     )?;
+    if !indexed {
+        info!("Building MTG search indexes...");
+    }
+    conn.execute_batch(SEARCH_INDEXES)?;
 
     // user_version tracks FTS schema version:
     //   0 = fresh/re-downloaded DB, no FTS built yet
@@ -127,6 +168,22 @@ fn select_base() -> String {
     )
 }
 
+/// Cards by uuid, straight from the `cards` table (faces are not collapsed). Rows that fail
+/// to parse are skipped.
+fn fetch_by_uuids(conn: &Connection, ids: &[String]) -> eyre::Result<HashMap<String, SqlCard>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let query = format!(
+        "{} WHERE a.uuid IN ({})",
+        select_base(),
+        sql_placeholders(ids.len())
+    );
+    let mut stmt = conn.prepare_cached(&query)?;
+    let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
+    Ok(iter.flatten().map(|c| (c.id.clone(), c)).collect())
+}
+
 impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     async fn search_cards(
         &self,
@@ -159,6 +216,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
 
         let mut conditions = Vec::new();
         let mut params: Vec<String> = Vec::new();
+        let mut needs_legalities = false;
         let mut i = 1;
 
         if use_fts {
@@ -177,7 +235,13 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         if let Some(set_code) = &filters.set_code
             && !set_code.is_empty()
         {
-            conditions.push(format!("a.setCode LIKE ?{i}"));
+            // `LIKE` can't use an index, so a plain code is matched with `=` against the
+            // NOCASE index; only a pattern with wildcards needs `LIKE`.
+            if set_code.contains(['%', '_']) {
+                conditions.push(format!("a.setCode LIKE ?{i}"));
+            } else {
+                conditions.push(format!("a.setCode = ?{i} COLLATE NOCASE"));
+            }
             params.push(set_code.to_string());
             i += 1;
         }
@@ -312,68 +376,115 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         if let Some(legal_in) = &filters.legal_in {
             let format = legal_in.to_lowercase();
             if LEGALITY_FORMATS.contains(&format.as_str()) {
-                conditions.push(format!("l.{format} = ?{i}"));
+                // The unary `+` stops the planner building a throwaway automatic index over
+                // all of `cardLegalities` for this test (~800ms); it looks legalities up by
+                // uuid instead.
+                conditions.push(format!("+l.{format} = ?{i}"));
                 params.push("Legal".to_string());
+                needs_legalities = true;
             }
         }
-        // Each face of a double-faced card is its own row, but a card should be listed once.
-        // Filters may match any face (e.g. a back-face type or text), so match on all rows in
-        // the subquery and return only the front face of each matching printing. The subquery
-        // deliberately reuses the `a` / `l` aliases the conditions above are written against.
-        let mut query = select_base();
-        if conditions.is_empty() {
-            query.push_str(&format!(" WHERE a.uuid = {FRONT_FACE_UUID}"));
-        } else {
-            let fts_join = if use_fts {
-                " JOIN cards_fts ON cards_fts.rowid = a.rowid"
-            } else {
-                ""
-            };
-            query.push_str(&format!(
-                " WHERE a.uuid IN (SELECT {FRONT_FACE_UUID} FROM cards AS a \
-                 LEFT JOIN cardLegalities AS l ON l.uuid = a.uuid{fts_join} WHERE {})",
-                conditions.join(" AND ")
-            ));
+        // Searching is two queries. The first works on narrow rows only: it applies the
+        // filters and the sort and yields the front-face uuid of each match. Carrying the
+        // wide card rows (rules text, legalities, ...) through the sort is what made broad
+        // searches and non-name sorts slow. The second query then loads full rows for just
+        // the page that is returned.
+        //
+        // `front_uuid` (see `FRONT_FACE_UUID`) identifies the printing a row belongs to.
+        let mut query = format!("SELECT {FRONT_FACE_UUID} AS front_uuid FROM cards AS a");
+        if use_fts {
+            query.push_str(" JOIN cards_fts ON cards_fts.rowid = a.rowid");
         }
+        if needs_legalities {
+            query.push_str(" JOIN cardLegalities AS l ON l.uuid = a.uuid");
+        }
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+        // Each expression matches an index (see `SEARCH_INDEXES`) so the sort can stream.
         let sort_col = match &filters.sort_by {
-            Some(SortField::Rarity) => "a.rarity",
-            Some(SortField::SetCode) => "a.setCode",
+            Some(SortField::Rarity) => "a.rarity COLLATE NOCASE",
+            Some(SortField::SetCode) => "a.setCode COLLATE NOCASE",
             Some(SortField::CollectorNumber) => "CAST(a.number AS INTEGER)",
-            Some(SortField::Artist) => "a.artist",
-            _ => "a.name",
+            Some(SortField::Artist) => "a.artist COLLATE NOCASE",
+            _ => "a.name COLLATE NOCASE",
         };
+        // The window size is a bound parameter so the statement can be cached.
+        let mut values: Vec<Value> = params.into_iter().map(Value::Text).collect();
+        let limit_param = values.len();
         query.push_str(&format!(
-            " ORDER BY {sort_col} COLLATE NOCASE {}{}",
+            " ORDER BY {sort_col} {} LIMIT ?{}",
             sql_sort_dir(&filters.sort_order),
-            sql_limit_offset(limit, skip),
+            limit_param + 1,
         ));
+        values.push(Value::Integer(0));
 
-        let mut stmt = conn.prepare(&query)?;
-        let user_iter =
-            stmt.query_map(rusqlite::params_from_iter(params.iter()), SqlCard::from_row)?;
+        // Each face of a double-faced card is its own row, but a card should be listed once.
+        // Collapsing faces in SQL (by re-applying the filters to sibling rows) stops SQLite
+        // from streaming rows off an index and stopping at LIMIT, which is very slow for
+        // broad filters. Instead faces are collapsed here: the first row seen for a printing
+        // wins, and pagination is applied after that. A small margin over what's needed almost
+        // always suffices; if faces ate too many rows, retry with a bigger window.
+        let limit = limit.unwrap_or(1); // same default `sql_limit_offset` applies
+        let skip = skip.unwrap_or(0);
+        let wanted = skip + limit;
+        let mut fetch = wanted + wanted / 8;
+        let page: Vec<String> = loop {
+            values[limit_param] = Value::Integer(fetch as i64);
+            let mut stmt = conn.prepare_cached(&query)?;
+            let mut rows = stmt.query(rusqlite::params_from_iter(values.iter()))?;
+            let mut seen = HashSet::new();
+            let mut fetched = 0;
+            let mut position = 0; // printings seen so far, including the skipped ones
+            let mut page = Vec::with_capacity(limit);
+            while let Some(row) = rows.next()? {
+                fetched += 1;
+                let front_uuid: String = row.get(0)?;
+                if !seen.insert(front_uuid.clone()) {
+                    continue;
+                }
+                position += 1;
+                if position > skip {
+                    page.push(front_uuid);
+                }
+                if position == wanted {
+                    break;
+                }
+            }
+            if position >= wanted || fetched < fetch {
+                break page;
+            }
+            fetch *= 2;
+        };
 
-        Ok(user_iter.flatten().map(|c| Card::Magic(c.into())).collect())
+        // Always load the front face, so a card has the same id (and details) however it was
+        // found, including when only its back face matched. Ids that don't resolve (rows
+        // that fail to parse) are skipped, as before.
+        let mut cards = fetch_by_uuids(&conn, &page)?;
+        Ok(page
+            .iter()
+            .filter_map(|id| cards.remove(id))
+            .map(|c| Card::Magic(c.into()))
+            .collect())
     }
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
-        }
         let conn = self.connection.lock().await;
-        let base = select_base();
-        let query = format!("{base} WHERE a.uuid IN ({})", sql_placeholders(ids.len()));
-        let mut stmt = conn.prepare(&query)?;
-        let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
-        Ok(iter
-            .flatten()
-            .map(|c| (c.id.clone(), Card::Magic(c.into())))
+        Ok(fetch_by_uuids(&conn, &ids)?
+            .into_iter()
+            .map(|(id, c)| (id, Card::Magic(c.into())))
             .collect())
     }
 
     async fn get_sets(&self) -> eyre::Result<Vec<Set>> {
         let conn = self.connection.lock().await;
-        let query = "SELECT DISTINCT c.setCode, COALESCE(s.name, '') FROM cards c LEFT JOIN sets s ON s.code = c.setCode ORDER BY c.setCode".to_string();
-        let mut stmt = conn.prepare(&query)?;
+        // Walk the (small) `sets` table and probe `cards` by set code, instead of scanning every
+        // card for its distinct set code. Every card's set has a `sets` row in MTGJSON.
+        let query = "SELECT s.code, COALESCE(s.name, '') FROM sets s \
+                     WHERE EXISTS (SELECT 1 FROM cards c WHERE c.setCode = s.code) \
+                     ORDER BY s.code";
+        let mut stmt = conn.prepare_cached(query)?;
         let iter = stmt.query_map([], |row| {
             Ok(Set {
                 code: row.get(0)?,
@@ -391,7 +502,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         // `.flatten()`), so pick the first parseable row out of a
         // randomly-ordered batch rather than erroring on a single bad draw.
         let query = format!("{base} WHERE a.uuid = {FRONT_FACE_UUID} ORDER BY RANDOM() LIMIT 50");
-        let mut stmt = conn.prepare(&query)?;
+        let mut stmt = conn.prepare_cached(&query)?;
         let user_iter = stmt.query_map([], SqlCard::from_row)?;
         Ok(user_iter.flatten().next().map(|c| Card::Magic(c.into())))
     }
@@ -410,17 +521,38 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             params.push(c.1.clone());
         });
         let query = format!(
-            "SELECT a.uuid, a.setCode, a.number FROM cards AS a \
-             WHERE (a.setCode, a.number) IN (VALUES {}) AND a.uuid = {FRONT_FACE_UUID};",
+            "SELECT uuid, setCode, number, side FROM cards WHERE (setCode, number) IN (VALUES {});",
             sql_pair_placeholders(cards.len())
         );
-        let mut stmt = conn.prepare(&query)?;
+        let mut stmt = conn.prepare_cached(&query)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
         })?;
-        Ok(iter
-            .flatten()
-            .map(|(id, set, num): (String, String, String)| (set, num, id))
+        // Every face of a double-faced card matches its set and number; keep the front one
+        // (no `side`, else the lowest) so a card resolves to a single id.
+        let mut resolved: Vec<(SetCode, CollectorNumber, CardID, Option<String>)> = vec![];
+        let mut index: HashMap<(String, String), usize> = HashMap::new();
+        for (id, set, num, side) in iter.flatten() {
+            match index.get(&(set.clone(), num.clone())) {
+                Some(&i) => {
+                    if side < resolved[i].3 {
+                        resolved[i] = (set, num, id, side);
+                    }
+                }
+                None => {
+                    index.insert((set.clone(), num.clone()), resolved.len());
+                    resolved.push((set, num, id, side));
+                }
+            }
+        }
+        Ok(resolved
+            .into_iter()
+            .map(|(set, num, id, _)| (set, num, id))
             .collect())
     }
 
