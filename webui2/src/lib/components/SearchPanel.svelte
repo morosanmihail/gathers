@@ -15,6 +15,9 @@
 		plugins?: string[];
 		activeSystem?: string;
 		onSystemChange?: (s: string) => void;
+		/** Called after the result grouping (prints/cards/art) is toggled, so the
+		 *  parent can re-run a search that's already on screen. */
+		onUniqueChange?: () => void;
 		compact?: boolean;
 	}
 
@@ -26,6 +29,7 @@
 		plugins = [],
 		activeSystem = '',
 		onSystemChange,
+		onUniqueChange,
 		compact = false
 	}: Props = $props();
 
@@ -57,6 +61,15 @@
 	);
 
 	const colors = colorOptions;
+
+	// How results sharing a card are collapsed, when the active system offers a choice.
+	const uniqueModes = $derived(app.uniqueModes(activeSystem));
+	const activeUnique = $derived(filters.unique || uniqueModes[0]?.id || '');
+	function chooseUnique(id: string) {
+		if (id === activeUnique) return;
+		set('unique', id);
+		onUniqueChange?.();
+	}
 
 	// Sort options differ by system: MTG adds an Artist sort the others don't have
 	const baseSortOptions = [
@@ -337,6 +350,25 @@
 			</div>
 		{/if}
 
+		<!-- Result grouping — only for systems that offer a choice -->
+		{#if uniqueModes.length > 1}
+			<div class="field unique-field">
+				<span class="unique-label">Show</span>
+				<div class="view-toggle" role="group" aria-label="Result grouping">
+					{#each uniqueModes as mode (mode.id)}
+						<button
+							type="button"
+							class="view-toggle-btn unique-btn"
+							class:active={activeUnique === mode.id}
+							aria-pressed={activeUnique === mode.id}
+							title={mode.description}
+							onclick={() => chooseUnique(mode.id)}
+						>{mode.label}</button>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		<!-- Sort — all systems -->
 		<div class="input-group field">
 			<select class="input" value={filters.sortBy}
@@ -415,6 +447,25 @@
 		margin-bottom: 10px;
 		padding-bottom: 8px;
 		border-bottom: 1px solid var(--border);
+	}
+
+	.unique-field {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.unique-label {
+		font-size: 0.82rem;
+		color: var(--text2);
+	}
+
+	/* Fill the row evenly however many modes a system offers. */
+	.unique-field :global(.view-toggle) { flex: 1; }
+	.unique-field :global(.unique-btn) {
+		flex: 1;
+		justify-content: center;
+		font-size: 0.82rem;
 	}
 
 	.filter-section-mtg       { --game-accent: #d8a848; }

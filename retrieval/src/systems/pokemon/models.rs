@@ -19,16 +19,25 @@ pub struct SqlPokemonCard {
 }
 
 impl SqlPokemonCard {
+    /// Reads a text column that the scraper may leave NULL as empty. Recent sets, for one,
+    /// arrive without a card type, and a row that fails to parse over a missing field is
+    /// silently dropped from every search.
+    fn text(row: &rusqlite::Row, index: usize) -> rusqlite::Result<String> {
+        Ok(row.get::<_, Option<String>>(index)?.unwrap_or_default())
+    }
+
+    /// Only the id and name are required: without them there is nothing to show or to
+    /// refer to. Everything else falls back to empty.
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         Ok(SqlPokemonCard {
             id: row.get(0)?,
             name: row.get(1)?,
-            set_code: row.get(2)?,
-            rarity: row.get(3)?,
-            energy_type: row.get(4)?,
-            card_type: row.get(5)?,
-            image: row.get(6)?,
-            collector_number: row.get(7)?,
+            set_code: Self::text(row, 2)?,
+            rarity: Self::text(row, 3)?,
+            energy_type: Self::text(row, 4)?,
+            card_type: Self::text(row, 5)?,
+            image: Self::text(row, 6)?,
+            collector_number: Self::text(row, 7)?,
             pokedex: row.get(8).ok(),
             description: row.get(9).ok(),
             release_date: row.get(10).ok(),

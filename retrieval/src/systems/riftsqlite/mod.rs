@@ -1,11 +1,12 @@
 mod models;
+mod unique;
 mod update;
 
 use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::Arc};
 
 use ::models::{
     Card, CardID, CollectorNumber, Set, SetCode,
-    filters::{CardSearchFilters, SortField},
+    filters::{CardSearchFilters, SortField, UNIQUE_PRINTS, UniqueMode},
 };
 use models::SqlCard;
 use rusqlite::{Connection, params};
@@ -16,7 +17,7 @@ use crate::systems::sql_helpers::{
     sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
 };
 use crate::{
-    NamedRetrievalSystem, RetrievalSystemTrait,
+    NamedRetrievalSystem, RetrievalSystemTrait, resolve_unique_mode,
     systems::riftsqlite::update::{RiftboundCardFetcher, SimplifiedCard},
 };
 
@@ -144,6 +145,10 @@ fn upsert_riftbound_cards(db_path: &str, cards: &[SimplifiedCard]) -> eyre::Resu
 }
 
 impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
+    fn unique_modes(&self) -> Vec<UniqueMode> {
+        unique::unique_modes()
+    }
+
     async fn search_cards(
         &self,
         filters: CardSearchFilters,
@@ -223,6 +228,28 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             Some(SortField::Artist) => "artists",
             _ => "name",
         };
+        let modes = self.unique_modes();
+        let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
+            .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
+        if mode == unique::UNIQUE_CARDS {
+            // Collapsing needs every match, not a page of them, so paging happens after.
+            // `id` breaks sort ties so pages don't overlap.
+            query.push_str(&format!(
+                " ORDER BY {sort_col} COLLATE NOCASE {}, id",
+                sql_sort_dir(&filters.sort_order),
+            ));
+            let mut stmt = conn.prepare(&query)?;
+            let cards: Vec<SqlCard> = stmt
+                .query_map(rusqlite::params_from_iter(params.iter()), SqlCard::from_row)?
+                .flatten()
+                .collect();
+            return Ok(unique::collapse_by_card(cards)
+                .into_iter()
+                .skip(skip.unwrap_or(0))
+                .take(limit.unwrap_or(1)) // same default `sql_limit_offset` applies
+                .map(|c| Card::Riftbound(c.into()))
+                .collect());
+        }
         query.push_str(&format!(
             " ORDER BY {sort_col} COLLATE NOCASE {}{}",
             sql_sort_dir(&filters.sort_order),

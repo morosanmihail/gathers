@@ -1,5 +1,6 @@
 mod models;
 mod prices;
+mod unique;
 pub mod update;
 
 pub use update::{download_mtg_db, download_prices};
@@ -13,7 +14,7 @@ use std::{
 
 use ::models::{
     Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
-    filters::{CardSearchFilters, SortField},
+    filters::{CardSearchFilters, SortField, SortOrder, UNIQUE_PRINTS, UniqueMode},
 };
 use models::{LEGALITY_FORMATS, SqlCard};
 use rusqlite::{Connection, types::Value};
@@ -21,7 +22,8 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::systems::sql_helpers::{sql_pair_placeholders, sql_placeholders, sql_sort_dir};
-use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
+use crate::systems::mtg_unique_modes;
+use crate::{NamedRetrievalSystem, RetrievalSystemTrait, resolve_unique_mode};
 
 impl NamedRetrievalSystem for MagicSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -35,6 +37,9 @@ pub struct MagicSQLiteRetrievalSystem {
     db_path: String,
     prices_path: Option<String>,
     prices_cache: Arc<Mutex<Option<HashMap<String, CardPrices>>>>,
+    /// SQL ranking which printing best represents a card in the `unique` modes, built once
+    /// from the columns this database has (see `unique::build_rank_sql`).
+    rank_sql: Arc<String>,
 }
 
 /// Indexes that keep searches off full-table scans and sorts. `CREATE INDEX IF NOT EXISTS`, so
@@ -129,11 +134,14 @@ impl MagicSQLiteRetrievalSystem {
         } else {
             Arc::new(Mutex::new(None))
         };
+        let conn = open_mtg_connection(&path)?;
+        let rank_sql = Arc::new(unique::build_rank_sql(&conn));
         Ok(Self {
-            connection: Arc::new(Mutex::new(open_mtg_connection(&path)?)),
+            connection: Arc::new(Mutex::new(conn)),
             db_path: path,
             prices_path,
             prices_cache,
+            rank_sql,
         })
     }
 }
@@ -185,6 +193,10 @@ fn fetch_by_uuids(conn: &Connection, ids: &[String]) -> eyre::Result<HashMap<Str
 }
 
 impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
+    fn unique_modes(&self) -> Vec<UniqueMode> {
+        mtg_unique_modes()
+    }
+
     async fn search_cards(
         &self,
         filters: CardSearchFilters,
@@ -391,16 +403,16 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         // the page that is returned.
         //
         // `front_uuid` (see `FRONT_FACE_UUID`) identifies the printing a row belongs to.
-        let mut query = format!("SELECT {FRONT_FACE_UUID} AS front_uuid FROM cards AS a");
+        let mut from_where = String::from(" FROM cards AS a");
         if use_fts {
-            query.push_str(" JOIN cards_fts ON cards_fts.rowid = a.rowid");
+            from_where.push_str(" JOIN cards_fts ON cards_fts.rowid = a.rowid");
         }
         if needs_legalities {
-            query.push_str(" JOIN cardLegalities AS l ON l.uuid = a.uuid");
+            from_where.push_str(" JOIN cardLegalities AS l ON l.uuid = a.uuid");
         }
         if !conditions.is_empty() {
-            query.push_str(" WHERE ");
-            query.push_str(&conditions.join(" AND "));
+            from_where.push_str(" WHERE ");
+            from_where.push_str(&conditions.join(" AND "));
         }
         // Each expression matches an index (see `SEARCH_INDEXES`) so the sort can stream.
         let sort_col = match &filters.sort_by {
@@ -410,52 +422,76 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             Some(SortField::Artist) => "a.artist COLLATE NOCASE",
             _ => "a.name COLLATE NOCASE",
         };
-        // The window size is a bound parameter so the statement can be cached.
-        let mut values: Vec<Value> = params.into_iter().map(Value::Text).collect();
-        let limit_param = values.len();
-        query.push_str(&format!(
-            " ORDER BY {sort_col} {} LIMIT ?{}",
-            sql_sort_dir(&filters.sort_order),
-            limit_param + 1,
-        ));
-        values.push(Value::Integer(0));
+        let sorted_by_name = sort_col.starts_with("a.name");
+        let descending = matches!(&filters.sort_order, Some(SortOrder::Desc));
 
-        // Each face of a double-faced card is its own row, but a card should be listed once.
-        // Collapsing faces in SQL (by re-applying the filters to sibling rows) stops SQLite
-        // from streaming rows off an index and stopping at LIMIT, which is very slow for
-        // broad filters. Instead faces are collapsed here: the first row seen for a printing
-        // wins, and pagination is applied after that. A small margin over what's needed almost
-        // always suffices; if faces ate too many rows, retry with a bigger window.
         let limit = limit.unwrap_or(1); // same default `sql_limit_offset` applies
         let skip = skip.unwrap_or(0);
-        let wanted = skip + limit;
-        let mut fetch = wanted + wanted / 8;
-        let page: Vec<String> = loop {
-            values[limit_param] = Value::Integer(fetch as i64);
-            let mut stmt = conn.prepare_cached(&query)?;
-            let mut rows = stmt.query(rusqlite::params_from_iter(values.iter()))?;
-            let mut seen = HashSet::new();
-            let mut fetched = 0;
-            let mut position = 0; // printings seen so far, including the skipped ones
-            let mut page = Vec::with_capacity(limit);
-            while let Some(row) = rows.next()? {
-                fetched += 1;
-                let front_uuid: String = row.get(0)?;
-                if !seen.insert(front_uuid.clone()) {
-                    continue;
-                }
-                position += 1;
-                if position > skip {
-                    page.push(front_uuid);
-                }
-                if position == wanted {
-                    break;
-                }
+
+        let modes = self.unique_modes();
+        let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
+            .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
+
+        let page: Vec<String> = if mode != UNIQUE_PRINTS {
+            let key_sql = unique::key_sql(mode)?;
+            let query = unique::UniqueQuery {
+                from_where: &from_where,
+                params: params.into_iter().map(Value::Text).collect(),
+                key_sql: &key_sql,
+                rank_sql: &self.rank_sql,
+            };
+            if sorted_by_name {
+                query.by_name(&conn, descending, skip, limit)?
+            } else {
+                query.grouped(&conn, sort_col, descending, skip, limit)?
             }
-            if position >= wanted || fetched < fetch {
-                break page;
+        } else {
+            let mut query = format!("SELECT {FRONT_FACE_UUID} AS front_uuid{from_where}");
+            // The window size is a bound parameter so the statement can be cached.
+            let mut values: Vec<Value> = params.into_iter().map(Value::Text).collect();
+            let limit_param = values.len();
+            query.push_str(&format!(
+                " ORDER BY {sort_col} {} LIMIT ?{}",
+                sql_sort_dir(&filters.sort_order),
+                limit_param + 1,
+            ));
+            values.push(Value::Integer(0));
+
+            // Each face of a double-faced card is its own row, but a card should be listed once.
+            // Collapsing faces in SQL (by re-applying the filters to sibling rows) stops SQLite
+            // from streaming rows off an index and stopping at LIMIT, which is very slow for
+            // broad filters. Instead faces are collapsed here: the first row seen for a printing
+            // wins, and pagination is applied after that. A small margin over what's needed almost
+            // always suffices; if faces ate too many rows, retry with a bigger window.
+            let wanted = skip + limit;
+            let mut fetch = wanted + wanted / 8;
+            loop {
+                values[limit_param] = Value::Integer(fetch as i64);
+                let mut stmt = conn.prepare_cached(&query)?;
+                let mut rows = stmt.query(rusqlite::params_from_iter(values.iter()))?;
+                let mut seen = HashSet::new();
+                let mut fetched = 0;
+                let mut position = 0; // printings seen so far, including the skipped ones
+                let mut page = Vec::with_capacity(limit);
+                while let Some(row) = rows.next()? {
+                    fetched += 1;
+                    let front_uuid: String = row.get(0)?;
+                    if !seen.insert(front_uuid.clone()) {
+                        continue;
+                    }
+                    position += 1;
+                    if position > skip {
+                        page.push(front_uuid);
+                    }
+                    if position == wanted {
+                        break;
+                    }
+                }
+                if position >= wanted || fetched < fetch {
+                    break page;
+                }
+                fetch *= 2;
             }
-            fetch *= 2;
         };
 
         // Always load the front face, so a card has the same id (and details) however it was

@@ -3,6 +3,7 @@
 mod models;
 mod prices;
 mod scraper;
+mod unique;
 
 pub use prices::download_pokemon_prices;
 
@@ -29,7 +30,8 @@ pub(crate) async fn scrape_to_path(path: &str) -> eyre::Result<()> {
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use ::models::{
-    Card, CardID, CardPrices, CollectorNumber, Set, SetCode, filters::CardSearchFilters,
+    Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
+    filters::{CardSearchFilters, UNIQUE_PRINTS, UniqueMode},
 };
 use models::SqlPokemonCard;
 use rusqlite::Connection;
@@ -40,7 +42,7 @@ use tracing::info;
 use crate::systems::sql_helpers::{
     sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
 };
-use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
+use crate::{NamedRetrievalSystem, RetrievalSystemTrait, resolve_unique_mode};
 
 impl NamedRetrievalSystem for PokemonSQLiteRetrievalSystem {
     fn name(&self) -> &str {
@@ -86,6 +88,10 @@ impl PokemonSQLiteRetrievalSystem {
 }
 
 impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
+    fn unique_modes(&self) -> Vec<UniqueMode> {
+        unique::unique_modes()
+    }
+
     async fn search_cards(
         &self,
         filters: CardSearchFilters,
@@ -184,6 +190,45 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             Some(SortField::ReleaseDate) => "releaseDate",
             _ => "name",
         };
+        let modes = self.unique_modes();
+        let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
+            .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
+        if mode == unique::UNIQUE_SPECIES {
+            // Collapsing needs every match, not a page of them, so paging happens after.
+            // `cardId` breaks sort ties so pages don't overlap.
+            let has_expansions: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='expansions')",
+                [],
+                |row| row.get(0),
+            )?;
+            let expansion_release = if has_expansions {
+                "(SELECT e.releaseDate FROM expansions AS e WHERE e.name = cards.expName)"
+            } else {
+                "NULL"
+            };
+            query = query.replacen(
+                " FROM cards",
+                &format!(", {expansion_release} AS expansionRelease FROM cards"),
+                1,
+            );
+            query.push_str(&format!(
+                " ORDER BY {sort_col} COLLATE NOCASE {}, cardId",
+                sql_sort_dir(&filters.sort_order),
+            ));
+            let mut stmt = conn.prepare(&query)?;
+            let cards = stmt
+                .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                    Ok((SqlPokemonCard::from_row(row)?, row.get::<_, Option<String>>(13)?))
+                })?
+                .flatten()
+                .collect();
+            return Ok(unique::collapse_by_species(&conn, cards)
+                .into_iter()
+                .skip(skip.unwrap_or(0))
+                .take(limit.unwrap_or(1)) // same default `sql_limit_offset` applies
+                .map(|c| Card::Pokemon(c.into()))
+                .collect());
+        }
         query.push_str(&format!(
             " ORDER BY {sort_col} COLLATE NOCASE {}{}",
             sql_sort_dir(&filters.sort_order),

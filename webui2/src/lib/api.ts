@@ -677,6 +677,7 @@ function buildSearchBody(filters: SearchFilters): Partial<ApiSearchFilters> {
 	if (!isNaN(pokedex)) body.pokedex = pokedex;
 	if (filters.sortBy) body.sort_by = filters.sortBy as ApiSearchFilters['sort_by'];
 	if (filters.sortOrder) body.sort_order = filters.sortOrder as ApiSearchFilters['sort_order'];
+	if (filters.unique) body.unique = filters.unique;
 
 	// MTG-only advanced filters
 	const manaMin = parseFloat(filters.manaValueMin);

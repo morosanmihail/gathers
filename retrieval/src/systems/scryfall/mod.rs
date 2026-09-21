@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use eyre::OptionExt;
 use models::{
     Card, CardID, CollectorNumber, SetCode,
-    filters::{CardSearchFilters, SortField, SortOrder},
+    filters::{CardSearchFilters, SortField, SortOrder, UNIQUE_PRINTS, UniqueMode},
 };
 use serde_json::Value;
 
-use crate::{NamedRetrievalSystem, RetrievalSystemTrait};
+use crate::systems::mtg_unique_modes;
+use crate::{NamedRetrievalSystem, RetrievalSystemTrait, resolve_unique_mode};
 
 #[derive(Debug, Clone)]
 pub struct ScryfallRetrievalSystem {}
@@ -53,6 +54,10 @@ fn scryfall_api_error(json: &Value) -> Option<eyre::Report> {
 }
 
 impl RetrievalSystemTrait for ScryfallRetrievalSystem {
+    fn unique_modes(&self) -> Vec<UniqueMode> {
+        mtg_unique_modes()
+    }
+
     async fn search_cards(
         &self,
         filters: CardSearchFilters,
@@ -61,10 +66,10 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let query_string = query::build_query_string(&filters);
         let page = query::scryfall_page(skip);
-        // "prints" (not "cards") so every printing/art of a card is its own
-        // search result and collection entry, matching the SQL system (one
-        // row per printing) instead of collapsing to a single art per name.
-        let unique = "prints";
+        // Each mode's id is Scryfall's own `unique=` value, passed straight through.
+        let modes = mtg_unique_modes();
+        let unique = resolve_unique_mode(&modes, filters.unique.as_deref())?
+            .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
         let order = match &filters.sort_by {
             Some(SortField::Rarity) => "rarity",
             Some(SortField::SetCode) => "set",

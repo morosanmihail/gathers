@@ -650,3 +650,221 @@ async fn test_prices_beta_raw_only() {
     assert!(!prices.paper.contains_key("graded_psa10"));
     assert!(!prices.paper.contains_key("graded_psa9"));
 }
+
+// ── unique modes ─────────────────────────────────────────────────────────────
+
+/// A small database for the `unique` modes.
+///
+/// | id       | name                        | notes                                        |
+/// |----------|-----------------------------|----------------------------------------------|
+/// | pk-old   | Pikachu                     | Old Set 1999, dex 25                         |
+/// | pk-new   | Pikachu                     | New Set 2023, no dex (recent sets have none) |
+/// | pk-promo | Pikachu - SWSH039           | Promos 2024, rarity Promo, dex 25            |
+/// | pk-full  | Pikachu V (Full Art)        | 2022, dex 25                                 |
+/// | raichu   | Raichu                      | dex 26                                       |
+/// | eevee-a  | Eevee                       | 2010, dex 133                                |
+/// | eevee-b  | Eevee                       | no release date; its expansion says 2021     |
+/// | nidoran  | Nidoran F                   | no card type, no dex                         |
+/// | nidoran2 | Nidoran♀                    | 1999, dex 29                                 |
+/// | tool     | Flying Pikachu              | Tool with dex 25: not a Pikachu              |
+/// | switch   | Switch                      | Item, dex placeholder                        |
+/// | tag      | Arceus & Dialga & Palkia GX | dex 483 as scraped                           |
+/// | pk-ex    | Pikachu ex                  | 2025, no dex: newer, but not the plain Pikachu |
+/// | pk-team  | Pikachu & Zekrom GX         | 2025, dex 25                                 |
+///
+/// so `prints` finds 14 cards and `species` 7: Pikachu, Raichu, Eevee, Nidoran, Dialga, plus
+/// the tool and the trainer, which have no species.
+fn species_fixture(dir: &TempDir) -> PokemonSQLiteRetrievalSystem {
+    let path = dir.path().join("pokemon.db");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE cards (cardId TEXT UNIQUE, name TEXT, expName TEXT, rarity TEXT, energyType TEXT,
+             cardType TEXT NULL, img TEXT, expCardNumber TEXT, pokedex INTEGER NULL, description TEXT NULL,
+             releaseDate TEXT NULL, expCodeTCGP TEXT NULL, variants TEXT NULL, expIdTCGP TEXT NULL);
+         CREATE TABLE expansions (name TEXT UNIQUE, releaseDate TEXT);
+         CREATE TABLE pokedex (id INTEGER, name TEXT, img TEXT);
+         INSERT INTO pokedex (id, name) VALUES (25, 'Pikachu'), (26, 'Raichu'), (29, 'Nidoran♀'),
+             (133, 'Eevee'), (483, 'Dialga'), (493, 'Arceus');
+         INSERT INTO expansions (name, releaseDate) VALUES ('Undated Set', '2021-05-01T00:00:00.000Z');",
+    )
+    .unwrap();
+    // (id, name, set, rarity, card type, dex, release date)
+    let cards: [(&str, &str, &str, &str, Option<&str>, Option<i64>, Option<&str>); 14] = [
+        ("pk-old", "Pikachu", "Old Set", "Common", Some("Pokemon"), Some(25), Some("1999-01-09T00:00:00Z")),
+        ("pk-new", "Pikachu", "New Set", "Common", Some("Pokemon"), None, Some("2023-03-31T00:00:00.000Z")),
+        ("pk-promo", "Pikachu - SWSH039", "SWSH Promos", "Promo", Some("Pokemon"), Some(25), Some("2024-06-01T00:00:00Z")),
+        ("pk-full", "Pikachu V (Full Art)", "Mid Set", "Ultra Rare", Some("Pokemon"), Some(25), Some("2022-01-01T00:00:00Z")),
+        ("raichu", "Raichu", "Old Set", "Rare", Some("Pokemon"), Some(26), Some("2001-01-01T00:00:00Z")),
+        ("eevee-a", "Eevee", "Old Set", "Common", Some("Pokemon"), Some(133), Some("2010-01-01T00:00:00Z")),
+        ("eevee-b", "Eevee", "Undated Set", "Common", Some("Pokemon"), Some(133), None),
+        ("nidoran", "Nidoran F", "New Set", "Common", None, None, Some("2015-01-01T00:00:00Z")),
+        ("nidoran2", "Nidoran♀", "Old Set", "Common", Some("Pokemon"), Some(29), Some("1999-01-09T00:00:00Z")),
+        ("tool", "Flying Pikachu", "Mid Set", "Common", Some("Tool"), Some(25), Some("2022-01-01T00:00:00Z")),
+        ("switch", "Switch", "Mid Set", "Common", Some("Item"), Some(100000), Some("2022-01-01T00:00:00Z")),
+        ("tag", "Arceus & Dialga & Palkia GX", "Mid Set", "Ultra Rare", Some("Pokemon"), Some(483), Some("2022-01-01T00:00:00Z")),
+        ("pk-ex", "Pikachu ex", "New Set", "Double Rare", Some("Pokemon"), None, Some("2025-01-01T00:00:00Z")),
+        ("pk-team", "Pikachu & Zekrom GX", "New Set", "Ultra Rare", Some("Pokemon"), Some(25), Some("2025-01-01T00:00:00Z")),
+    ];
+    for (id, name, set, rarity, card_type, dex, release) in cards {
+        conn.execute(
+            "INSERT INTO cards (cardId, name, expName, rarity, energyType, cardType, img, expCardNumber, pokedex, releaseDate)
+             VALUES (?1, ?2, ?3, ?4, 'Colorless', ?5, '', '001', ?6, ?7)",
+            (id, name, set, rarity, card_type, dex, release),
+        )
+        .unwrap();
+    }
+    drop(conn);
+    PokemonSQLiteRetrievalSystem::new(Some(path.to_string_lossy().to_string()), None).unwrap()
+}
+
+async fn ids(system: &PokemonSQLiteRetrievalSystem, filters: CardSearchFilters, skip: usize, limit: usize) -> Vec<String> {
+    system
+        .search_cards(filters, Some(skip), Some(limit))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| match c {
+            Card::Pokemon(p) => p.id,
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn test_unique_modes_offered() {
+    let modes = setup_test_db().await.unique_modes();
+    let ids: Vec<_> = modes.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["prints", "species"]);
+}
+
+#[tokio::test]
+async fn test_unique_defaults_to_prints() {
+    let dir = TempDir::new().unwrap();
+    let system = species_fixture(&dir);
+    let all = |f: CardSearchFilters| ids(&system, f, 0, 100);
+
+    let by_default = all(CardSearchFilters::new()).await;
+    assert_eq!(by_default.len(), 14);
+    assert_eq!(all(CardSearchFilters::new().with_unique("prints")).await, by_default);
+    assert_eq!(all(CardSearchFilters::new().with_unique("")).await, by_default);
+}
+
+#[tokio::test]
+async fn test_species_collapses_a_pokemon_to_its_best_printing() {
+    let dir = TempDir::new().unwrap();
+    let system = species_fixture(&dir);
+    let species = ids(&system, CardSearchFilters::new().with_unique("species"), 0, 100).await;
+    // Sorted by name. Pikachu: the newest printing of the plain Pikachu, even though the recent
+    // one has no Pokédex number of its own, and not the newer promo, full-art variant or ex and
+    // team-up cards. Eevee: the
+    // undated printing counts as its expansion's 2021, beating 2010. Nidoran: the untyped
+    // "Nidoran F" is found by name and is newer than the ♀ card. The tag team is filed under
+    // its scraped number. The tool and trainer aren't Pokémon, so they stay as they are.
+    assert_eq!(species, ["tag", "eevee-b", "tool", "nidoran", "pk-new", "raichu", "switch"]);
+}
+
+#[tokio::test]
+async fn test_species_picks_the_representative_among_the_matching_printings() {
+    let dir = TempDir::new().unwrap();
+    let system = species_fixture(&dir);
+    for (set, expected) in [("Old Set", "pk-old"), ("Mid Set", "pk-full"), ("SWSH Promos", "pk-promo")] {
+        let filters = CardSearchFilters::new().with_name("Pikachu").with_set_code(set).with_unique("species");
+        let found = ids(&system, filters, 0, 100).await;
+        // The tool also matches "Pikachu", in the set it is in.
+        let pikachus: Vec<_> = found.iter().filter(|id| id.starts_with("pk-")).collect();
+        assert_eq!(pikachus, [expected], "set {set}: {found:?}");
+    }
+}
+
+#[tokio::test]
+async fn test_species_sorts_and_pages_the_collapsed_results() {
+    let dir = TempDir::new().unwrap();
+    let system = species_fixture(&dir);
+    use ::models::filters::{SortField, SortOrder};
+    for sort in [SortField::Name, SortField::SetCode, SortField::CollectorNumber] {
+        for order in [SortOrder::Asc, SortOrder::Desc] {
+            let filters = || CardSearchFilters::new().with_unique("species").with_sort_by(sort.clone()).with_sort_order(order.clone());
+            let whole = ids(&system, filters(), 0, 100).await;
+            assert_eq!(whole.len(), 7, "{sort:?} {order:?}");
+            let mut paged = vec![];
+            for page in 0..whole.len() {
+                paged.extend(ids(&system, filters(), page * 2, 2).await);
+            }
+            assert_eq!(paged, whole, "{sort:?} {order:?}");
+        }
+    }
+    let desc = ids(&system, CardSearchFilters::new().with_unique("species").with_sort_order(SortOrder::Desc), 0, 100).await;
+    assert_eq!(desc, ["switch", "raichu", "pk-new", "nidoran", "tool", "eevee-b", "tag"]);
+}
+
+#[tokio::test]
+async fn test_unique_rejects_unknown_mode() {
+    let system = setup_test_db().await;
+    let err = system
+        .search_cards(CardSearchFilters::new().with_unique("art"), None, Some(1))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Unsupported unique mode 'art'"), "{err}");
+    assert!(err.to_string().contains("prints, species"), "{err}");
+}
+
+#[tokio::test]
+async fn test_species_without_a_pokedex_table_uses_scraped_numbers_only() {
+    let dir = TempDir::new().unwrap();
+    let system = species_fixture(&dir);
+    Connection::open(&system._db_path).unwrap().execute_batch("DROP TABLE pokedex; DROP TABLE expansions;").unwrap();
+    let species = ids(&system, CardSearchFilters::new().with_unique("species"), 0, 100).await;
+    // Without names to match, the numberless cards are results of their own, while the ones
+    // with a scraped number still collapse. With no names to say which is the plain Pikachu,
+    // dex 25 goes to its newest regular printing.
+    assert!(species.contains(&"pk-new".to_string()) && species.contains(&"nidoran".to_string()));
+    assert!(species.contains(&"pk-team".to_string()));
+    for gone in ["pk-old", "pk-promo", "pk-full"] {
+        assert!(!species.contains(&gone.to_string()), "{gone} should have collapsed into pk-team");
+    }
+}
+
+#[tokio::test]
+async fn test_species_on_the_real_data() {
+    let system = setup_test_db().await;
+    let names = |cards: Vec<Card>| -> Vec<String> {
+        cards.into_iter().map(|c| match c { Card::Pokemon(p) => p.name, _ => unreachable!() }).collect()
+    };
+    let prints = names(system.search_cards(CardSearchFilters::new().with_name("Bulbasaur"), None, Some(1000)).await.unwrap());
+    let species = names(
+        system
+            .search_cards(CardSearchFilters::new().with_name("Bulbasaur").with_unique("species"), None, Some(1000))
+            .await
+            .unwrap(),
+    );
+    assert!(prints.len() > 10);
+    // One Bulbasaur, plus the Ditto card that is named after it: it is a different species.
+    assert_eq!(species.len(), 2, "{species:?}");
+    assert_eq!(species.iter().filter(|n| n.starts_with("Bulbasaur")).count(), 1);
+    assert!(species.iter().any(|n| n.starts_with("Ditto")));
+}
+
+#[tokio::test]
+async fn test_cards_with_missing_fields_still_load() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("pokemon.db");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE cards (cardId TEXT UNIQUE, name TEXT, expName TEXT, rarity TEXT, energyType TEXT,
+             cardType TEXT NULL, img TEXT, expCardNumber TEXT, pokedex INTEGER NULL, description TEXT NULL,
+             releaseDate TEXT NULL, expCodeTCGP TEXT NULL, variants TEXT NULL, expIdTCGP TEXT NULL);
+         -- Only an id and a name: no set, rarity, energy type, card type, image or number.
+         INSERT INTO cards (cardId, name) VALUES ('bare', 'Bare Card');",
+    )
+    .unwrap();
+    drop(conn);
+    let system = PokemonSQLiteRetrievalSystem::new(Some(path.to_string_lossy().to_string()), None).unwrap();
+
+    let found = system
+        .search_cards(CardSearchFilters::new().with_name("Bare"), None, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    let by_id = system.get_cards_by_ids(vec!["bare".to_string()]).await.unwrap();
+    assert!(by_id.contains_key("bare"));
+}
