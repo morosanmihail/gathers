@@ -39,6 +39,23 @@ pub struct ErrorPayload {
 /// Convenience alias for the standard API error response.
 pub type ApiError = (StatusCode, Json<ErrorPayload>);
 
+/// Rejects a `unique` mode the system doesn't offer up front, so a typo is a 400 naming the
+/// valid modes rather than a generic search failure. A system that offers no modes ignores
+/// `unique`, so nothing is rejected for it.
+pub(crate) fn check_unique_mode(
+    system: &RetrievalSystem,
+    unique: Option<&str>,
+) -> Result<(), ApiError> {
+    retrieval::resolve_unique_mode(&system.unique_modes(), unique)
+        .map(|_| ())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorPayload { error: e.to_string() }),
+            )
+        })
+}
+
 pub(crate) fn demo_mode() -> bool {
     std::env::var("DEMO_MODE").is_ok()
 }

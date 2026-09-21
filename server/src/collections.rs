@@ -1012,7 +1012,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<Vec<ResultCard>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_mtg()?;
-        crate::mtg_api::check_unique_mode(ret, input.unique.as_deref())?;
+        crate::check_unique_mode(ret, input.unique.as_deref())?;
 
         match ret
             .search_cards(input.into(), query.offset.into(), query.page_size.min(1000).into())

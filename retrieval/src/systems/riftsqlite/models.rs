@@ -17,17 +17,26 @@ pub struct SqlCard {
 }
 
 impl SqlCard {
+    /// Reads a text column that may be NULL as empty. Runes and tokens have no rules text,
+    /// and a row that fails to parse over a missing field is silently dropped from every
+    /// search.
+    fn text(row: &rusqlite::Row, index: usize) -> rusqlite::Result<String> {
+        Ok(row.get::<_, Option<String>>(index)?.unwrap_or_default())
+    }
+
+    /// Only the id and name are required: without them there is nothing to show or to
+    /// refer to. Everything else falls back to empty.
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         Ok(SqlCard {
             id: row.get(0)?,
             name: row.get(1)?,
-            set_code: row.get(2)?,
-            domains: row.get(5)?,
-            text: row.get(6)?,
-            rarity: row.get(3)?,
-            artists: row.get(4)?,
-            image: row.get(7)?,
-            collector_number: row.get(8)?,
+            set_code: Self::text(row, 2)?,
+            domains: Self::text(row, 5)?,
+            text: Self::text(row, 6)?,
+            rarity: Self::text(row, 3)?,
+            artists: Self::text(row, 4)?,
+            image: Self::text(row, 7)?,
+            collector_number: Self::text(row, 8)?,
         })
     }
 }
@@ -52,7 +61,12 @@ impl From<SqlCard> for RiftboundCard {
         } else {
             domains
         };
-        let artists: Vec<Artist> = value.artists.split(",").map(|s| s.to_string()).collect();
+        let artists: Vec<Artist> = value
+            .artists
+            .split(",")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         RiftboundCard {
             id: value.id,
             name: value.name,

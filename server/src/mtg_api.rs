@@ -26,23 +26,6 @@ fn default_limit() -> usize {
     10
 }
 
-/// Rejects a `unique` mode the system doesn't offer up front, so a typo is a 400 naming the
-/// valid modes rather than a generic search failure. A system that offers no modes ignores
-/// `unique`, so nothing is rejected for it.
-pub(crate) fn check_unique_mode(
-    system: &retrieval::RetrievalSystem,
-    unique: Option<&str>,
-) -> Result<(), ApiError> {
-    retrieval::resolve_unique_mode(&system.unique_modes(), unique)
-        .map(|_| ())
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload { error: e.to_string() }),
-            )
-        })
-}
-
 pub fn mtg_routes() -> ApiRouter<GathersState> {
     #[derive(Deserialize, JsonSchema)]
     struct MagicSearchQuery {
@@ -59,7 +42,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<Vec<APICard>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_mtg()?;
-        check_unique_mode(ret, input.unique.as_deref())?;
+        crate::check_unique_mode(ret, input.unique.as_deref())?;
 
         ret.search_cards(input.into(), query.skip.into(), query.limit.into())
             .await

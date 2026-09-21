@@ -44,6 +44,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<Vec<APIPokemonCard>>, ApiError> {
         let guard = state.0.lock().await;
         let ret = guard.require_pokemon()?;
+        crate::check_unique_mode(ret, input.unique.as_deref())?;
 
         ret.search_cards(input.into(), query.skip.into(), query.limit.into())
             .await
