@@ -12,6 +12,8 @@ export interface Collection {
 }
 
 export type SystemInfo = components['schemas']['SystemInfo'];
+// One way a system can collapse search results that share a card (MTG: prints / cards / art).
+export type UniqueMode = components['schemas']['APIUniqueMode'];
 export type DownloadProgress = components['schemas']['DownloadProgressInfo'];
 export type CardIdentifiers = components['schemas']['APICardIdentifiers'];
 export type MtgCard = components['schemas']['APICard'];
@@ -156,6 +158,9 @@ export interface SearchFilters {
 	pokedex: string;
 	sortBy: string;
 	sortOrder: 'Asc' | 'Desc';
+	// How results sharing a card are collapsed — one of the active system's
+	// `unique_modes` ids. '' = that system's default (its first mode).
+	unique: string;
 	// MTG-only advanced filters
 	manaValueMin: string;
 	manaValueMax: string;
@@ -239,6 +244,7 @@ export function defaultFilters(): SearchFilters {
 		pokedex: '',
 		sortBy: 'Name',
 		sortOrder: 'Asc',
+		unique: '',
 		manaValueMin: '',
 		manaValueMax: '',
 		colors: [],

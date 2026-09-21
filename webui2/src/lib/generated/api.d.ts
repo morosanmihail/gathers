@@ -1845,6 +1845,13 @@ export interface components {
             text?: string | null;
             toughness?: string | null;
             types?: string[] | null;
+            /**
+             * @description How to collapse results that share a card: one of the ids the system
+             *     lists under `unique_modes` in `/api/system` (MTG: `prints`, `cards`,
+             *     `art`). Omitted or empty means the system's default (`prints` for
+             *     MTG). Systems that list no modes ignore it.
+             */
+            unique?: string | null;
         };
         APICollectionSortField: ("TimeAdded" | "WantQuantity" | "Provider") | "Quantity";
         /** @enum {string} */
@@ -1888,6 +1895,18 @@ export interface components {
         APISortField: ("Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist") | "ReleaseDate";
         /** @enum {string} */
         APISortOrder: "Asc" | "Desc";
+        /**
+         * @description One way a system can collapse search results that share a card; see
+         *     `APICardSearchFilters::unique`.
+         */
+        APIUniqueMode: {
+            /** @description One-line explanation, for a tooltip. */
+            description: string;
+            /** @description Value to send as `unique`. */
+            id: string;
+            /** @description Short name for a toggle. */
+            label: string;
+        };
         AdjustWantQuantityRequest: {
             /** Format: int32 */
             delta: number;
@@ -2296,6 +2315,15 @@ export interface components {
              *     These strings also match the `provider` field stored on collection cards.
              */
             systems: string[];
+            /**
+             * @description The ways each system can collapse search results that share a card
+             *     (see `APICardSearchFilters::unique`), keyed by system name; the first
+             *     is the default. Systems with no modes are left out — they have
+             *     nothing to toggle.
+             */
+            unique_modes: {
+                [key: string]: components["schemas"]["APIUniqueMode"][];
+            };
             /**
              * @description Server version: the git tag it was built from (e.g. `v0.6.4`, or
              *     `v0.6.4-18-ga2de264` for a build past a tag).

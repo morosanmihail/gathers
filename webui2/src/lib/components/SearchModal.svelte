@@ -178,6 +178,7 @@
 				plugins={app.plugins}
 				{activeSystem}
 				onSystemChange={handleSystemChange}
+				onUniqueChange={() => { if (searched) doSearch(1); }}
 				compact
 			/>
 

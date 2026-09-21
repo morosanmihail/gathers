@@ -16,6 +16,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 
 use crate::collections::{collection_routes, public_collection_routes};
+use crate::collections::collections_models::APIUniqueMode;
 use crate::mtg_api::mtg_routes;
 use crate::plugin_api::plugin_routes;
 use crate::pokemon_api::pokemon_routes;
@@ -69,6 +70,11 @@ pub struct SystemInfo {
     /// separate from `systems` — a plugin isn't a `provider` collections can
     /// store cards under, and doesn't support the same search filters.
     pub plugins: Vec<String>,
+    /// The ways each system can collapse search results that share a card
+    /// (see `APICardSearchFilters::unique`), keyed by system name; the first
+    /// is the default. Systems with no modes are left out — they have
+    /// nothing to toggle.
+    pub unique_modes: HashMap<String, Vec<APIUniqueMode>>,
     /// Systems whose databases are currently being downloaded, with progress info.
     pub downloading: HashMap<String, DownloadProgressInfo>,
     /// Whether the server is running in demo mode (settings endpoints disabled).
@@ -251,15 +257,21 @@ impl RetrievalState {
     }
 
     pub async fn get_system_info(&self) -> SystemInfo {
-        let systems: Vec<String> = [
+        let active: Vec<&RetrievalSystem> = [
             self.mtg.as_ref(),
             self.riftbound.as_ref(),
             self.pokemon.as_ref(),
         ]
         .into_iter()
         .flatten()
-        .map(|s| s.name().to_string())
         .collect();
+        let systems: Vec<String> = active.iter().map(|s| s.name().to_string()).collect();
+        let unique_modes: HashMap<String, Vec<APIUniqueMode>> = active
+            .iter()
+            .map(|s| (s.name().to_string(), s.unique_modes()))
+            .filter(|(_, modes)| !modes.is_empty())
+            .map(|(name, modes)| (name, modes.into_iter().map(APIUniqueMode::from).collect()))
+            .collect();
         let plugins: Vec<String> = self.plugins.keys().cloned().collect();
         let system = systems.first().cloned().unwrap_or_default();
         let mut downloading = HashMap::new();
@@ -272,7 +284,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, plugins, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
+        SystemInfo { system, systems, plugins, unique_modes, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {

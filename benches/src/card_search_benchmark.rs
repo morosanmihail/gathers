@@ -140,6 +140,38 @@ fn bench_card_search_benchmark(c: &mut Criterion) {
         CardSearchFilters::new().with_loyalty("7")
     });
 
+    // `unique` modes, one page of 24. Sorted by name they stream off the index like a plain
+    // search; any other sort has to collapse every match first.
+    for mode in ["cards", "art"] {
+        let mut page = |name: &str, filters: fn() -> CardSearchFilters| {
+            group.bench_function(format!("page_unique_{mode}_{name}"), |b| {
+                b.to_async(&rt).iter(|| async {
+                    let result = system
+                        .search_cards(black_box(filters().with_unique(mode)), None, Some(24))
+                        .await;
+                    let _ = black_box(result);
+                })
+            });
+        };
+        page("browse", CardSearchFilters::new);
+        page("name", || CardSearchFilters::new().with_name("jace"));
+        page("small_set", || CardSearchFilters::new().with_set_code("PISD"));
+        page("broad_text", || CardSearchFilters::new().with_text("draw a card"));
+        page("legal_in_format", || {
+            CardSearchFilters::new()
+                .with_legal_in("modern")
+                .with_rarity(Rarity::Rare)
+        });
+        page("sorted_by_artist", || {
+            CardSearchFilters::new().with_sort_by(SortField::Artist)
+        });
+        page("name_sorted_by_set", || {
+            CardSearchFilters::new()
+                .with_name("jace")
+                .with_sort_by(SortField::SetCode)
+        });
+    }
+
     // Test 10: Get cards by IDs
     group.bench_function("get_cards_by_ids", |b| {
         b.to_async(&rt).iter(|| async {

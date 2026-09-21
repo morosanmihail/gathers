@@ -56,6 +56,7 @@
 		if (params.has('colors'))          { overrides.colorIdentities = str('colors').split(',').filter(Boolean); hasFilter = true; }
 		if (params.has('sortBy'))          overrides.sortBy = str('sortBy');
 		if (params.has('sortOrder'))       overrides.sortOrder = str('sortOrder') as 'Asc' | 'Desc';
+		if (params.has('unique'))          overrides.unique = str('unique');
 		if (params.has('system'))          activeSystem = str('system');
 
 		// Advanced (MTG-only) filters
@@ -113,6 +114,7 @@
 		if (filters.colorIdentities.length)  params.set('colors', filters.colorIdentities.join(','));
 		if (filters.sortBy !== 'Name')       params.set('sortBy', filters.sortBy);
 		if (filters.sortOrder !== 'Asc')     params.set('sortOrder', filters.sortOrder);
+		if (filters.unique)                  params.set('unique', filters.unique);
 		if (activeSystem)                    params.set('system', activeSystem);
 
 		// Advanced (MTG-only) filters
@@ -225,6 +227,7 @@
 				plugins={app.plugins}
 				{activeSystem}
 				onSystemChange={handleSystemChange}
+				onUniqueChange={() => { if (searched) doSearch(1); }}
 			/>
 		</div>
 

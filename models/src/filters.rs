@@ -21,6 +21,37 @@ pub enum SortOrder {
     Desc,
 }
 
+/// One way a system can collapse search results that share a card, offered
+/// through `RetrievalSystemTrait::unique_modes` and selected with
+/// `CardSearchFilters::unique`.
+///
+/// Modes are plain strings so each system can define its own: MTG offers
+/// Scryfall's `prints` / `cards` / `art`, and a game could add something
+/// else (say `"variants"`) without touching the shared filter type.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UniqueMode {
+    /// Value sent as `CardSearchFilters::unique`.
+    pub id: String,
+    /// Short name for a toggle.
+    pub label: String,
+    /// One-line explanation, for a tooltip.
+    pub description: String,
+}
+
+impl UniqueMode {
+    pub fn new(id: &str, label: &str, description: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            label: label.to_string(),
+            description: description.to_string(),
+        }
+    }
+}
+
+/// `UniqueMode::id` for "every printing is its own result" — MTG's default,
+/// and what a system that offers no modes behaves like.
+pub const UNIQUE_PRINTS: &str = "prints";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CardSearchFilters {
     pub name: Option<String>,
@@ -84,6 +115,10 @@ pub struct CardSearchFilters {
     pub sort_by: Option<SortField>,
     #[serde(alias = "sortOrder")]
     pub sort_order: Option<SortOrder>,
+    /// How to collapse results that share a card: one of the ids in the
+    /// system's `unique_modes()`. `None` or empty means the system's default
+    /// (its first mode). Systems that offer no modes ignore it.
+    pub unique: Option<String>,
 }
 
 impl CardSearchFilters {
@@ -235,6 +270,11 @@ impl CardSearchFilters {
         self.sort_order = Some(sort_order);
         self
     }
+
+    pub fn with_unique(mut self, unique: impl Into<String>) -> Self {
+        self.unique = Some(unique.into());
+        self
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +329,15 @@ mod tests {
             .with_sort_order(SortOrder::Desc);
         assert_eq!(filters.sort_by, Some(SortField::Artist));
         assert_eq!(filters.sort_order, Some(SortOrder::Desc));
+    }
+
+    #[test]
+    fn test_unique_deserialization() {
+        let f: CardSearchFilters = serde_json::from_str(r#"{"unique":"cards"}"#).unwrap();
+        assert_eq!(f.unique.as_deref(), Some("cards"));
+        let f: CardSearchFilters = serde_json::from_str("{}").unwrap();
+        assert!(f.unique.is_none());
+        assert_eq!(CardSearchFilters::new().with_unique("art").unique.as_deref(), Some("art"));
     }
 
     #[test]

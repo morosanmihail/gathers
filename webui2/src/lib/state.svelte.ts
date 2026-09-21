@@ -1,4 +1,4 @@
-import type { Collection, SystemInfo, Theme, ViewMode, CardSet } from './types';
+import type { Collection, SystemInfo, Theme, ViewMode, CardSet, UniqueMode } from './types';
 import { listCollections, getSystemInfo, getMtgCardSets, getPokemonCardSets } from './api';
 import { injectThemeStyles } from './themes/index';
 
@@ -27,6 +27,12 @@ class AppState {
 
 	get plugins() {
 		return this.systemInfo?.plugins ?? [];
+	}
+
+	/** The ways `system` can collapse search results that share a card, default
+	 *  first. Empty when it has nothing to toggle (Riftbound, Pokemon, plugins). */
+	uniqueModes(system: string): UniqueMode[] {
+		return this.systemInfo?.unique_modes?.[system] ?? [];
 	}
 
 	async loadSystemInfo() {

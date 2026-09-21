@@ -95,6 +95,33 @@ pub struct APICardSearchFilters {
     pub sort_by: Option<APISortField>,
     #[serde(alias = "sortOrder")]
     pub sort_order: Option<APISortOrder>,
+    /// How to collapse results that share a card: one of the ids the system
+    /// lists under `unique_modes` in `/api/system` (MTG: `prints`, `cards`,
+    /// `art`). Omitted or empty means the system's default (`prints` for
+    /// MTG). Systems that list no modes ignore it.
+    pub unique: Option<String>,
+}
+
+/// One way a system can collapse search results that share a card; see
+/// `APICardSearchFilters::unique`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct APIUniqueMode {
+    /// Value to send as `unique`.
+    pub id: String,
+    /// Short name for a toggle.
+    pub label: String,
+    /// One-line explanation, for a tooltip.
+    pub description: String,
+}
+
+impl From<models::filters::UniqueMode> for APIUniqueMode {
+    fn from(value: models::filters::UniqueMode) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            description: value.description,
+        }
+    }
 }
 
 impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
@@ -141,6 +168,7 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
             pokedex: value.pokedex,
             sort_by: value.sort_by.map(models::filters::SortField::from),
             sort_order: value.sort_order.map(models::filters::SortOrder::from),
+            unique: value.unique,
         }
     }
 }

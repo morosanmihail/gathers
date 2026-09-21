@@ -1614,3 +1614,225 @@ async fn test_get_sets_lists_every_set_with_cards_in_code_order() {
         ]
     );
 }
+
+// ── unique modes ─────────────────────────────────────────────────────────────
+
+/// One printing to add to a fixture database.
+struct Printing {
+    uuid: &'static str,
+    name: &'static str,
+    set: &'static str,
+    number: &'static str,
+    side: Option<&'static str>,
+    oracle: &'static str,
+    illustration: &'static str,
+    promo: bool,
+    online_only: bool,
+}
+
+impl Printing {
+    fn new(uuid: &'static str, name: &'static str, set: &'static str, oracle: &'static str, illustration: &'static str) -> Self {
+        Self { uuid, name, set, number: "1", side: None, oracle, illustration, promo: false, online_only: false }
+    }
+}
+
+/// A copy of the test database (in `dir`) plus printings built for the `unique` modes:
+///
+/// | card          | printings                                                                  |
+/// |---------------|----------------------------------------------------------------------------|
+/// | Fixture Jace  | AAA/2010 art 1, BBB/2020 art 1, CCC/2024 promo art 2, DDD/2025 digital art 3 |
+/// | Fixture Ajani | AAA/2010 art 4, BBB/2020 art 5                                             |
+/// | Fixture Dual  | one double-faced printing in AAA (faces have different art)                |
+/// | Fixture Many  | 150 printings of art 6, in sets M000..M149, newest is M149                 |
+///
+/// so `prints` finds 4 + 2 + 1 + 150, `cards` 4 and `art` 3 + 2 + 1 + 1.
+fn unique_fixture(dir: &TempDir) -> MagicSQLiteRetrievalSystem {
+    let path = dir.path().join("unique.db");
+    std::fs::copy("../data/testPrintings.db", &path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    // Reopening rebuilds the full-text index, which the added rows need to be searchable.
+    conn.execute_batch("PRAGMA user_version = 0; ALTER TABLE sets ADD COLUMN releaseDate TEXT;").unwrap();
+
+    let mut printings = vec![
+        Printing::new("j1", "Fixture Jace", "AAA", "O-jace", "I1"),
+        Printing::new("j2", "Fixture Jace", "BBB", "O-jace", "I1"),
+        Printing { promo: true, ..Printing::new("j3", "Fixture Jace", "CCC", "O-jace", "I2") },
+        Printing { online_only: true, ..Printing::new("j4", "Fixture Jace", "DDD", "O-jace", "I3") },
+        Printing::new("a1", "Fixture Ajani", "AAA", "O-ajani", "I4"),
+        Printing::new("a2", "Fixture Ajani", "BBB", "O-ajani", "I5"),
+        Printing { number: "9", side: Some("a"), ..Printing::new("d1", "Fixture Dual // Fixture Back", "AAA", "O-dual", "I7") },
+        Printing { number: "9", side: Some("b"), ..Printing::new("d2", "Fixture Dual // Fixture Back", "AAA", "O-dual", "I8") },
+    ];
+    let many: Vec<(String, String)> = (0..150).map(|i| (format!("m{i:03}"), format!("M{i:03}"))).collect();
+    for (uuid, set) in &many {
+        printings.push(Printing::new(
+            Box::leak(uuid.clone().into_boxed_str()),
+            "Fixture Many",
+            Box::leak(set.clone().into_boxed_str()),
+            "O-many",
+            "I6",
+        ));
+    }
+
+    for (set, date) in [("AAA", "2010-01-01"), ("BBB", "2020-01-01"), ("CCC", "2024-01-01"), ("DDD", "2025-01-01")] {
+        conn.execute("INSERT INTO sets (code, name, releaseDate) VALUES (?1, ?1, ?2)", (set, date)).unwrap();
+    }
+    for (i, (_, set)) in many.iter().enumerate() {
+        // Later sets are newer: M149 is the newest.
+        let date = format!("2000-{:02}-{:02}", i / 28 + 1, i % 28 + 1);
+        conn.execute("INSERT INTO sets (code, name, releaseDate) VALUES (?1, ?1, ?2)", (set, date)).unwrap();
+    }
+    for p in &printings {
+        // Start from a real row so every column the loader reads is populated.
+        conn.execute("INSERT INTO cards SELECT * FROM cards WHERE name = 'Goblin King'", []).unwrap();
+        conn.execute(
+            "UPDATE cards SET uuid = ?1, name = ?2, setCode = ?3, number = ?4, side = ?5, isPromo = ?6, \
+             isOnlineOnly = ?7, availability = ?8, language = 'English' WHERE rowid = last_insert_rowid()",
+            (p.uuid, p.name, p.set, p.number, p.side, p.promo, p.online_only, if p.online_only { "mtgo" } else { "paper" }),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cardIdentifiers (uuid, scryfallId, scryfallOracleId, scryfallIllustrationId) VALUES (?1, ?1, ?2, ?3)",
+            (p.uuid, p.oracle, p.illustration),
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    MagicSQLiteRetrievalSystem::new(Some(path.to_string_lossy().to_string()), None).unwrap()
+}
+
+fn fixture_filters(unique: &str) -> CardSearchFilters {
+    CardSearchFilters::new().with_name("Fixture").with_unique(unique)
+}
+
+async fn ids(system: &MagicSQLiteRetrievalSystem, filters: CardSearchFilters, skip: usize, limit: usize) -> Vec<String> {
+    system
+        .search_cards(filters, Some(skip), Some(limit))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| match c {
+            Card::Magic(m) => m.id,
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn test_unique_modes_offered() {
+    let modes = MagicSQLiteRetrievalSystem::new(None, None).unwrap().unique_modes();
+    let ids: Vec<_> = modes.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["prints", "cards", "art"]);
+}
+
+#[tokio::test]
+async fn test_unique_defaults_to_prints() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    let all = |f: CardSearchFilters| ids(&system, f, 0, 1000);
+
+    let by_default = all(CardSearchFilters::new().with_name("Fixture")).await;
+    assert_eq!(by_default.len(), 4 + 2 + 1 + 150);
+    assert_eq!(all(fixture_filters("prints")).await, by_default);
+    assert_eq!(all(fixture_filters("")).await, by_default);
+}
+
+#[tokio::test]
+async fn test_unique_cards_one_per_card_preferring_the_best_printing() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    let cards = ids(&system, fixture_filters("cards"), 0, 1000).await;
+    // Sorted by name: Ajani, Dual, Jace, Many. Ajani's newest printing is BBB, and Jace's best
+    // is the newest paper non-promo one (not the newer promo or digital-only printing).
+    // Dual is reported by its front face, and Many by its newest set.
+    assert_eq!(cards, ["a2", "d1", "j2", "m149"]);
+}
+
+#[tokio::test]
+async fn test_unique_art_one_per_artwork() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    let art = ids(&system, fixture_filters("art"), 0, 1000).await;
+    // Jace's art 1 was printed twice (newest wins); its other two arts have one printing each.
+    // Dual's faces have different art but it is one printing, keyed on its front face.
+    assert_eq!(art, ["a2", "a1", "d1", "j2", "j3", "j4", "m149"]);
+}
+
+#[tokio::test]
+async fn test_unique_representative_is_chosen_among_the_matching_printings() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    for (set, expected) in [("AAA", "j1"), ("CCC", "j3"), ("DDD", "j4")] {
+        let filters = CardSearchFilters::new().with_name("Fixture Jace").with_set_code(set).with_unique("cards");
+        assert_eq!(ids(&system, filters, 0, 10).await, [expected], "set {set}");
+    }
+}
+
+#[tokio::test]
+async fn test_unique_paging_has_no_gaps_or_duplicates() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    for unique in ["cards", "art"] {
+        for sort in [SortField::Name, SortField::SetCode] {
+            for order in [SortOrder::Asc, SortOrder::Desc] {
+                let filters = || fixture_filters(unique).with_sort_by(sort.clone()).with_sort_order(order.clone());
+                let whole = ids(&system, filters(), 0, 1000).await;
+                let mut paged = vec![];
+                for page in 0..whole.len() + 1 {
+                    paged.extend(ids(&system, filters(), page * 2, 2).await);
+                }
+                assert_eq!(paged, whole, "{unique} {sort:?} {order:?}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_unique_sorting_by_other_fields_orders_the_representatives() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    let sets = |cards: Vec<Card>| -> Vec<String> {
+        cards.into_iter().map(|c| match c { Card::Magic(m) => m.set_code, _ => unreachable!() }).collect()
+    };
+    let asc = system
+        .search_cards(fixture_filters("cards").with_sort_by(SortField::SetCode), None, Some(10))
+        .await
+        .unwrap();
+    // Dual (AAA), Jace and Ajani (BBB), then Many's newest set.
+    assert_eq!(sets(asc), ["AAA", "BBB", "BBB", "M149"]);
+    let desc = system
+        .search_cards(fixture_filters("cards").with_sort_by(SortField::SetCode).with_sort_order(SortOrder::Desc), None, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(sets(desc), ["M149", "BBB", "BBB", "AAA"]);
+}
+
+#[tokio::test]
+async fn test_unique_survives_a_card_with_more_printings_than_the_first_window() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    // "Fixture Many" alone is 150 printings, more than a first window covers.
+    let filters = CardSearchFilters::new().with_name("Fixture Many").with_unique("cards");
+    assert_eq!(ids(&system, filters, 0, 1).await, ["m149"]);
+}
+
+#[tokio::test]
+async fn test_unique_rejects_unknown_mode() {
+    let dir = TempDir::new().unwrap();
+    let system = unique_fixture(&dir);
+    let err = system.search_cards(fixture_filters("bogus"), None, Some(1)).await.unwrap_err();
+    assert!(err.to_string().contains("Unsupported unique mode 'bogus'"), "{err}");
+    assert!(err.to_string().contains("prints, cards, art"), "{err}");
+}
+
+#[tokio::test]
+async fn test_unique_tolerates_a_database_without_ranking_columns() {
+    // The stock test database has no `sets.releaseDate`, and no printing has identifiers.
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let cards = system
+        .search_cards(CardSearchFilters::new().with_name("Goblin King").with_unique("cards"), None, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 1);
+}
