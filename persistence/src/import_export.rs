@@ -314,7 +314,7 @@ mod tests {
         // 3 rows: M13/39 gets a normal row (qty 2) + a foil row (qty 1);
         // ISD/173 gets only a foil row (qty 4) since its normal qty is 0.
         let card_count = s
-            .get_cards_in_collection_count(new_collection.clone(), &[])
+            .get_cards_in_collection_count(new_collection.clone(), &[], None)
             .await
             .unwrap();
         assert_eq!(card_count, 3);

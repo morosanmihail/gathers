@@ -33,6 +33,12 @@ pub struct CollectionCardsParams {
     pub provider: Option<String>,
     /// Filter to any of these providers (ignored if `provider` is set).
     pub providers: Vec<String>,
+    /// Hides rows from plugins that aren't currently enabled. `Some(list)`
+    /// keeps only plugin rows (`plugin-*` providers) whose provider is in
+    /// `list` — pass the enabled plugins' providers, so an empty list hides
+    /// every plugin row. `None` applies no such restriction. Non-plugin
+    /// rows are never affected.
+    pub enabled_plugin_providers: Option<Vec<String>>,
 }
 
 impl CollectionCardsParams {
@@ -44,6 +50,7 @@ impl CollectionCardsParams {
             sort_order: None,
             provider: None,
             providers: vec![],
+            enabled_plugin_providers: None,
         }
     }
 }
@@ -82,6 +89,7 @@ pub trait PersistenceSystemTrait {
         &self,
         collection_id: CollectionID,
         providers: &[String],
+        enabled_plugin_providers: Option<&[String]>,
     ) -> impl std::future::Future<Output = eyre::Result<usize>>;
 
     fn add_card_to_collection(

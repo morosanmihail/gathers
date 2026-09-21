@@ -77,24 +77,28 @@ pub(super) fn get_cards_count(
     conn: &Connection,
     collection_id: &CollectionID,
     providers: &[String],
+    enabled_plugin_providers: Option<&[String]>,
 ) -> eyre::Result<usize> {
-    let count: usize = if providers.is_empty() {
-        let mut stmt =
-            conn.prepare("SELECT COUNT(*) FROM cards WHERE collection = ?1")?;
-        stmt.query_row(params![collection_id], |r| r.get::<_, u32>(0))? as usize
-    } else {
+    let mut conditions = vec!["collection = ?1".to_string()];
+    let mut query_params: Vec<String> = vec![collection_id.clone()];
+
+    if !providers.is_empty() {
         let placeholders: Vec<String> =
             (2..=providers.len() + 1).map(|i| format!("?{i}")).collect();
-        let query = format!(
-            "SELECT COUNT(*) FROM cards WHERE collection = ?1 AND provider IN ({})",
-            placeholders.join(", ")
-        );
-        let mut query_params: Vec<String> = vec![collection_id.clone()];
+        conditions.push(format!("provider IN ({})", placeholders.join(", ")));
         query_params.extend_from_slice(providers);
-        let mut stmt = conn.prepare(&query)?;
-        stmt.query_row(rusqlite::params_from_iter(query_params.iter()), |r| {
-            r.get::<_, u32>(0)
-        })? as usize
-    };
+    }
+    if let Some((condition, scope_params)) =
+        super::cards::plugin_scope_condition(enabled_plugin_providers, query_params.len() + 1)
+    {
+        conditions.push(condition);
+        query_params.extend(scope_params);
+    }
+
+    let query = format!("SELECT COUNT(*) FROM cards WHERE {}", conditions.join(" AND "));
+    let mut stmt = conn.prepare(&query)?;
+    let count = stmt.query_row(rusqlite::params_from_iter(query_params.iter()), |r| {
+        r.get::<_, u32>(0)
+    })? as usize;
     Ok(count)
 }

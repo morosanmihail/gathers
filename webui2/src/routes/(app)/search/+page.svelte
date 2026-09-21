@@ -7,7 +7,7 @@
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, providerFromActiveSystem, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { defaultFilters } from '$lib/types';
+	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
 
 	let filters = $state(defaultFilters());
@@ -22,6 +22,7 @@
 	let appliedQS = $state('');
 
 	let addTarget = $state<AnyCard | null>(null);
+	let addFinish = $state('');
 	let addCollection = $state('');
 	let addPrice = $state('');
 	let toast = $state('');
@@ -182,9 +183,10 @@
 		}
 	}
 
-	function promptAdd(card: AnyCard | CollectionCard) {
+	function promptAdd(card: AnyCard | CollectionCard, finish = '') {
 		if (!app.collectionsEnabled) return;
 		addTarget = card as AnyCard;
+		addFinish = finish;
 		addPrice = '';
 	}
 
@@ -194,9 +196,9 @@
 		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
 		try {
 			await app.withOp(`Adding ${addTarget.name}`, () =>
-				addCardToCollection(addCollection, addTarget!.id, '', 1, purchasePrice, providerFromActiveSystem(activeSystem))
+				addCardToCollection(addCollection, addTarget!.id, addFinish, 1, purchasePrice, providerFromActiveSystem(activeSystem))
 			);
-			toast = `Added "${addTarget.name}" to ${addCollection}`;
+			toast = `Added "${addTarget.name}"${addFinish ? ` (${finishLabel(addFinish)})` : ''} to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);
 		} catch (e) {
 			toast = `Error: ${e}`;
@@ -270,7 +272,8 @@
 					]}
 					keyFn={(c) => c.id}
 					{prices}
-					onAdd={app.collectionsEnabled ? promptAdd : undefined}
+					onAdd={app.collectionsEnabled ? (c) => promptAdd(c) : undefined}
+					onAddFinish={app.collectionsEnabled ? promptAdd : undefined}
 					onclick={(c) => detailCard = c as AnyCard}
 					{total}
 					{page}
@@ -287,7 +290,7 @@
 	<div class="confirm-overlay" role="dialog" aria-modal="true">
 		<div class="confirm-box">
 			<h4>Add to collection</h4>
-			<p>Add <strong>{addTarget.name}</strong> to:</p>
+			<p>Add <strong>{addTarget.name}</strong>{addFinish ? ` (${finishLabel(addFinish)})` : ''} to:</p>
 			{#if app.collections.length > 0}
 				<select class="input" bind:value={addCollection} style="margin-bottom: 10px;">
 					{#each app.collections as col}

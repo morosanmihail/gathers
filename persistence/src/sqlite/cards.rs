@@ -80,6 +80,33 @@ RETURNING uuid, finish, collection, quantity, want_quantity, timeadded, provider
     Ok(result)
 }
 
+/// SQL condition (and its bound params) hiding rows whose provider is a
+/// plugin that isn't in `enabled`; see
+/// `CollectionCardsParams::enabled_plugin_providers`. Compared
+/// case-insensitively, since rows stored before providers were lowercased
+/// can still carry the plugin's configured casing. `first_param` is the
+/// index of the first `?N` placeholder this may use.
+pub(super) fn plugin_scope_condition(
+    enabled: Option<&[String]>,
+    first_param: usize,
+) -> Option<(String, Vec<String>)> {
+    const IS_PLUGIN: &str = "substr(lower(provider), 1, 7) = 'plugin-'";
+    let enabled = enabled?;
+    if enabled.is_empty() {
+        return Some((format!("NOT ({IS_PLUGIN})"), vec![]));
+    }
+    let placeholders: Vec<String> = (0..enabled.len())
+        .map(|j| format!("?{}", first_param + j))
+        .collect();
+    Some((
+        format!(
+            "(NOT ({IS_PLUGIN}) OR lower(provider) IN ({}))",
+            placeholders.join(", ")
+        ),
+        enabled.iter().map(|p| p.to_lowercase()).collect(),
+    ))
+}
+
 pub(super) fn get_paginated(
     conn: &Connection,
     collection_id: &CollectionID,
@@ -103,6 +130,14 @@ pub(super) fn get_paginated(
         conditions.push(format!("provider IN ({})", placeholders.join(", ")));
         query_params.extend(params.providers.clone());
         i += params.providers.len();
+    }
+
+    if let Some((condition, scope_params)) =
+        plugin_scope_condition(params.enabled_plugin_providers.as_deref(), i)
+    {
+        conditions.push(condition);
+        i += scope_params.len();
+        query_params.extend(scope_params);
     }
 
     // Sorts (and paginates) over individual (uuid, finish) rows, not

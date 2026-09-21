@@ -34,6 +34,18 @@ struct SearchRequest {
     limit: Option<usize>,
 }
 
+/// Clones the named plugin's client out of the shared state so the global
+/// lock is released before any network call to it. Holding the lock across
+/// the request would make one dead or slow plugin (up to the plugin request
+/// timeout) block every other API call, not just that plugin's.
+async fn plugin_handle(
+    state: &GathersState,
+    name: &str,
+) -> Result<retrieval::PluginRetrievalSystem, ApiError> {
+    let ret = state.0.lock().await;
+    ret.require_plugin(name).cloned()
+}
+
 pub fn plugin_routes() -> ApiRouter<GathersState> {
     async fn list_plugins(State(state): State<GathersState>) -> Json<Vec<PluginSummary>> {
         let ret = state.0.lock().await;
@@ -53,8 +65,7 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
         Path(name): Path<String>,
         Json(body): Json<SearchRequest>,
     ) -> Result<Json<Vec<PluginCard>>, ApiError> {
-        let ret = state.0.lock().await;
-        let plugin = ret.require_plugin(&name)?;
+        let plugin = plugin_handle(&state, &name).await?;
         plugin
             .search(body.filters, body.skip, body.limit)
             .await
@@ -74,8 +85,7 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
         Path(name): Path<String>,
         Json(ids): Json<Vec<String>>,
     ) -> Result<Json<HashMap<String, PluginCard>>, ApiError> {
-        let ret = state.0.lock().await;
-        let plugin = ret.require_plugin(&name)?;
+        let plugin = plugin_handle(&state, &name).await?;
         plugin.cards_by_ids(ids).await.map(Json).map_err(|e| {
             (
                 StatusCode::BAD_GATEWAY,
@@ -97,8 +107,7 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
         if demo_mode() {
             return Err(demo_err());
         }
-        let ret = state.0.lock().await;
-        let plugin = ret.require_plugin(&name)?;
+        let plugin = plugin_handle(&state, &name).await?;
         match plugin.update().await {
             Ok(true) => Ok(Json("Update started".to_string())),
             Ok(false) => Ok(Json("Plugin did not start an update".to_string())),

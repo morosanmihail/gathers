@@ -137,6 +137,15 @@ async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String
     .collect()
 }
 
+/// Providers of the plugins that are currently enabled. `RetrievalState::plugins`
+/// only ever holds enabled plugins, so any `plugin-*` collection row whose
+/// provider isn't in this list belongs to a disabled (or since-removed)
+/// plugin. Pass it to the collection queries so those rows are skipped
+/// instead of showing up as blank entries that can't be hydrated.
+async fn enabled_plugin_providers(state: &GathersState) -> Vec<String> {
+    state.0.lock().await.plugins.keys().map(|name| plugin_provider(name)).collect()
+}
+
 async fn clone_plugins_by_name(state: &GathersState) -> HashMap<String, retrieval::PluginRetrievalSystem> {
     state.0.lock().await.plugins.clone()
 }
@@ -933,6 +942,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 .as_deref()
                 .map(|s| s.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
+            enabled_plugin_providers: Some(enabled_plugin_providers(&state).await),
         };
         let cards = state
             .1
@@ -973,6 +983,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Query(query): Query<CollectionCardsQuery>,
     ) -> Result<Json<usize>, ApiError> {
+        let enabled_plugins = enabled_plugin_providers(&state).await;
         let storage = &mut state.1.lock().await.storage;
         let providers: Vec<String> = if let Some(p) = query.provider {
             vec![p]
@@ -983,7 +994,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 .unwrap_or_default()
         };
 
-        match storage.get_cards_in_collection_count(collection_id, &providers).await {
+        match storage.get_cards_in_collection_count(collection_id, &providers, Some(&enabled_plugins)).await {
             Ok(count) => Ok(Json(count)),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1273,6 +1284,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             providers: query.providers.as_deref()
                 .map(|s| s.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
+            enabled_plugin_providers: Some(enabled_plugin_providers(&state).await),
         };
 
         let collection_cards = state
@@ -1348,6 +1360,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             providers: query.providers.as_deref()
                 .map(|s| s.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
+            enabled_plugin_providers: Some(enabled_plugin_providers(&state).await),
         };
 
         let collection_cards = state
@@ -1410,6 +1423,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
     ) -> Result<Json<CollectionValueBreakdown>, ApiError> {
         let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
+        let enabled_plugins = enabled_plugin_providers(&state).await;
 
         let storage_guard = state.1.lock().await;
 
@@ -1424,6 +1438,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     sort_order: None,
                     provider: None,
                     providers: vec![],
+                    enabled_plugin_providers: Some(enabled_plugins),
                 },
             )
             .await
@@ -1643,6 +1658,7 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                 )
             })?;
 
+        let enabled_plugins = enabled_plugin_providers(&state).await;
         let collection_params = CollectionCardsParams {
             offset: query.offset,
             limit: query.limit.min(1000),
@@ -1653,6 +1669,7 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                 .as_deref()
                 .map(|s| s.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
+            enabled_plugin_providers: Some(enabled_plugins.clone()),
         };
 
         let entries = state
@@ -1684,7 +1701,7 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .get_cards_in_collection_count(collection_id.clone(), &providers)
+            .get_cards_in_collection_count(collection_id.clone(), &providers, Some(&enabled_plugins))
             .await
             .map_err(|e| {
                 (

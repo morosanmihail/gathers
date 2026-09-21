@@ -79,9 +79,10 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         &self,
         collection_id: CollectionID,
         providers: &[String],
+        enabled_plugin_providers: Option<&[String]>,
     ) -> eyre::Result<usize> {
         let conn = self.connection.lock().await;
-        collections::get_cards_count(&conn, &collection_id, providers)
+        collections::get_cards_count(&conn, &collection_id, providers, enabled_plugin_providers)
     }
 
     async fn add_card_to_collection(

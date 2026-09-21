@@ -9,7 +9,7 @@ async fn test_collection_sort_by_quantity_asc() {
     p.add_card_to_collection(&col, &"card_c".to_string(), "", 3, OLD_TIME, "").await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
-        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Asc), provider: None, providers: vec![],
+        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Asc), provider: None, providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards[0].quantity, 1);
     assert_eq!(cards[1].quantity, 3);
@@ -25,7 +25,7 @@ async fn test_collection_sort_by_quantity_desc() {
     p.add_card_to_collection(&col, &"card_c".to_string(), "", 3, OLD_TIME, "").await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
-        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Desc), provider: None, providers: vec![],
+        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Desc), provider: None, providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards[0].quantity, 5);
     assert_eq!(cards[1].quantity, 3);
@@ -48,7 +48,7 @@ async fn test_collection_sort_by_quantity_desc_applies_per_finish_row() {
     p.add_card_to_collection(&col, &"card_c".to_string(), "foil", 7, OLD_TIME, "").await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
-        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Desc), provider: None, providers: vec![],
+        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Desc), provider: None, providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     let foil_quantities: Vec<i32> = cards.iter().filter(|c| c.finish == "foil").map(|c| c.quantity).collect();
     assert_eq!(foil_quantities, vec![10, 7, 2]);
@@ -63,7 +63,7 @@ async fn test_collection_sort_by_provider() {
     p.add_card_to_collection(&col, &"m_card".to_string(), "", 1, OLD_TIME, "MProvider").await.unwrap();
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
-        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Provider), sort_order: Some(SortOrder::Asc), provider: None, providers: vec![],
+        offset: 0, limit: 10, sort_by: Some(CollectionSortField::Provider), sort_order: Some(SortOrder::Asc), provider: None, providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards[0].provider, "AProvider");
     assert_eq!(cards[1].provider, "MProvider");
@@ -82,7 +82,7 @@ async fn test_collection_filter_by_provider() {
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10, sort_by: None, sort_order: None,
-        provider: Some("MagicSQLite".to_string()), providers: vec![],
+        provider: Some("MagicSQLite".to_string()), providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards.len(), 2);
     assert!(cards.iter().all(|c| c.provider == "MagicSQLite"));
@@ -99,7 +99,7 @@ async fn test_collection_filter_by_providers_multi() {
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10, sort_by: None, sort_order: None,
         provider: None,
-        providers: vec!["MagicSQLite".to_string(), "RiftboundSQLite".to_string()],
+        providers: vec!["MagicSQLite".to_string(), "RiftboundSQLite".to_string()], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards.len(), 2);
     assert!(cards.iter().any(|c| c.uuid == "mtg1"));
@@ -117,7 +117,7 @@ async fn test_collection_filter_by_providers_single_entry() {
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10, sort_by: None, sort_order: None,
         provider: None,
-        providers: vec!["RiftboundSQLite".to_string()],
+        providers: vec!["RiftboundSQLite".to_string()], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards.len(), 1);
     assert_eq!(cards[0].uuid, "rb1");
@@ -133,7 +133,7 @@ async fn test_collection_filter_provider_takes_precedence_over_providers() {
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10, sort_by: None, sort_order: None,
         provider: Some("MagicSQLite".to_string()),
-        providers: vec!["RiftboundSQLite".to_string()],
+        providers: vec!["RiftboundSQLite".to_string()], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards.len(), 1);
     assert_eq!(cards[0].uuid, "mtg1");
@@ -147,7 +147,7 @@ async fn test_collection_filter_by_provider_no_match() {
 
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10, sort_by: None, sort_order: None,
-        provider: Some("PokemonSQLite".to_string()), providers: vec![],
+        provider: Some("PokemonSQLite".to_string()), providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert!(cards.is_empty());
 }
@@ -163,7 +163,7 @@ async fn test_collection_filter_and_sort_combined() {
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams {
         offset: 0, limit: 10,
         sort_by: Some(CollectionSortField::Quantity), sort_order: Some(SortOrder::Asc),
-        provider: Some("MagicSQLite".to_string()), providers: vec![],
+        provider: Some("MagicSQLite".to_string()), providers: vec![], enabled_plugin_providers: None,
     }).await.unwrap();
     assert_eq!(cards.len(), 2);
     assert_eq!(cards[0].uuid, "mtg_low");

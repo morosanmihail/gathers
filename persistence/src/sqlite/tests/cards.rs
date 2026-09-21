@@ -167,16 +167,16 @@ async fn test_get_cards_count_with_providers_filter() {
     p.add_card_to_collection(&col, &"mtg2".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
 
-    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string()]).await.unwrap();
+    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string()], None).await.unwrap();
     assert_eq!(count, 2);
 
-    let count = p.get_cards_in_collection_count(col.clone(), &["RiftboundSQLite".to_string()]).await.unwrap();
+    let count = p.get_cards_in_collection_count(col.clone(), &["RiftboundSQLite".to_string()], None).await.unwrap();
     assert_eq!(count, 1);
 
-    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string(), "RiftboundSQLite".to_string()]).await.unwrap();
+    let count = p.get_cards_in_collection_count(col.clone(), &["MagicSQLite".to_string(), "RiftboundSQLite".to_string()], None).await.unwrap();
     assert_eq!(count, 3);
 
-    let count = p.get_cards_in_collection_count(col.clone(), &["Unknown".to_string()]).await.unwrap();
+    let count = p.get_cards_in_collection_count(col.clone(), &["Unknown".to_string()], None).await.unwrap();
     assert_eq!(count, 0);
 }
 
@@ -272,6 +272,66 @@ async fn test_get_cards_count_no_provider_filter() {
     p.add_card_to_collection(&col, &"card1".to_string(), "", 1, OLD_TIME, "A").await.unwrap();
     p.add_card_to_collection(&col, &"card2".to_string(), "", 1, OLD_TIME, "B").await.unwrap();
 
-    let count = p.get_cards_in_collection_count(col.clone(), &[]).await.unwrap();
+    let count = p.get_cards_in_collection_count(col.clone(), &[], None).await.unwrap();
     assert_eq!(count, 2);
+}
+
+// ── hiding rows from disabled plugins ────────────────────────────────────────
+
+async fn plugin_scope_fixture() -> (SQLitePersistenceSystem, String) {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
+    p.add_card_to_collection(&col, &"book1".to_string(), "", 1, OLD_TIME, "plugin-books").await.unwrap();
+    p.add_card_to_collection(&col, &"comic1".to_string(), "", 1, OLD_TIME, "plugin-comics").await.unwrap();
+    // A row stored before providers were lowercased.
+    p.add_card_to_collection(&col, &"book2".to_string(), "", 1, OLD_TIME, "plugin-Books").await.unwrap();
+    (p, col)
+}
+
+async fn uuids_with_scope(p: &SQLitePersistenceSystem, col: &String, scope: Option<Vec<String>>) -> Vec<String> {
+    let mut params = CollectionCardsParams::new(0, 100);
+    params.enabled_plugin_providers = scope;
+    let mut uuids: Vec<String> = p.get_cards_in_collection_paginated(col, params).await.unwrap()
+        .into_iter().map(|c| c.uuid).collect();
+    uuids.sort();
+    uuids
+}
+
+#[tokio::test]
+async fn test_plugin_scope_none_applies_no_restriction() {
+    let (p, col) = plugin_scope_fixture().await;
+    assert_eq!(uuids_with_scope(&p, &col, None).await.len(), 4);
+    assert_eq!(p.get_cards_in_collection_count(col, &[], None).await.unwrap(), 4);
+}
+
+#[tokio::test]
+async fn test_plugin_scope_empty_hides_every_plugin_row() {
+    let (p, col) = plugin_scope_fixture().await;
+    assert_eq!(uuids_with_scope(&p, &col, Some(vec![])).await, vec!["mtg1"]);
+    assert_eq!(p.get_cards_in_collection_count(col, &[], Some(&[])).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_plugin_scope_keeps_only_enabled_plugins() {
+    let (p, col) = plugin_scope_fixture().await;
+    let enabled = vec!["plugin-books".to_string()];
+    // Matches case-insensitively, so the legacy "plugin-Books" row stays too.
+    assert_eq!(uuids_with_scope(&p, &col, Some(enabled.clone())).await, vec!["book1", "book2", "mtg1"]);
+    assert_eq!(p.get_cards_in_collection_count(col, &[], Some(&enabled)).await.unwrap(), 3);
+}
+
+#[tokio::test]
+async fn test_plugin_scope_combines_with_provider_filter() {
+    let (p, col) = plugin_scope_fixture().await;
+    let mut params = CollectionCardsParams::new(0, 100);
+    params.provider = Some("plugin-comics".to_string());
+    params.enabled_plugin_providers = Some(vec!["plugin-books".to_string()]);
+    assert!(p.get_cards_in_collection_paginated(&col, params).await.unwrap().is_empty());
+
+    let count = p
+        .get_cards_in_collection_count(col, &["plugin-comics".to_string()], Some(&["plugin-books".to_string()]))
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
 }

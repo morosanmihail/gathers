@@ -42,6 +42,16 @@ const cache = ttlCache(5 * 60 * 1000);
 // Long-lived card detail cache (cards don't change)
 const cardDetailCache: Map<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = new Map();
 
+// Plugin providers that just failed a bulk lookup (disabled, not running,
+// timing out), keyed by provider -> retry-after timestamp. While cooling down
+// we skip the request entirely, so every page/filter change doesn't re-pay
+// the failure (or timeout) for cards that can't be hydrated anyway.
+const PLUGIN_RETRY_COOLDOWN_MS = 30_000;
+const pluginCooldownUntil: Map<string, number> = new Map();
+
+// Concurrent lookups for the same provider + ids share one request.
+const inflightDetails: Map<string, Promise<void>> = new Map();
+
 // Per-card price cache keyed by `provider:id` — prices change rarely within a session
 const priceCache: Map<string, CardPrices> = new Map();
 
@@ -173,39 +183,15 @@ async function fetchCardDetails(
 	provider: string
 ): Promise<Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard>> {
 	const missing = ids.filter(id => !cardDetailCache.has(`${provider}:${id}`));
-	if (missing.length > 0) {
-		try {
-			if (provider.startsWith('plugin-')) {
-				const name = provider.slice('plugin-'.length);
-				const raw = await fetchJSON<Record<string, PluginCardWire>>(
-					`/api/plugins/${encodeURIComponent(name)}/cards/by-ids`,
-					{
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(missing)
-					}
-				);
-				for (const [id, wire] of Object.entries(raw)) {
-					cardDetailCache.set(`${provider}:${id}`, mapPluginCard(name, wire));
-				}
-			} else {
-				const endpoint = provider === 'RiftboundSQLite'
-					? '/api/riftbound/cards'
-					: provider === 'PokemonSQLite'
-					? '/api/pokemon/cards'
-					: '/api/mtg/cards';
-				// Build ?ids=x&ids=y query
-				const params = missing.map(id => `ids=${encodeURIComponent(id)}`).join('&');
-				const results = await fetchJSON<Record<string, MtgCard | RiftboundCard | PokemonCard>>(
-					`${endpoint}?${params}`
-				);
-				for (const [id, detail] of Object.entries(results)) {
-					cardDetailCache.set(`${provider}:${id}`, detail);
-				}
-			}
-		} catch (err) {
-			console.error(`[gathers] fetchCardDetails failed for provider=${provider}:`, err);
+	const coolingDown = provider.startsWith('plugin-') && (pluginCooldownUntil.get(provider) ?? 0) > Date.now();
+	if (missing.length > 0 && !coolingDown) {
+		const key = `${provider}|${[...missing].sort().join(',')}`;
+		let pending = inflightDetails.get(key);
+		if (!pending) {
+			pending = loadCardDetails(missing, provider).finally(() => inflightDetails.delete(key));
+			inflightDetails.set(key, pending);
 		}
+		await pending;
 	}
 	const out: Record<string, MtgCard | RiftboundCard | PokemonCard | PluginResultCard> = {};
 	for (const id of ids) {
@@ -213,6 +199,44 @@ async function fetchCardDetails(
 		if (detail) out[id] = detail;
 	}
 	return out;
+}
+
+async function loadCardDetails(missing: string[], provider: string): Promise<void> {
+	try {
+		if (provider.startsWith('plugin-')) {
+			const name = provider.slice('plugin-'.length);
+			const raw = await fetchJSON<Record<string, PluginCardWire>>(
+				`/api/plugins/${encodeURIComponent(name)}/cards/by-ids`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(missing)
+				}
+			);
+			for (const [id, wire] of Object.entries(raw)) {
+				cardDetailCache.set(`${provider}:${id}`, mapPluginCard(name, wire));
+			}
+		} else {
+			const endpoint = provider === 'RiftboundSQLite'
+				? '/api/riftbound/cards'
+				: provider === 'PokemonSQLite'
+				? '/api/pokemon/cards'
+				: '/api/mtg/cards';
+			// Build ?ids=x&ids=y query
+			const params = missing.map(id => `ids=${encodeURIComponent(id)}`).join('&');
+			const results = await fetchJSON<Record<string, MtgCard | RiftboundCard | PokemonCard>>(
+				`${endpoint}?${params}`
+			);
+			for (const [id, detail] of Object.entries(results)) {
+				cardDetailCache.set(`${provider}:${id}`, detail);
+			}
+		}
+	} catch (err) {
+		if (provider.startsWith('plugin-')) {
+			pluginCooldownUntil.set(provider, Date.now() + PLUGIN_RETRY_COOLDOWN_MS);
+		}
+		console.error(`[gathers] fetchCardDetails failed for provider=${provider}:`, err);
+	}
 }
 
 // Enrich entries with card details, batched by provider
