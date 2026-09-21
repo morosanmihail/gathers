@@ -3,7 +3,7 @@ members = ["models", "retrieval", "gathers", "server", "persistence", "benches",
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.7.1"
 edition = "2024"
 
 [workspace.dependencies]

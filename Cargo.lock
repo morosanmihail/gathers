@@ -238,7 +238,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "benches"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "criterion",
  "models",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "dummy-plugin"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "axum",
  "serde",
@@ -678,7 +678,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "e2e"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "eyre",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "gathers"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "eyre",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "mirror"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "axum",
  "eyre",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "enum_dispatch",
  "schemars",
@@ -1595,7 +1595,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "persistence"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "csv",
@@ -1986,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "retrieval"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "bzip2",
  "enum_dispatch",
@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "aide",
  "axum",
