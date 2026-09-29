@@ -1,7 +1,7 @@
 use crate::{CollectionCard, CollectionCardsParams, CollectionSortField};
 use models::CollectionID;
 use models::filters::SortOrder;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 pub(super) fn add_cards(
     conn: &Connection,
@@ -17,7 +17,8 @@ pub(super) fn add_cards(
     // otherwise removing (or un-wanting) a (uuid, finish) that was never
     // added would insert a negative-quantity "ghost" row instead of being a
     // no-op: the ON CONFLICT clamp below only clamps `existing + delta`, and
-    // there's no existing row here for it to clamp against. This can't be
+    // there's no existing row here for it to clamp against. (Sums are also
+    // capped at i32::MAX, the most a row can be read back as.) This can't be
     // done in the VALUES clause itself (e.g. `MAX(?, 0)`) because that
     // expression also becomes `EXCLUDED.quantity`, which the ON CONFLICT
     // branch needs un-clamped to correctly compute `existing + delta`.
@@ -53,8 +54,8 @@ pub(super) fn add_cards(
         "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, timeadded, timeupdated, provider)
 VALUES {}
 ON CONFLICT (uuid, finish, collection) DO UPDATE SET
- quantity = max(cards.quantity + EXCLUDED.quantity, 0),
- want_quantity = max(cards.want_quantity + EXCLUDED.want_quantity, 0),
+ quantity = max(min(cards.quantity + EXCLUDED.quantity, 2147483647), 0),
+ want_quantity = max(min(cards.want_quantity + EXCLUDED.want_quantity, 2147483647), 0),
  timeupdated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 RETURNING uuid, finish, collection, quantity, want_quantity, timeadded, provider",
         placeholders
@@ -72,12 +73,28 @@ RETURNING uuid, finish, collection, quantity, want_quantity, timeadded, provider
                 provider: row.get(6)?,
             })
         })?
-        .flatten()
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     conn.execute("DELETE FROM cards WHERE quantity = 0 AND want_quantity = 0", [])?;
 
     Ok(result)
+}
+
+/// The `(quantity, want_quantity, provider)` of one card+finish row, if the
+/// collection has it.
+pub(super) fn get_row(
+    conn: &Connection,
+    collection_id: &CollectionID,
+    uuid: &str,
+    finish: &str,
+) -> eyre::Result<Option<(i32, i32, String)>> {
+    Ok(conn
+        .query_row(
+            "SELECT quantity, want_quantity, provider FROM cards WHERE collection = ?1 AND uuid = ?2 AND finish = ?3",
+            rusqlite::params![collection_id, uuid, finish],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?)
 }
 
 /// SQL condition (and its bound params) hiding rows whose provider is a
@@ -165,8 +182,9 @@ pub(super) fn get_paginated(
         i,
         i + 1,
     );
-    query_params.push(params.limit.to_string());
-    query_params.push(params.offset.to_string());
+    // SQLite integers are i64; anything larger is a type error, not "all".
+    query_params.push(params.limit.min(i64::MAX as usize).to_string());
+    query_params.push(params.offset.min(i64::MAX as usize).to_string());
 
     let collection_id = collection_id.clone();
     let mut stmt = conn.prepare(&query)?;

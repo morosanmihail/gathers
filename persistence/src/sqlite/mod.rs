@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-use crate::{CollectionCard, CollectionCardsParams, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
+use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, PersistenceError, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -57,8 +57,11 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         name: &CollectionID,
         move_to: Option<CollectionID>,
     ) -> eyre::Result<CollectionID> {
-        let conn = self.connection.lock().await;
-        collections::remove_collection(&conn, name, move_to.as_ref())
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
+        let removed = collections::remove_collection(&tx, name, move_to.as_ref())?;
+        tx.commit()?;
+        Ok(removed)
     }
 
     async fn rename_collection(
@@ -66,13 +69,21 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         old_name: &CollectionID,
         new_name: &CollectionID,
     ) -> eyre::Result<()> {
-        let conn = self.connection.lock().await;
-        collections::rename_collection(&conn, old_name, new_name)
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
+        collections::rename_collection(&tx, old_name, new_name)?;
+        tx.commit()?;
+        Ok(())
     }
 
     async fn list_collections(&self, filter: Option<String>) -> eyre::Result<Vec<CollectionID>> {
         let conn = self.connection.lock().await;
         collections::list_collections(&conn, filter.as_deref())
+    }
+
+    async fn list_collection_info(&self) -> eyre::Result<Vec<CollectionInfo>> {
+        let conn = self.connection.lock().await;
+        collections::list_collection_info(&conn)
     }
 
     async fn get_cards_in_collection_count(
@@ -139,12 +150,13 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         delta: i32,
         provider: &str,
     ) -> eyre::Result<CollectionCard> {
-        let conn = self.connection.lock().await;
+        let mut conn = self.connection.lock().await;
+        let tx = conn.transaction()?;
         let now = chrono::Utc::now().to_rfc3339();
         // Wanting a card doesn't pin down a finish yet — always tracked on
         // the default (`""`) finish row.
         let mut result = cards::add_cards(
-            &conn,
+            &tx,
             collection_id,
             &[CollectionCard {
                 uuid: card_uuid.clone(),
@@ -156,9 +168,11 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 provider: provider.to_string(),
             }],
         )?;
-        result
+        let card = result
             .pop()
-            .ok_or_else(|| eyre::eyre!("No card returned from want-quantity upsert"))
+            .ok_or_else(|| eyre::eyre!("No card returned from want-quantity upsert"))?;
+        tx.commit()?;
+        Ok(card)
     }
 
     async fn move_cards_between_collections(
@@ -168,11 +182,26 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<()> {
         let mut conn = self.connection.lock().await;
         let tx = conn.transaction()?;
+        if collections::list_collections(&tx, None)?
+            .iter()
+            .all(|name| *name != to_collection_id)
+        {
+            return Err(PersistenceError::CollectionNotFound(to_collection_id).into());
+        }
         for c in input_cards {
-            if c.quantity == 0 && c.want_quantity == 0 {
+            if c.collection == to_collection_id {
                 continue;
             }
-            if c.collection == to_collection_id {
+            // Only what the source really holds can move — the request's
+            // numbers are an upper bound, never a source of new cards.
+            let Some((held, held_want, held_provider)) =
+                cards::get_row(&tx, &c.collection, &c.uuid, &c.finish)?
+            else {
+                continue;
+            };
+            let quantity = c.quantity.clamp(0, held);
+            let want_quantity = c.want_quantity.clamp(0, held_want);
+            if quantity == 0 && want_quantity == 0 {
                 continue;
             }
             let source_results = cards::add_cards(
@@ -182,10 +211,10 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     uuid: c.uuid.clone(),
                     finish: c.finish.clone(),
                     collection: c.collection.clone(),
-                    quantity: -c.quantity,
-                    want_quantity: -c.want_quantity,
+                    quantity: -quantity,
+                    want_quantity: -want_quantity,
                     time_added: c.time_added.clone(),
-                    provider: c.provider.clone(),
+                    provider: held_provider.clone(),
                 }],
             )?;
             let src_qty = source_results.first().map(|sc| sc.quantity).unwrap_or(0);
@@ -197,11 +226,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                 &c.finish,
                 src_qty,
             )?;
-            let provider = source_results
-                .first()
-                .filter(|sc| !sc.provider.is_empty())
-                .map(|sc| sc.provider.clone())
-                .unwrap_or_else(|| c.provider.clone());
+            let provider = if held_provider.is_empty() { c.provider.clone() } else { held_provider };
             cards::add_cards(
                 &tx,
                 &to_collection_id,
@@ -209,8 +234,8 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
                     uuid: c.uuid.clone(),
                     finish: c.finish.clone(),
                     collection: to_collection_id.clone(),
-                    quantity: c.quantity,
-                    want_quantity: c.want_quantity,
+                    quantity,
+                    want_quantity,
                     time_added: c.time_added.clone(),
                     provider,
                 }],

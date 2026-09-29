@@ -41,6 +41,10 @@
 		groups.filter(g => app.selectedCards.has(g.id))
 	);
 
+	const removable = $derived(
+		app.collections.find(c => c.id === collection)?.removable ?? true
+	);
+
 	const otherCollections = $derived(
 		app.collections.filter(c => c.id !== collection)
 	);
@@ -271,13 +275,15 @@
 		</button>
 	{/if}
 
-	<!-- Delete collection -->
-	<button class="btn btn-danger" onclick={() => confirmDelete = 'collection'}>
-		<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-			<path d="M2 4h10M5 4V3a1 1 0 011-1h2a1 1 0 011 1v1M11 4l-.9 8.1A1 1 0 019.1 13H4.9a1 1 0 01-1-.9L3 4" stroke="currentColor" stroke-width="1.2" fill="none"/>
-		</svg>
-		Delete collection
-	</button>
+	<!-- Delete collection — not offered for the default collection, which the server won't delete -->
+	{#if removable}
+		<button class="btn btn-danger" onclick={() => confirmDelete = 'collection'}>
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+				<path d="M2 4h10M5 4V3a1 1 0 011-1h2a1 1 0 011 1v1M11 4l-.9 8.1A1 1 0 019.1 13H4.9a1 1 0 01-1-.9L3 4" stroke="currentColor" stroke-width="1.2" fill="none"/>
+			</svg>
+			Delete collection
+		</button>
+	{/if}
 
 	<!-- Purchase history — rightmost -->
 	{#if onHistoryOpen && app.pricingEnabled}

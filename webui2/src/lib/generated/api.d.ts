@@ -159,7 +159,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -178,8 +180,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -231,7 +231,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -250,8 +252,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -413,7 +413,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -432,8 +434,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -595,7 +595,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -614,8 +616,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -667,7 +667,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -686,8 +688,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -715,7 +715,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Collection"][];
+                        "application/json": components["schemas"]["CollectionListEntry"][];
                     };
                 };
             };
@@ -777,7 +777,13 @@ export interface paths {
         put?: never;
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Move the collection's cards (and their purchase history) here instead
+                     *     of deleting them. Empty or omitted deletes them.
+                     */
+                    keepCardsInCollection?: string | null;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1703,7 +1709,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: {
+        get?: never;
+        put?: never;
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -1722,8 +1730,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2020,6 +2026,15 @@ export interface components {
             sort_by?: components["schemas"]["APICollectionSortField"] | null;
             sort_order?: components["schemas"]["APISortOrder"] | null;
         };
+        /** @description An entry of `/api/collection/list`. */
+        CollectionListEntry: {
+            id: string;
+            /**
+             * @description False for the default collection, which can't be deleted (only
+             *     emptied into another collection via `keepCardsInCollection`).
+             */
+            removable: boolean;
+        };
         CollectionPurchaseHistoryEntry: {
             card_name?: string | null;
             card_uuid: string;
@@ -2033,6 +2048,14 @@ export interface components {
             quantity: number;
             recorded_at: string;
             set_code?: string | null;
+        };
+        CollectionRemoveQuery: {
+            /**
+             * @description Move the collection's cards (and their purchase history) here instead
+             *     of deleting them. Empty or omitted deletes them.
+             * @default null
+             */
+            keepCardsInCollection: string | null;
         };
         CollectionRemoveResponse: {
             message: string;
@@ -2255,6 +2278,15 @@ export interface components {
             auto_download_interval_hours: number;
             /** @default true */
             collections_enabled: boolean;
+            /**
+             * @description Browser origins (e.g. `https://cards.example.com`) allowed to call
+             *     this API from another origin. Empty by default: the bundled web UI
+             *     is served from the same origin (behind its proxy), and allowing any
+             *     origin would let every website a user visits read — and, as there's
+             *     no authentication, change — their collections. Also settable as a
+             *     comma-separated list in `GATHERS_CORS_ORIGINS`.
+             */
+            cors_allowed_origins?: string[];
             mtg_db_path?: string | null;
             mtg_prices_path?: string | null;
             /** @default [] */

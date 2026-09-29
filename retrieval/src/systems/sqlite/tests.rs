@@ -1836,3 +1836,18 @@ async fn test_unique_tolerates_a_database_without_ranking_columns() {
         .unwrap();
     assert_eq!(cards.len(), 1);
 }
+
+#[tokio::test]
+async fn test_search_with_extreme_skip_and_limit() {
+    // These used to overflow the paging arithmetic (a panic) or ask for a
+    // multi-terabyte allocation (aborting the whole process).
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    for unique in [None, Some("cards".to_string())] {
+        let filters = CardSearchFilters { unique: unique.clone(), ..Default::default() };
+        let skipped = system.search_cards(filters.clone(), Some(usize::MAX), Some(10)).await.unwrap();
+        assert!(skipped.is_empty(), "unique {unique:?}");
+        let named = CardSearchFilters { name: Some("Goblin King".to_string()), ..filters };
+        let all = system.search_cards(named, None, Some(usize::MAX)).await.unwrap();
+        assert!(!all.is_empty(), "unique {unique:?}");
+    }
+}

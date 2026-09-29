@@ -11,7 +11,8 @@ use serde::Serialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tower::{BoxError, ServiceBuilder};
-use tower_http::cors::CorsLayer;
+use axum::http::HeaderValue;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 
@@ -55,6 +56,34 @@ pub(crate) fn check_unique_mode(
             )
         })
 }
+
+/// Maps a storage error to a response: request problems the persistence layer
+/// reports (`persistence::PersistenceError`) become the matching 4xx, anything
+/// else is a 500 prefixed with `context`.
+pub(crate) fn storage_error(context: &str, e: eyre::Report) -> ApiError {
+    use persistence::PersistenceError as E;
+    let status = match e.downcast_ref::<E>() {
+        Some(E::CollectionNotFound(_)) => StatusCode::NOT_FOUND,
+        Some(E::CollectionExists(_)) => StatusCode::CONFLICT,
+        Some(E::CollectionNotRemovable(_) | E::InvalidInput(_)) => StatusCode::BAD_REQUEST,
+        None => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let error = if status == StatusCode::INTERNAL_SERVER_ERROR {
+        format!("{context}. {e}")
+    } else {
+        e.to_string()
+    };
+    (status, Json(ErrorPayload { error }))
+}
+
+pub(crate) fn bad_request(error: impl Into<String>) -> ApiError {
+    (StatusCode::BAD_REQUEST, Json(ErrorPayload { error: error.into() }))
+}
+
+/// Most results a single search/list page returns; larger `limit`s are
+/// capped to it. Keeps one request from dumping (and holding a connection
+/// for) an entire card database.
+pub(crate) const MAX_PAGE_SIZE: usize = 1000;
 
 pub(crate) fn demo_mode() -> bool {
     std::env::var("DEMO_MODE").is_ok()
@@ -348,6 +377,28 @@ impl RetrievalState {
         })
     }
 
+    /// Marks the database behind `key` (e.g. `Sql`, `PokemonSql-prices`) as
+    /// being updated, so a second update can't start writing the same files
+    /// concurrently. Fails with 409 if one is already running; pair with
+    /// `finish_download`.
+    pub fn start_download(&mut self, key: &str) -> Result<Arc<Mutex<DownloadProgress>>, ApiError> {
+        if self.downloading.contains_key(key) {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(ErrorPayload {
+                    error: format!("An update of {key} is already running"),
+                }),
+            ));
+        }
+        let progress = Arc::new(Mutex::new(DownloadProgress::default()));
+        self.downloading.insert(key.to_string(), progress.clone());
+        Ok(progress)
+    }
+
+    pub fn finish_download(&mut self, key: &str) {
+        self.downloading.remove(key);
+    }
+
     pub fn reload_mtg(&mut self) -> eyre::Result<()> {
         if let Some(system) = self.mtg_system_type {
             self.mtg = Some(Self::new_retrieval(system, self.mtg_db_path.clone(), self.mtg_prices_path.clone())?);
@@ -478,9 +529,62 @@ pub struct ServerConfig {
     storage_db_path: Option<String>,
     #[serde(default)]
     pub plugins: Vec<PluginConfig>,
+    /// Browser origins (e.g. `https://cards.example.com`) allowed to call
+    /// this API from another origin. Empty by default: the bundled web UI
+    /// is served from the same origin (behind its proxy), and allowing any
+    /// origin would let every website a user visits read — and, as there's
+    /// no authentication, change — their collections. Also settable as a
+    /// comma-separated list in `GATHERS_CORS_ORIGINS`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl ServerConfig {
+    /// Rejects settings the server couldn't start with (or that would make
+    /// it misbehave) before they're written to disk.
+    fn validate(&self) -> Result<(), String> {
+        if !(1..=65535).contains(&self.port) {
+            return Err(format!("Port must be between 1 and 65535, got {}", self.port));
+        }
+        if self.system.is_empty() {
+            return Err("At least one system must be enabled".to_string());
+        }
+        if self.system.contains(&Systems::Scryfall) && self.system.contains(&Systems::Sql) {
+            return Err("Only one MTG system (Scryfall or Sql) can be enabled".to_string());
+        }
+        if !(1..=auto_download::MAX_INTERVAL_HOURS).contains(&self.auto_download_interval_hours) {
+            return Err(format!(
+                "Auto-download interval must be between 1 and {} hours",
+                auto_download::MAX_INTERVAL_HOURS
+            ));
+        }
+        let mut names = std::collections::HashSet::new();
+        for plugin in &self.plugins {
+            let name = plugin.name.trim();
+            if name.is_empty() || name != plugin.name {
+                return Err(format!("Invalid plugin name '{}'", plugin.name));
+            }
+            if !names.insert(name.to_lowercase()) {
+                return Err(format!("Duplicate plugin name '{name}'"));
+            }
+            if !(plugin.base_url.starts_with("http://") || plugin.base_url.starts_with("https://")) {
+                return Err(format!(
+                    "Plugin '{name}' base URL must start with http:// or https://"
+                ));
+            }
+        }
+        for origin in &self.cors_allowed_origins {
+            if origin.trim_end_matches('/') != origin
+                || !(origin.starts_with("http://") || origin.starts_with("https://"))
+            {
+                return Err(format!(
+                    "Invalid CORS origin '{origin}' (expected e.g. https://cards.example.com)"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Whether going from `self` to `new` changes anything that is only read
     /// at startup. `pricing_enabled` and `collections_enabled` are applied to
     /// the running server on save; everything else needs a restart.
@@ -612,6 +716,7 @@ async fn main() -> eyre::Result<()> {
             pokemon_prices_path: Some(db_dir.join("pokemon_prices.sqlite").to_string_lossy().into_owned()),
             storage_db_path: Some(db_dir.join("storage.db").to_string_lossy().into_owned()),
             plugins: Vec::new(),
+            cors_allowed_origins: Vec::new(),
         };
         if let Err(e) = std::fs::create_dir_all(&gathers_dir) {
             eprintln!(
@@ -642,6 +747,10 @@ async fn main() -> eyre::Result<()> {
         std::process::exit(1);
     }
     info!(db_dir = %db_dir.display(), "Database directory ready");
+
+    if let Err(e) = config.validate() {
+        warn!(config = %config_path.display(), "Config problem: {e}");
+    }
 
     // CLI args override config for this session
     if !args.system.is_empty() {
@@ -869,7 +978,29 @@ async fn main() -> eyre::Result<()> {
 
     let mut api = openapi_doc();
 
-    let cors = CorsLayer::permissive();
+    let mut allowed_origins = config.cors_allowed_origins.clone();
+    if let Ok(val) = std::env::var("GATHERS_CORS_ORIGINS") {
+        allowed_origins.extend(
+            val.split(',')
+                .map(|o| o.trim().trim_end_matches('/').to_string())
+                .filter(|o| !o.is_empty()),
+        );
+    }
+    let allowed_origins = Arc::new(allowed_origins);
+    let cors = {
+        let origins: Vec<HeaderValue> = allowed_origins
+            .iter()
+            .filter_map(|o| HeaderValue::from_str(o).ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+    };
+    if !allowed_origins.is_empty() {
+        info!(origins = ?allowed_origins, "Cross-origin requests allowed");
+    }
+
     let app = api_router(&mut api)
         .layer(
             ServiceBuilder::new()
@@ -887,6 +1018,8 @@ async fn main() -> eyre::Result<()> {
                 .layer(TraceLayer::new_for_http())
                 .into_inner(),
         )
+        .layer(axum::middleware::from_fn_with_state(retrieval.clone(), feature_gate))
+        .layer(axum::middleware::from_fn_with_state(allowed_origins, reject_cross_site))
         .layer(cors)
         .layer(Extension(api))
         .with_state((retrieval, storage));
@@ -909,6 +1042,114 @@ async fn main() -> eyre::Result<()> {
 
     info!("Restarting");
     Err(reexec().into())
+}
+
+/// The host part of a `Host` header or origin authority, without the port.
+fn host_without_port(authority: &str) -> &str {
+    if let Some(rest) = authority.strip_prefix('[') {
+        // IPv6 literal, e.g. `[::1]:5173`.
+        return rest.split(']').next().unwrap_or(rest);
+    }
+    authority.split(':').next().unwrap_or(authority)
+}
+
+/// Whether a request that changes state may proceed, given its `Origin` /
+/// `Sec-Fetch-Site` headers. There is no authentication, so without this any
+/// website a user visits could submit requests to their server (a plain
+/// form POST or `<img src>` needs no CORS permission) and change or delete
+/// their collections. Browsers always label such requests; non-browser
+/// clients (curl, scripts) send neither header and are unaffected.
+fn is_allowed_origin(
+    method: &axum::http::Method,
+    headers: &axum::http::HeaderMap,
+    allowed: &[String],
+) -> bool {
+    use axum::http::Method;
+    if matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        return true;
+    }
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let origin = header("origin");
+    if origin.is_some_and(|o| allowed.iter().any(|a| a == o)) {
+        return true;
+    }
+    match header("sec-fetch-site") {
+        Some("same-origin" | "none") => return true,
+        Some("cross-site") => return false,
+        // "same-site" (another port or subdomain) or an older browser: fall
+        // back to comparing the origin's host with the one requested.
+        _ => {}
+    }
+    match origin {
+        None => true,
+        Some(origin) => {
+            let origin_host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+            let host = header("host").unwrap_or_default();
+            host_without_port(origin_host).eq_ignore_ascii_case(host_without_port(host))
+        }
+    }
+}
+
+async fn reject_cross_site(
+    State(allowed): State<Arc<Vec<String>>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    if is_allowed_origin(request.method(), request.headers(), &allowed) {
+        next.run(request).await
+    } else {
+        warn!(method = %request.method(), path = %request.uri().path(), "Rejected cross-site request");
+        (
+            StatusCode::FORBIDDEN,
+            Json(ErrorPayload {
+                error: "Cross-site request rejected (add the origin to cors_allowed_origins to allow it)".to_string(),
+            }),
+        )
+            .into_response()
+    }
+}
+
+/// Which setting, if any, has to be on for `path` to be served.
+fn required_feature(path: &str) -> Option<&'static str> {
+    if path.starts_with("/api/collection/") || path.starts_with("/api/share/") {
+        return Some("collections");
+    }
+    let pricing = ["/api/mtg/prices", "/api/pokemon/prices"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+        || path.contains("/purchase_history")
+        || path.ends_with("/value_breakdown");
+    pricing.then_some("pricing")
+}
+
+/// Enforces `collections_enabled` / `pricing_enabled` for the API, not just
+/// the UI: a disabled feature's endpoints answer 403.
+async fn feature_gate(
+    State(retrieval): State<Arc<Mutex<RetrievalState>>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    if let Some(feature) = required_feature(request.uri().path()) {
+        let enabled = {
+            let state = retrieval.lock().await;
+            match feature {
+                "collections" => state.collections_enabled,
+                _ => state.pricing_enabled,
+            }
+        };
+        if !enabled {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ErrorPayload {
+                    error: format!("{} are disabled on this server", if feature == "collections" { "Collections" } else { "Prices" }),
+                }),
+            )
+                .into_response();
+        }
+    }
+    next.run(request).await
 }
 
 /// Fired (with `notify_waiters`, since both the graceful shutdown and its
@@ -969,13 +1210,14 @@ mod restart_needed_tests {
 
     #[test]
     fn startup_only_settings_need_a_restart() {
-        let changes: [fn(&mut ServerConfig); 6] = [
+        let changes: [fn(&mut ServerConfig); 7] = [
             |c| c.port = 1234,
             |c| c.system.push(Systems::Sql),
             |c| c.auto_download_enabled = !c.auto_download_enabled,
             |c| c.auto_download_interval_hours += 1,
             |c| c.mtg_db_path = Some("/elsewhere.db".into()),
             |c| c.plugins.push(PluginConfig { name: "books".into(), base_url: "http://localhost:5236".into(), enabled: true }),
+            |c| c.cors_allowed_origins.push("https://cards.example.com".into()),
         ];
         for change in changes {
             let mut new = config();
@@ -1010,5 +1252,108 @@ mod plugin_name_tests {
         let plugins = HashMap::from([("Books".to_string(), 1), ("books".to_string(), 2)]);
         assert_eq!(find_plugin(&plugins, "books"), Some(&2));
         assert_eq!(find_plugin(&plugins, "Books"), Some(&1));
+    }
+}
+
+#[cfg(test)]
+mod config_validation_tests {
+    use super::*;
+
+    fn config() -> ServerConfig {
+        toml::from_str("system = [\"RiftboundSql\"]\nport = 5234").unwrap()
+    }
+
+    #[test]
+    fn default_config_is_valid() {
+        assert_eq!(config().validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_settings_the_server_cant_start_with() {
+        let changes: [fn(&mut ServerConfig); 8] = [
+            |c| c.port = 0,
+            |c| c.port = 99999,
+            |c| c.system.clear(),
+            |c| c.system = vec![Systems::Scryfall, Systems::Sql],
+            |c| c.auto_download_interval_hours = 0,
+            |c| c.auto_download_interval_hours = u64::MAX,
+            |c| c.plugins = vec![
+                PluginConfig { name: "Books".into(), base_url: "http://a".into(), enabled: true },
+                PluginConfig { name: "books".into(), base_url: "http://b".into(), enabled: true },
+            ],
+            |c| c.cors_allowed_origins.push("cards.example.com".into()),
+        ];
+        for (i, change) in changes.into_iter().enumerate() {
+            let mut c = config();
+            change(&mut c);
+            assert!(c.validate().is_err(), "change #{i} should be rejected");
+        }
+    }
+}
+
+#[cfg(test)]
+mod request_guard_tests {
+    use super::*;
+    use axum::http::{HeaderMap, Method};
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn safe_methods_and_non_browser_clients_pass() {
+        let evil = headers(&[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")]);
+        assert!(is_allowed_origin(&Method::GET, &evil, &[]));
+        assert!(is_allowed_origin(&Method::POST, &HeaderMap::new(), &[]));
+    }
+
+    #[test]
+    fn cross_site_writes_are_rejected_unless_allowed() {
+        let evil = headers(&[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site"), ("host", "gathers.local:5234")]);
+        assert!(!is_allowed_origin(&Method::POST, &evil, &[]));
+        assert!(!is_allowed_origin(&Method::DELETE, &evil, &[]));
+        assert!(is_allowed_origin(&Method::POST, &evil, &["https://evil.example".to_string()]));
+    }
+
+    #[test]
+    fn same_origin_writes_pass() {
+        let ui = headers(&[("origin", "http://localhost:5173"), ("sec-fetch-site", "same-origin"), ("host", "localhost:5173")]);
+        assert!(is_allowed_origin(&Method::POST, &ui, &[]));
+        // A proxy that drops the port from Host (nginx's `$host`), in a
+        // browser that doesn't send Sec-Fetch-Site.
+        let proxied = headers(&[("origin", "http://nas:3001"), ("host", "nas")]);
+        assert!(is_allowed_origin(&Method::POST, &proxied, &[]));
+        let other_host = headers(&[("origin", "http://evil.example"), ("host", "nas")]);
+        assert!(!is_allowed_origin(&Method::POST, &other_host, &[]));
+        let ipv6 = headers(&[("origin", "http://[::1]:5173"), ("host", "[::1]:5234")]);
+        assert!(is_allowed_origin(&Method::POST, &ipv6, &[]));
+    }
+
+    #[test]
+    fn features_gate_their_endpoints() {
+        assert_eq!(required_feature("/api/collection/list"), Some("collections"));
+        assert_eq!(required_feature("/api/share/abc"), Some("collections"));
+        assert_eq!(required_feature("/api/mtg/prices"), Some("pricing"));
+        assert_eq!(required_feature("/api/pokemon/prices/update"), Some("pricing"));
+        assert_eq!(required_feature("/api/mtg/cards/search"), None);
+        assert_eq!(required_feature("/api/system"), None);
+        assert_eq!(required_feature("/api/settings"), None);
+    }
+
+    #[test]
+    fn storage_errors_map_to_status_codes() {
+        use persistence::PersistenceError as E;
+        let status = |e: E| storage_error("ctx", e.into()).0;
+        assert_eq!(status(E::CollectionNotFound("x".into())), StatusCode::NOT_FOUND);
+        assert_eq!(status(E::CollectionExists("x".into())), StatusCode::CONFLICT);
+        assert_eq!(status(E::CollectionNotRemovable("x".into())), StatusCode::BAD_REQUEST);
+        assert_eq!(status(E::InvalidInput("x".into())), StatusCode::BAD_REQUEST);
+        let (status, Json(body)) = storage_error("Failed to do it", eyre::eyre!("disk on fire"));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body.error, "Failed to do it. disk on fire");
     }
 }

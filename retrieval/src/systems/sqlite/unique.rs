@@ -208,7 +208,7 @@ impl UniqueQuery<'_> {
             if done {
                 return Ok(collapsed.into_iter().skip(skip).take(limit).collect());
             }
-            fetch *= 2;
+            fetch = fetch.saturating_mul(2).min(i64::MAX as usize);
         }
     }
 

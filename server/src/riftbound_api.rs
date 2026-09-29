@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -9,10 +8,9 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::Card;
-use retrieval::{DownloadProgress, RetrievalSystemTrait};
+use retrieval::RetrievalSystemTrait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::{
@@ -40,11 +38,11 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
         Query(query): Query<RiftboundSearchQuery>,
         Json(input): Json<APICardSearchFilters>,
     ) -> Result<Json<Vec<APIRiftboundCard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_riftbound()?;
-        crate::check_unique_mode(ret, input.unique.as_deref())?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_riftbound()?.clone();
+        crate::check_unique_mode(&ret, input.unique.as_deref())?;
 
-        ret.search_cards(input.into(), query.skip.into(), query.limit.into())
+        ret.search_cards(input.into(), query.skip.into(), query.limit.min(crate::MAX_PAGE_SIZE).into())
             .await
             .map_err(|e| {
                 (
@@ -77,8 +75,8 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Query(query): Query<RiftboundRetrieveQuery>,
     ) -> Result<Json<HashMap<String, APIRiftboundCard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_riftbound()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_riftbound()?.clone();
 
         ret.get_cards_by_ids(query.ids)
             .await
@@ -104,8 +102,8 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
     async fn random_card(
         State(state): State<GathersState>,
     ) -> Result<Json<APIRiftboundCard>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_riftbound()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_riftbound()?.clone();
 
         let card = ret.get_random_card().await.map_err(|e| {
             (
@@ -127,8 +125,8 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
     }
 
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<String>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_riftbound()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_riftbound()?.clone();
 
         ret.get_sets()
             .await
@@ -149,18 +147,16 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let riftbound = {
-            let ret = state.0.lock().await;
-            ret.require_riftbound()?.clone()
+            let mut ret = state.0.lock().await;
+            let system = ret.require_riftbound()?.clone();
+            ret.start_download("RiftboundSql")?;
+            system
         };
         let retrieval = state.0.clone();
-        retrieval.lock().await.downloading.insert(
-            "RiftboundSql".to_string(),
-            Arc::new(Mutex::new(DownloadProgress::default())),
-        );
         tokio::spawn(async move {
             let result = riftbound.update_backend().await;
             let mut ret = retrieval.lock().await;
-            ret.downloading.remove("RiftboundSql");
+            ret.finish_download("RiftboundSql");
             match result.and_then(|_| ret.reload_riftbound()) {
                 Ok(()) => info!("Riftbound DB updated"),
                 Err(e) => error!(error = %e, "Failed to update Riftbound DB"),
@@ -174,5 +170,5 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_riftbound_cards))
         .api_route("/sets", get(get_sets))
-        .api_route("/update", get(update))
+        .api_route("/update", post(update))
 }

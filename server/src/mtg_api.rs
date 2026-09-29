@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -9,10 +8,9 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::{Card, CardPrices, Set};
-use retrieval::{DownloadProgress, RetrievalSystemTrait as _};
+use retrieval::RetrievalSystemTrait as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::{
@@ -40,11 +38,11 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         Query(query): Query<MagicSearchQuery>,
         Json(input): Json<APICardSearchFilters>,
     ) -> Result<Json<Vec<APICard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_mtg()?;
-        crate::check_unique_mode(ret, input.unique.as_deref())?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
+        crate::check_unique_mode(&ret, input.unique.as_deref())?;
 
-        ret.search_cards(input.into(), query.skip.into(), query.limit.into())
+        ret.search_cards(input.into(), query.skip.into(), query.limit.min(crate::MAX_PAGE_SIZE).into())
             .await
             .map_err(|e| {
                 (
@@ -77,8 +75,8 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Query(query): Query<MagicRetrieveQuery>,
     ) -> Result<Json<HashMap<String, APICard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_mtg()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
 
         ret.get_cards_by_ids(query.ids)
             .await
@@ -102,8 +100,8 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     }
 
     async fn random_card(State(state): State<GathersState>) -> Result<Json<APICard>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_mtg()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
 
         let card = ret.get_random_card().await.map_err(|e| {
             (
@@ -125,8 +123,8 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     }
 
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<Set>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_mtg()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
 
         ret.get_sets()
             .await
@@ -147,19 +145,16 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let mtg = {
-            let ret = state.0.lock().await;
-            ret.require_mtg()?.clone()
+            let mut ret = state.0.lock().await;
+            let system = ret.require_mtg()?.clone();
+            ret.start_download("Sql")?;
+            system
         };
         let retrieval = state.0.clone();
-        retrieval
-            .lock()
-            .await
-            .downloading
-            .insert("Sql".to_string(), Arc::new(Mutex::new(DownloadProgress::default())));
         tokio::spawn(async move {
             let result = mtg.update_backend().await;
             let mut ret = retrieval.lock().await;
-            ret.downloading.remove("Sql");
+            ret.finish_download("Sql");
             match result.and_then(|_| ret.reload_mtg()) {
                 Ok(()) => info!("MTG DB updated"),
                 Err(e) => error!(error = %e, "Failed to update MTG DB"),
@@ -173,17 +168,15 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let mtg = {
-            let ret = state.0.lock().await;
-            ret.require_mtg()?.clone()
+            let mut ret = state.0.lock().await;
+            let system = ret.require_mtg()?.clone();
+            ret.start_download("Sql-prices")?;
+            system
         };
         let retrieval = state.0.clone();
-        retrieval.lock().await.downloading.insert(
-            "Sql-prices".to_string(),
-            Arc::new(Mutex::new(DownloadProgress::default())),
-        );
         tokio::spawn(async move {
             let result = mtg.update_prices().await;
-            retrieval.lock().await.downloading.remove("Sql-prices");
+            retrieval.lock().await.finish_download("Sql-prices");
             match result {
                 Ok(true) => info!("MTG prices updated"),
                 Ok(false) => info!("No MTG price database configured"),
@@ -203,8 +196,8 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Query(query): Query<BulkPricesQuery>,
     ) -> Result<Json<HashMap<String, CardPrices>>, ApiError> {
-        let guard = state.0.lock().await;
-        let mtg = guard.require_mtg()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let mtg = state.0.lock().await.require_mtg()?.clone();
         mtg.get_bulk_card_prices(query.ids)
             .await
             .map_err(|e| {
@@ -223,7 +216,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_cards))
         .api_route("/sets", get(get_sets))
-        .api_route("/update", get(update))
+        .api_route("/update", post(update))
         .api_route("/prices", get(bulk_prices))
-        .api_route("/prices/update", get(update_prices))
+        .api_route("/prices/update", post(update_prices))
 }

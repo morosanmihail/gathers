@@ -11,6 +11,57 @@ use models::filters::SortOrder;
 pub use crate::csv_models::{CsvField, CsvFieldMapping};
 pub use crate::sqlite::SQLitePersistenceSystem;
 
+/// Errors caused by the request rather than by storage itself, so callers
+/// can tell "you asked for something invalid" apart from a database failure
+/// (e.g. to answer 4xx instead of 500). Returned inside an `eyre::Report`;
+/// recover it with `report.downcast_ref::<PersistenceError>()`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PersistenceError {
+    CollectionNotFound(CollectionID),
+    CollectionExists(CollectionID),
+    /// The collection is protected (the default collection) and can only be
+    /// emptied into another collection, never deleted.
+    CollectionNotRemovable(CollectionID),
+    InvalidInput(String),
+}
+
+impl std::fmt::Display for PersistenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CollectionNotFound(name) => write!(f, "Collection '{name}' not found"),
+            Self::CollectionExists(name) => write!(f, "Collection '{name}' already exists"),
+            Self::CollectionNotRemovable(name) => write!(
+                f,
+                "Collection '{name}' is the default collection and can't be deleted; move its cards to another collection instead"
+            ),
+            Self::InvalidInput(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for PersistenceError {}
+
+/// Largest per-unit price accepted for a purchase. Far above any real card,
+/// but low enough that totals over many copies stay finite.
+pub const MAX_UNIT_PRICE: f64 = 1_000_000_000.0;
+
+/// Checks a per-unit purchase price is a real, non-negative amount no larger
+/// than `MAX_UNIT_PRICE`.
+pub fn validate_price(price: f64) -> Result<(), String> {
+    if price.is_finite() && (0.0..=MAX_UNIT_PRICE).contains(&price) {
+        Ok(())
+    } else {
+        Err(format!("Price must be between 0 and {MAX_UNIT_PRICE}"))
+    }
+}
+
+/// A collection's name plus whether it may be deleted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionInfo {
+    pub name: CollectionID,
+    pub removable: bool,
+}
+
 #[derive(Debug, Default, Clone)]
 pub enum CollectionSortField {
     #[default]
@@ -68,12 +119,20 @@ pub trait PersistenceSystemTrait {
         name: CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<String>>;
 
+    /// Deletes a collection along with its cards, purchase history and share
+    /// links — or, with `move_to`, first merges its cards and purchase
+    /// history into that collection. The default collection can't be
+    /// deleted: with `move_to` it's emptied into the target and kept,
+    /// without it this fails with `PersistenceError::CollectionNotRemovable`
+    /// and nothing changes.
     fn remove_collection(
         &mut self,
         name: &CollectionID,
         move_to: Option<CollectionID>,
     ) -> impl std::future::Future<Output = eyre::Result<CollectionID>>;
 
+    /// Renames a collection, carrying its cards, purchase history and share
+    /// links over. Fails with `CollectionNotFound` / `CollectionExists`.
     fn rename_collection(
         &mut self,
         old_name: &CollectionID,
@@ -84,6 +143,10 @@ pub trait PersistenceSystemTrait {
         &self,
         filter: Option<String>,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<CollectionID>>>;
+
+    fn list_collection_info(
+        &self,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<CollectionInfo>>>;
 
     fn get_cards_in_collection_count(
         &self,
@@ -125,6 +188,11 @@ pub trait PersistenceSystemTrait {
         provider: &str,
     ) -> impl std::future::Future<Output = eyre::Result<CollectionCard>>;
 
+    /// Moves each entry's `quantity`/`want_quantity` of that card+finish from
+    /// its `collection` to `to_collection_id`. Only what the source actually
+    /// holds is moved — a larger (or negative) request is clamped to it — so
+    /// a move can never create cards. The destination must exist
+    /// (`CollectionNotFound` otherwise).
     fn move_cards_between_collections(
         &mut self,
         cards: &[CollectionCard],

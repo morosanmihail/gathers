@@ -156,3 +156,62 @@ async fn test_move_same_collection_is_noop() {
     assert_eq!(cards.iter().find(|c| c.finish == "foil").unwrap().quantity, 2);
     assert!(cards.iter().all(|c| c.provider == "mtg"));
 }
+
+#[tokio::test]
+async fn test_move_clamps_to_what_source_holds() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    p.add_card_to_collection(&col_a, &"card1".to_string(), "", 1, OLD_TIME, "mtg").await.unwrap();
+
+    p.move_cards_between_collections(
+        &[CollectionCard { uuid: "card1".to_string(), finish: String::new(), quantity: 100, want_quantity: 50, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "".to_string() }],
+        col_b.clone(),
+    ).await.unwrap();
+
+    let dst = p.get_cards_in_collection_paginated(&col_b, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(dst.len(), 1);
+    assert_eq!(dst[0].quantity, 1, "only the one copy the source had moves");
+    assert_eq!(dst[0].want_quantity, 0);
+    assert!(p.get_cards_in_collection_paginated(&col_a, CollectionCardsParams::new(0, 10)).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_move_cannot_create_cards() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "mtg").await.unwrap();
+
+    p.move_cards_between_collections(
+        &[
+            // Source collection that doesn't have the card at all.
+            CollectionCard { uuid: "card1".to_string(), finish: String::new(), quantity: 5, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: "Nowhere".to_string(), provider: "mtg".to_string() },
+            // Negative quantity: would otherwise pull cards *out of* the destination into the source.
+            CollectionCard { uuid: "card1".to_string(), finish: String::new(), quantity: -5, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "mtg".to_string() },
+        ],
+        col_b.clone(),
+    ).await.unwrap();
+
+    assert!(p.get_cards_in_collection_paginated(&col_b, CollectionCardsParams::new(0, 10)).await.unwrap().is_empty());
+    let src = p.get_cards_in_collection_paginated(&col_a, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(src[0].quantity, 3);
+}
+
+#[tokio::test]
+async fn test_move_to_missing_collection_is_not_found() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
+    p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "mtg").await.unwrap();
+
+    let err = p.move_cards_between_collections(
+        &[CollectionCard { uuid: "card1".to_string(), finish: String::new(), quantity: 3, want_quantity: 0, time_added: OLD_TIME.to_string(), collection: col_a.clone(), provider: "mtg".to_string() }],
+        "Ghost".to_string(),
+    ).await.unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<PersistenceError>(),
+        Some(&PersistenceError::CollectionNotFound("Ghost".into()))
+    );
+    let src = p.get_cards_in_collection_paginated(&col_a, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(src[0].quantity, 3);
+}

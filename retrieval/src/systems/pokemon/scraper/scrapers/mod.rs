@@ -124,6 +124,7 @@ async fn update_cards(
         if tcgp_cards.is_empty() {
             if let Some(mut enriched) =
                 tcgp::search_card(client, &card.name, &exp.name, tcgp_codes).await
+                && tcgp::is_same_card(&card, &enriched)
             {
                 enriched.img = card.img.clone();
                 db.upsert_card(&enriched, UpdateFields::Tcgp);

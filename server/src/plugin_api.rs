@@ -67,7 +67,7 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<Vec<PluginCard>>, ApiError> {
         let plugin = plugin_handle(&state, &name).await?;
         plugin
-            .search(body.filters, body.skip, body.limit)
+            .search(body.filters, body.skip, body.limit.map(|l| l.min(crate::MAX_PAGE_SIZE)))
             .await
             .map(Json)
             .map_err(|e| {
@@ -124,5 +124,5 @@ pub fn plugin_routes() -> ApiRouter<GathersState> {
         .api_route("/", get(list_plugins))
         .api_route("/{name}/search", post(search))
         .api_route("/{name}/cards/by-ids", post(cards_by_ids))
-        .api_route("/{name}/update", get(update))
+        .api_route("/{name}/update", post(update))
 }
