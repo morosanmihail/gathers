@@ -42,6 +42,11 @@ pub struct MagicSQLiteRetrievalSystem {
     rank_sql: Arc<String>,
 }
 
+/// Largest `skip`/`limit` a search honours (see `search_cards`): far beyond
+/// any real result set, yet small enough that the paging window arithmetic
+/// can't overflow.
+pub(crate) const MAX_WINDOW: usize = (i32::MAX as usize) / 8;
+
 /// Indexes that keep searches off full-table scans and sorts. `CREATE INDEX IF NOT EXISTS`, so
 /// a freshly downloaded DB gets them on first open (~1s) and an existing one pays nothing.
 const SEARCH_INDEXES: &str = "
@@ -425,8 +430,12 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let sorted_by_name = sort_col.starts_with("a.name");
         let descending = matches!(&filters.sort_order, Some(SortOrder::Desc));
 
-        let limit = limit.unwrap_or(1); // same default `sql_limit_offset` applies
-        let skip = skip.unwrap_or(0);
+        // Same default `sql_limit_offset` applies. Both are capped well below
+        // the point where the window arithmetic below (`skip + limit`, then
+        // growing that several-fold) could overflow or stop fitting SQLite's
+        // i64 — nothing can be skipped or returned past that anyway.
+        let limit = limit.unwrap_or(1).min(MAX_WINDOW);
+        let skip = skip.unwrap_or(0).min(MAX_WINDOW);
 
         let modes = self.unique_modes();
         let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
@@ -465,6 +474,8 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             // always suffices; if faces ate too many rows, retry with a bigger window.
             let wanted = skip + limit;
             let mut fetch = wanted + wanted / 8;
+            // Sized for the page, but not blindly: `limit` is caller-chosen.
+            let capacity = limit.min(1024);
             loop {
                 values[limit_param] = Value::Integer(fetch as i64);
                 let mut stmt = conn.prepare_cached(&query)?;
@@ -472,7 +483,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                 let mut seen = HashSet::new();
                 let mut fetched = 0;
                 let mut position = 0; // printings seen so far, including the skipped ones
-                let mut page = Vec::with_capacity(limit);
+                let mut page = Vec::with_capacity(capacity);
                 while let Some(row) = rows.next()? {
                     fetched += 1;
                     let front_uuid: String = row.get(0)?;
@@ -490,7 +501,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                 if position >= wanted || fetched < fetch {
                     break page;
                 }
-                fetch *= 2;
+                fetch = fetch.saturating_mul(2).min(i64::MAX as usize);
             }
         };
 

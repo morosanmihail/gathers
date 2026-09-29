@@ -583,3 +583,26 @@ async fn test_update_entry_error_message_mentions_counts() {
         panic!("expected ValidationError");
     }
 }
+
+#[tokio::test]
+async fn test_update_purchase_entry_rejects_invalid_values() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 3, 0).await;
+    record_purchase(&mut p, &col, "card1", 3, 0, Some(2.0)).await;
+    let id = p.get_all_purchase_history(&col).await.unwrap()[0].id;
+
+    for (quantity, price) in [(0, Some(1.0)), (-5, Some(1.0)), (1, Some(-100.0)), (1, Some(f64::INFINITY)), (1, Some(1e300))] {
+        let result = p.update_purchase_entry(&col, id, quantity, price).await.unwrap();
+        assert!(
+            matches!(result, UpdateEntryResult::ValidationError(_)),
+            "quantity {quantity}, price {price:?} should be rejected, got {result:?}"
+        );
+    }
+    let hist = p.get_all_purchase_history(&col).await.unwrap();
+    assert_eq!(hist[0].quantity, 3);
+    assert_eq!(hist[0].price_per_unit, Some(2.0));
+
+    // No price at all is still fine.
+    assert_eq!(p.update_purchase_entry(&col, id, 2, None).await.unwrap(), UpdateEntryResult::Updated);
+}

@@ -135,7 +135,8 @@ export async function renameCollection(oldId: string, newId: string): Promise<vo
 }
 
 export async function deleteCollection(id: string, keepCardsIn = ''): Promise<void> {
-	await fetchJSON(`/api/collection/remove/${encodeURIComponent(id)}?keepCardsInCollection=${encodeURIComponent(keepCardsIn)}`, {
+	const keep = keepCardsIn ? `?keepCardsInCollection=${encodeURIComponent(keepCardsIn)}` : '';
+	await fetchJSON(`/api/collection/remove/${encodeURIComponent(id)}${keep}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' }
 	});

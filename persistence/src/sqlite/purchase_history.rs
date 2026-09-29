@@ -134,18 +134,18 @@ fn trim_by_finish(
     finish: &str,
     target: i32,
 ) -> eyre::Result<()> {
-    let total: i32 = conn.query_row(
+    let total: i64 = conn.query_row(
         "SELECT COALESCE(SUM(quantity), 0) FROM purchase_history \
          WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3",
         params![collection_id, card_uuid, finish],
         |row| row.get(0),
     )?;
 
-    if total <= target {
+    if total <= i64::from(target) {
         return Ok(());
     }
 
-    let mut excess = total - target;
+    let mut excess = total - i64::from(target);
 
     let mut stmt = conn.prepare(
         "SELECT id, quantity, price_per_unit, provider, recorded_at \
@@ -169,7 +169,8 @@ fn trim_by_finish(
         if excess <= 0 {
             break;
         }
-        let remove = entry.qty.min(excess);
+        // Fits in i32: bounded by `entry.qty`.
+        let remove = i64::from(entry.qty).min(excess) as i32;
         conn.execute(
             "UPDATE purchase_history SET quantity = quantity - ?1 WHERE id = ?2",
             params![remove, entry.id],
@@ -177,7 +178,7 @@ fn trim_by_finish(
         if let Some(dst) = transfer_to {
             insert_purchase_row(conn, dst, card_uuid, finish, remove, entry.price, &entry.provider, &entry.recorded_at)?;
         }
-        excess -= remove;
+        excess -= i64::from(remove);
     }
 
     Ok(())
@@ -216,6 +217,17 @@ pub(super) fn update_entry(
         return Ok(UpdateEntryResult::NotFound);
     };
 
+    if quantity < 1 {
+        return Ok(UpdateEntryResult::ValidationError(
+            "Quantity must be at least 1 (delete the entry instead)".to_string(),
+        ));
+    }
+    if let Some(price) = price_per_unit
+        && let Err(msg) = crate::validate_price(price)
+    {
+        return Ok(UpdateEntryResult::ValidationError(msg));
+    }
+
     let col_qty: i32 = conn
         .query_row(
             "SELECT COALESCE(quantity, 0) FROM cards WHERE collection = ?1 AND uuid = ?2 AND finish = ?3",
@@ -224,15 +236,15 @@ pub(super) fn update_entry(
         )
         .unwrap_or(0);
 
-    let other_qty: i32 = conn.query_row(
+    let other_qty: i64 = conn.query_row(
         "SELECT COALESCE(SUM(quantity), 0) FROM purchase_history \
          WHERE card_uuid = ?1 AND finish = ?2 AND collection_id = ?3 AND id != ?4",
         params![&card_uuid, &finish, collection_id, entry_id],
         |row| row.get(0),
     )?;
 
-    let new_total = other_qty + quantity;
-    if new_total > col_qty {
+    let new_total = other_qty + i64::from(quantity);
+    if new_total > i64::from(col_qty) {
         return Ok(UpdateEntryResult::ValidationError(format!(
             "Cannot record {new_total} copies — collection only has {col_qty}"
         )));
@@ -252,7 +264,7 @@ pub(super) fn get_collection_totals(
     let mut stmt = conn.prepare(
         "SELECT card_uuid, finish, \
                 SUM(COALESCE(price_per_unit, 0.0) * quantity), \
-                SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END) \
+                min(SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END), 2147483647) \
          FROM purchase_history \
          WHERE collection_id = ?1 \
          GROUP BY card_uuid, finish \

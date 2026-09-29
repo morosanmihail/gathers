@@ -21,7 +21,8 @@ use crate::{
     collections::collections_models::{
         APICardSearchFilters, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
         CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
-        CollectionAllPurchaseHistoryResponse, CollectionPurchaseHistoryEntry,
+        CollectionAllPurchaseHistoryResponse, CollectionListEntry, CollectionPurchaseHistoryEntry,
+        CollectionRemoveQuery,
         CollectionRenameRequest, CollectionValueBreakdown, CollectionsSearchQuery,
         PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
         ShareLinkResponse, ShareLinkRevokeResponse,
@@ -111,7 +112,8 @@ fn compute_value_breakdown(
         }
     }
 
-    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    // Non-finite totals (from absurd recorded prices) would serialize as null.
+    let round2 = |v: f64| if v.is_finite() { (v * 100.0).round() / 100.0 } else { 0.0 };
     collections_models::CollectionValueBreakdown {
         total_value: round2(total_value),
         profit: round2(profit),
@@ -561,23 +563,18 @@ fn sort_collection_cards(
 }
 
 pub fn collection_routes() -> ApiRouter<GathersState> {
-    async fn list(State(state): State<GathersState>) -> Result<Json<Vec<Collection>>, ApiError> {
+    async fn list(State(state): State<GathersState>) -> Result<Json<Vec<CollectionListEntry>>, ApiError> {
         let storage = &state.1.lock().await.storage;
-
-        match storage.list_collections(None).await {
-            Ok(collections) => Ok(Json(
-                collections
-                    .iter()
-                    .map(|c| Collection { id: c.clone() })
-                    .collect(),
-            )),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to list collections. {e}"),
-                }),
-            )),
-        }
+        let collections = storage
+            .list_collection_info()
+            .await
+            .map_err(|e| crate::storage_error("Failed to list collections", e))?;
+        Ok(Json(
+            collections
+                .into_iter()
+                .map(|c| CollectionListEntry { id: c.name, removable: c.removable })
+                .collect(),
+        ))
     }
 
     async fn add(
@@ -589,38 +586,33 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
         let storage = &mut state.1.lock().await.storage;
 
-        match storage.add_collection(input.id.clone()).await {
-            Ok(collection_id) => Ok(Json(CollectionAddResponse {
-                id: collection_id,
-                name: input.id,
-            })),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to add collection. {e}"),
-                }),
-            )),
+        if collection_exists(storage, &input.id).await? {
+            return Err(crate::storage_error(
+                "",
+                persistence::PersistenceError::CollectionExists(input.id).into(),
+            ));
         }
+        let collection_id = storage
+            .add_collection(input.id.clone())
+            .await
+            .map_err(|e| crate::storage_error("Failed to add collection", e))?;
+        Ok(Json(CollectionAddResponse { id: collection_id, name: input.id }))
     }
 
     async fn remove(
         State(state): State<GathersState>,
         Path(id): Path<String>,
+        Query(query): Query<CollectionRemoveQuery>,
     ) -> Result<Json<CollectionRemoveResponse>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
 
         let storage = &mut state.1.lock().await.storage;
-
-        // TODO: allow setting the "move to collection" instead of None
-        match storage.remove_collection(&id, None).await {
-            Ok(message) => Ok(Json(CollectionRemoveResponse { message })),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to remove collection. {e}"),
-                }),
-            )),
-        }
+        let move_to = query.keep_cards_in_collection.filter(|c| !c.is_empty());
+        let message = storage
+            .remove_collection(&id, move_to)
+            .await
+            .map_err(|e| crate::storage_error("Failed to remove collection", e))?;
+        Ok(Json(CollectionRemoveResponse { message }))
     }
 
     async fn rename(
@@ -632,16 +624,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         validate_collection_name(&input.new_id)?;
 
         let storage = &mut state.1.lock().await.storage;
-
-        match storage.rename_collection(&id, &input.new_id).await {
-            Ok(()) => Ok(Json(Collection { id: input.new_id })),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to rename collection. {e}"),
-                }),
-            )),
-        }
+        storage
+            .rename_collection(&id, &input.new_id)
+            .await
+            .map_err(|e| crate::storage_error("Failed to rename collection", e))?;
+        Ok(Json(Collection { id: input.new_id }))
     }
 
     #[axum::debug_handler]
@@ -654,18 +641,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         let storage = &mut state.1.lock().await.storage;
 
         let cards: Vec<models::CollectionCard> = input.iter().map(|card| card.into()).collect();
-        match storage
+        storage
             .move_cards_between_collections(&cards, to_collection_id)
             .await
-        {
-            Ok(_) => Ok(Json(())),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to move cards. {e}"),
-                }),
-            )),
-        }
+            .map_err(|e| crate::storage_error("Failed to move cards", e))?;
+        Ok(Json(()))
     }
 
     async fn share_list(
@@ -692,6 +672,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         if demo_mode() { return Err(demo_err()); }
 
         let storage = &mut state.1.lock().await.storage;
+        validate_collection(storage, &id).await?;
 
         match storage.create_share_link(&id).await {
             Ok(link) => Ok(Json(link.into())),
@@ -724,52 +705,61 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     }
 
     fn validate_collection_name(name: &str) -> Result<(), ApiError> {
-        if name.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload {
-                    error: "Collection name cannot be empty".to_string(),
-                }),
+        if name.trim().is_empty() {
+            return Err(crate::bad_request("Collection name cannot be empty"));
+        }
+        if name.trim() != name {
+            return Err(crate::bad_request(
+                "Collection name can't start or end with whitespace",
             ));
+        }
+        // These would be unreachable: they're path segments in every
+        // `/collection/.../{id}` URL, and get normalized away.
+        if name == "." || name == ".." {
+            return Err(crate::bad_request("Collection name can't be '.' or '..'"));
         }
         if name.len() > 255 {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload {
-                    error: "Collection name too long (max 255 characters)".to_string(),
-                }),
-            ));
+            return Err(crate::bad_request("Collection name too long (max 255 characters)"));
         }
         if name.chars().any(|c| c.is_control()) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload {
-                    error: "Collection name contains invalid characters".to_string(),
-                }),
-            ));
+            return Err(crate::bad_request("Collection name contains invalid characters"));
         }
         Ok(())
     }
 
-    async fn validate_collection(
-        storage: &mut PersistenceSystem,
+    async fn collection_exists(
+        storage: &PersistenceSystem,
         collection_id: &String,
-    ) -> Result<(), Json<ErrorPayload>> {
-        let collections = match storage.list_collections(None).await {
-            Ok(collections) => collections,
-            Err(e) => {
-                return Err(Json(ErrorPayload {
-                    error: format!("Failed to verify collection. {e}"),
-                }));
-            }
-        };
+    ) -> Result<bool, ApiError> {
+        let collections = storage
+            .list_collections(None)
+            .await
+            .map_err(|e| crate::storage_error("Failed to verify collection", e))?;
+        Ok(collections.contains(collection_id))
+    }
 
-        if !collections.contains(collection_id) {
-            return Err(Json(ErrorPayload {
-                error: "Collection not found".to_string(),
-            }));
+    /// 404s unless the collection exists.
+    async fn validate_collection(
+        storage: &PersistenceSystem,
+        collection_id: &String,
+    ) -> Result<(), ApiError> {
+        if collection_exists(storage, collection_id).await? {
+            Ok(())
+        } else {
+            Err(crate::storage_error(
+                "",
+                persistence::PersistenceError::CollectionNotFound(collection_id.clone()).into(),
+            ))
         }
-        Ok(())
+    }
+
+    fn card_not_found(card_id: &str) -> ApiError {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorPayload {
+                error: format!("Card '{card_id}' wasn't found in any configured system or plugin"),
+            }),
+        )
     }
 
     async fn mutate_card_quantities(
@@ -805,12 +795,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     .unwrap_or_else(|_| Utc::now()),
                 provider: card.provider,
             }])),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to change card quantity in collection. {e}"),
-                }),
-            )),
+            Err(e) => Err(crate::storage_error("Failed to change card quantity in collection", e)),
         }
     }
 
@@ -819,13 +804,24 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<CardToAdd>,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
+        // Adding is allowed in demo mode, removing isn't — so this can't
+        // double as a remove with a negative quantity.
+        if input.quantity <= 0 {
+            return Err(crate::bad_request("Quantity must be at least 1"));
+        }
+        let pricing_enabled = state.0.lock().await.pricing_enabled;
+        let purchase_price = input.purchase_price.filter(|_| pricing_enabled);
+        if let Some(price) = purchase_price {
+            persistence::validate_price(price).map_err(crate::bad_request)?;
+        }
+
         let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
+        if provider.is_empty() {
+            return Err(card_not_found(&input.id));
+        }
 
         let storage = &mut state.1.lock().await.storage;
-
-        if let Err(e) = validate_collection(storage, &collection_id).await {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e));
-        };
+        validate_collection(storage, &collection_id).await?;
 
         let result = mutate_card_quantities(
             storage,
@@ -835,25 +831,28 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             input.quantity,
             provider.clone(),
         )
-        .await;
+        .await?;
 
         // Record purchase history only when a positive price is supplied.
-        if result.is_ok() && input.quantity > 0 && input.purchase_price.is_some_and(|p| p > 0.0) {
+        if purchase_price.is_some_and(|p| p > 0.0) {
             let now = chrono::Utc::now().to_rfc3339();
-            let _ = storage
+            if let Err(e) = storage
                 .record_purchase(
                     &collection_id,
                     &input.id,
                     &input.finish,
                     input.quantity,
-                    input.purchase_price,
+                    purchase_price,
                     &provider,
                     &now,
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(error = %e, card = %input.id, "Failed to record purchase");
+            }
         }
 
-        result
+        Ok(result)
     }
 
     async fn cards_remove(
@@ -862,27 +861,19 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Json(input): Json<CardToAdd>,
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
+        // A negative quantity would add cards instead.
+        if input.quantity <= 0 {
+            return Err(crate::bad_request("Quantity must be at least 1"));
+        }
         let storage = &mut state.1.lock().await.storage;
-
-        if let Err(e) = validate_collection(storage, &collection_id).await {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e));
-        };
-
-        let neg_quantity = input.quantity.checked_neg().ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorPayload {
-                    error: "Invalid quantity".to_string(),
-                }),
-            )
-        })?;
+        validate_collection(storage, &collection_id).await?;
 
         mutate_card_quantities(
             storage,
             &collection_id,
             input.id,
             &input.finish,
-            neg_quantity,
+            -input.quantity,
             "".to_string(),
         )
         .await
@@ -893,15 +884,19 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Path(collection_id): Path<String>,
         Json(input): Json<AdjustWantQuantityRequest>,
     ) -> Result<Json<CollectionCard>, ApiError> {
+        // Mirrors add (allowed) vs. delete (not) for owned cards.
+        if demo_mode() && input.delta < 0 { return Err(demo_err()); }
+
         // Only used if the card doesn't already have a row in the collection;
-        // an existing row keeps its own provider regardless.
+        // an existing row keeps its own provider regardless. Lowering the
+        // want of a card that no system knows any more is still fine.
         let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
+        if provider.is_empty() && input.delta > 0 {
+            return Err(card_not_found(&input.id));
+        }
 
         let storage = &mut state.1.lock().await.storage;
-
-        if let Err(e) = validate_collection(storage, &collection_id).await {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e));
-        };
+        validate_collection(storage, &collection_id).await?;
 
         match storage
             .adjust_want_quantity(&collection_id, &input.id, input.delta, &provider)
@@ -918,12 +913,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     .unwrap_or_else(|_| Utc::now()),
                 provider: card.provider,
             })),
-            Err(e) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload {
-                    error: format!("Failed to adjust want quantity. {e}"),
-                }),
-            )),
+            Err(e) => Err(crate::storage_error("Failed to adjust want quantity", e)),
         }
     }
 
@@ -934,7 +924,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<Vec<CollectionCard>>, ApiError> {
         let collection_params = CollectionCardsParams {
             offset: query.offset,
-            limit: query.limit.min(1000),
+            limit: query.limit.min(crate::MAX_PAGE_SIZE),
             sort_by: query.sort_by.map(persistence::CollectionSortField::from),
             sort_order: query.sort_order.map(models::filters::SortOrder::from),
             provider: query.provider,
@@ -1010,12 +1000,12 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Query(query): Query<CollectionsSearchQuery>,
         Json(input): Json<APICardSearchFilters>,
     ) -> Result<Json<Vec<ResultCard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_mtg()?;
-        crate::check_unique_mode(ret, input.unique.as_deref())?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
+        crate::check_unique_mode(&ret, input.unique.as_deref())?;
 
         match ret
-            .search_cards(input.into(), query.offset.into(), query.page_size.min(1000).into())
+            .search_cards(input.into(), query.offset.into(), query.page_size.min(crate::MAX_PAGE_SIZE).into())
             .await
         {
             Ok(result) => Ok(Json(
@@ -1258,14 +1248,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .storage
             .import_csv(tmp_path, collection_name, &retrievals, None, &mapping)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorPayload {
-                        error: format!("Import failed: {e}"),
-                    }),
-                )
-            })?;
+            .map_err(|e| crate::storage_error("Import failed", e))?;
 
         Ok(Json(()))
     }
@@ -1329,7 +1312,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         let page: Vec<CollectionCard> = matched
             .into_iter()
             .skip(query.offset)
-            .take(query.limit)
+            .take(query.limit.min(crate::MAX_PAGE_SIZE))
             .map(|cc| CollectionCard {
                 id: cc.uuid.clone(),
                 finish: cc.finish.clone(),
@@ -1662,7 +1645,7 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
         let enabled_plugins = enabled_plugin_providers(&state).await;
         let collection_params = CollectionCardsParams {
             offset: query.offset,
-            limit: query.limit.min(1000),
+            limit: query.limit.min(crate::MAX_PAGE_SIZE),
             sort_by: query.sort_by.map(persistence::CollectionSortField::from),
             sort_order: query.sort_order.map(models::filters::SortOrder::from),
             provider: query.provider.clone(),

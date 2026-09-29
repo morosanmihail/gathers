@@ -178,6 +178,23 @@ pub struct Collection {
     pub id: String,
 }
 
+/// An entry of `/api/collection/list`.
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionListEntry {
+    pub id: String,
+    /// False for the default collection, which can't be deleted (only
+    /// emptied into another collection via `keepCardsInCollection`).
+    pub removable: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CollectionRemoveQuery {
+    /// Move the collection's cards (and their purchase history) here instead
+    /// of deleting them. Empty or omitted deletes them.
+    #[serde(rename = "keepCardsInCollection", default)]
+    pub keep_cards_in_collection: Option<String>,
+}
+
 #[derive(Serialize, JsonSchema)]
 pub struct CollectionAddResponse {
     pub id: String,

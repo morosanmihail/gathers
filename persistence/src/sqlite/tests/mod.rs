@@ -2,7 +2,7 @@
 pub use super::SQLitePersistenceSystem;
 pub use models::{CardID, CollectionCard, CollectionID};
 pub use models::filters::SortOrder;
-pub use crate::{CollectionCardsParams, CollectionSortField, PersistenceSystemTrait, UpdateEntryResult};
+pub use crate::{CollectionCardsParams, CollectionInfo, CollectionSortField, PersistenceError, PersistenceSystemTrait, UpdateEntryResult};
 pub use rusqlite::params;
 
 pub const DEFAULT: &str = "Default";

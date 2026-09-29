@@ -63,6 +63,7 @@ async fn post_settings(
     if demo_mode() {
         return Err(demo_err());
     }
+    new_config.validate().map_err(crate::bad_request)?;
     let ret = state.0.lock().await;
     let config_path = ret.config_path.clone();
     drop(ret);
@@ -77,7 +78,7 @@ async fn post_settings(
             Json(ErrorPayload { error: format!("Failed to serialize config: {e}") }),
         )
     })?;
-    std::fs::write(&config_path, &toml_str).map_err(|e| {
+    write_atomically(&config_path, &toml_str).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorPayload { error: format!("Failed to write config: {e}") }),
@@ -89,4 +90,15 @@ async fn post_settings(
     ret.restart_required |= restart_needed;
     drop(ret);
     Ok(Json(new_config))
+}
+
+/// Writes via a temp file in the same directory and a rename, so a crash or
+/// full disk mid-write can't leave a truncated config the server then fails
+/// to start with.
+fn write_atomically(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }

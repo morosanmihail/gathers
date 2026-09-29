@@ -7,9 +7,7 @@ export type Theme = string;
 export type ViewMode = 'grid' | 'list';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
 
-export interface Collection {
-	id: string;
-}
+export type Collection = components['schemas']['CollectionListEntry'];
 
 export type SystemInfo = components['schemas']['SystemInfo'];
 // One way a system can collapse search results that share a card (MTG: prints / cards / art).

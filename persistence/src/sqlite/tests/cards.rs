@@ -335,3 +335,27 @@ async fn test_plugin_scope_combines_with_provider_filter() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[tokio::test]
+async fn test_quantities_saturate_instead_of_breaking_the_collection() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Big".to_string()).await.unwrap();
+    for _ in 0..2 {
+        p.add_card_to_collection(&col, &"card1".to_string(), "", i32::MAX, OLD_TIME, "mtg").await.unwrap();
+        p.adjust_want_quantity(&col, &"card1".to_string(), i32::MAX, "mtg").await.unwrap();
+    }
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
+    assert_eq!(cards[0].quantity, i32::MAX);
+    assert_eq!(cards[0].want_quantity, i32::MAX);
+}
+
+#[tokio::test]
+async fn test_paginated_with_huge_offset_and_limit() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    add_card(&mut p, &col, &"card1".to_string(), 1, 0).await;
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(usize::MAX, 10)).await.unwrap();
+    assert!(cards.is_empty());
+    let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, usize::MAX)).await.unwrap();
+    assert_eq!(cards.len(), 1);
+}

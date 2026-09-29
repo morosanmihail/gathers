@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use aide::axum::{
     ApiRouter,
@@ -9,10 +8,9 @@ use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
 use models::{Card, Set};
-use retrieval::{DownloadProgress, RetrievalSystemTrait};
+use retrieval::RetrievalSystemTrait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use models::CardPrices;
@@ -42,11 +40,11 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
         Query(query): Query<PokemonSearchQuery>,
         Json(input): Json<APICardSearchFilters>,
     ) -> Result<Json<Vec<APIPokemonCard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_pokemon()?;
-        crate::check_unique_mode(ret, input.unique.as_deref())?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_pokemon()?.clone();
+        crate::check_unique_mode(&ret, input.unique.as_deref())?;
 
-        ret.search_cards(input.into(), query.skip.into(), query.limit.into())
+        ret.search_cards(input.into(), query.skip.into(), query.limit.min(crate::MAX_PAGE_SIZE).into())
             .await
             .map_err(|e| {
                 (
@@ -79,8 +77,8 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Query(query): Query<PokemonRetrieveQuery>,
     ) -> Result<Json<HashMap<String, APIPokemonCard>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_pokemon()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_pokemon()?.clone();
 
         ret.get_cards_by_ids(query.ids)
             .await
@@ -106,8 +104,8 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     async fn random_card(
         State(state): State<GathersState>,
     ) -> Result<Json<APIPokemonCard>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_pokemon()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_pokemon()?.clone();
 
         let card = ret.get_random_card().await.map_err(|e| {
             (
@@ -129,8 +127,8 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     }
 
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<Set>>, ApiError> {
-        let guard = state.0.lock().await;
-        let ret = guard.require_pokemon()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_pokemon()?.clone();
 
         ret.get_sets()
             .await
@@ -154,18 +152,16 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     async fn update(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let pokemon = {
-            let ret = state.0.lock().await;
-            ret.require_pokemon()?.clone()
+            let mut ret = state.0.lock().await;
+            let system = ret.require_pokemon()?.clone();
+            ret.start_download("PokemonSql")?;
+            system
         };
         let retrieval = state.0.clone();
-        retrieval.lock().await.downloading.insert(
-            "PokemonSql".to_string(),
-            Arc::new(Mutex::new(DownloadProgress::default())),
-        );
         tokio::spawn(async move {
             let result = pokemon.update_backend().await;
             let mut ret = retrieval.lock().await;
-            ret.downloading.remove("PokemonSql");
+            ret.finish_download("PokemonSql");
             match result.and_then(|_| ret.reload_pokemon()) {
                 Ok(()) => info!("Pokemon DB updated"),
                 Err(e) => error!(error = %e, "Failed to update Pokemon DB"),
@@ -179,17 +175,15 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
     async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let pokemon = {
-            let ret = state.0.lock().await;
-            ret.require_pokemon()?.clone()
+            let mut ret = state.0.lock().await;
+            let system = ret.require_pokemon()?.clone();
+            ret.start_download("PokemonSql-prices")?;
+            system
         };
         let retrieval = state.0.clone();
-        retrieval.lock().await.downloading.insert(
-            "PokemonSql-prices".to_string(),
-            Arc::new(Mutex::new(DownloadProgress::default())),
-        );
         tokio::spawn(async move {
             let result = pokemon.update_prices().await;
-            retrieval.lock().await.downloading.remove("PokemonSql-prices");
+            retrieval.lock().await.finish_download("PokemonSql-prices");
             match result {
                 Ok(true) => info!("Pokemon prices updated"),
                 Ok(false) => info!("No Pokemon price database configured"),
@@ -209,8 +203,8 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Query(query): Query<BulkPricesQuery>,
     ) -> Result<Json<HashMap<String, CardPrices>>, ApiError> {
-        let guard = state.0.lock().await;
-        let pokemon = guard.require_pokemon()?;
+        // Cloned out so the shared state isn't locked for the whole query.
+        let pokemon = state.0.lock().await.require_pokemon()?.clone();
         pokemon
             .get_bulk_card_prices(query.ids)
             .await
@@ -230,7 +224,7 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_pokemon_cards))
         .api_route("/sets", get(get_sets))
-        .api_route("/update", get(update))
+        .api_route("/update", post(update))
         .api_route("/prices", get(bulk_prices))
-        .api_route("/prices/update", get(update_prices))
+        .api_route("/prices/update", post(update_prices))
 }

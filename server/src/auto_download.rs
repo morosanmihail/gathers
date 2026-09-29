@@ -18,6 +18,9 @@ pub fn default_interval_hours() -> u64 {
     24
 }
 
+/// Longest allowed auto-download interval: a year.
+pub const MAX_INTERVAL_HOURS: u64 = 24 * 365;
+
 fn marker_path(gathers_dir: &Path) -> PathBuf {
     gathers_dir.join("auto_download.last_run")
 }
@@ -39,55 +42,85 @@ fn write_last_run(gathers_dir: &Path) -> eyre::Result<()> {
     Ok(())
 }
 
+/// Runs `update` for the database behind `key` unless a manual update of it
+/// is already running (see `RetrievalState::start_download`), marking it as
+/// running meanwhile so a manual update can't start mid-way either.
+async fn run_exclusive<F>(retrieval: &Arc<Mutex<RetrievalState>>, key: &str, update: F)
+where
+    F: std::future::Future<Output = ()>,
+{
+    if retrieval.lock().await.start_download(key).is_err() {
+        info!(key, "Skipping auto-download: an update is already running");
+        return;
+    }
+    update.await;
+    retrieval.lock().await.finish_download(key);
+}
+
 /// Re-downloads card and price databases for every currently active system,
 /// reusing the same trigger paths as the manual `/update` HTTP endpoints.
 async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>) {
     let mtg = retrieval.lock().await.mtg.clone();
     if let Some(mtg) = mtg {
-        match mtg.update_backend().await {
-            Ok(_) => match retrieval.lock().await.reload_mtg() {
-                Ok(_) => info!("MTG card DB auto-downloaded"),
-                Err(e) => error!(error = %e, "Failed to reload MTG after auto-download"),
-            },
-            Err(e) => error!(error = %e, "Auto-download of MTG card DB failed"),
-        }
-        match mtg.update_prices().await {
-            Ok(_) => info!("MTG price DB auto-downloaded"),
-            Err(e) => error!(error = %e, "Auto-download of MTG price DB failed"),
-        }
+        run_exclusive(retrieval, "Sql", async {
+            match mtg.update_backend().await {
+                Ok(_) => match retrieval.lock().await.reload_mtg() {
+                    Ok(_) => info!("MTG card DB auto-downloaded"),
+                    Err(e) => error!(error = %e, "Failed to reload MTG after auto-download"),
+                },
+                Err(e) => error!(error = %e, "Auto-download of MTG card DB failed"),
+            }
+        })
+        .await;
+        run_exclusive(retrieval, "Sql-prices", async {
+            match mtg.update_prices().await {
+                Ok(_) => info!("MTG price DB auto-downloaded"),
+                Err(e) => error!(error = %e, "Auto-download of MTG price DB failed"),
+            }
+        })
+        .await;
     }
 
     let riftbound = retrieval.lock().await.riftbound.clone();
     if let Some(riftbound) = riftbound {
-        match riftbound.update_backend().await {
-            Ok(_) => match retrieval.lock().await.reload_riftbound() {
-                Ok(_) => info!("Riftbound card DB auto-downloaded"),
-                Err(e) => error!(error = %e, "Failed to reload Riftbound after auto-download"),
-            },
-            Err(e) => error!(error = %e, "Auto-download of Riftbound card DB failed"),
-        }
+        run_exclusive(retrieval, "RiftboundSql", async {
+            match riftbound.update_backend().await {
+                Ok(_) => match retrieval.lock().await.reload_riftbound() {
+                    Ok(_) => info!("Riftbound card DB auto-downloaded"),
+                    Err(e) => error!(error = %e, "Failed to reload Riftbound after auto-download"),
+                },
+                Err(e) => error!(error = %e, "Auto-download of Riftbound card DB failed"),
+            }
+        })
+        .await;
     }
 
     let pokemon = retrieval.lock().await.pokemon.clone();
     if let Some(pokemon) = pokemon {
-        match pokemon.update_backend().await {
-            Ok(_) => match retrieval.lock().await.reload_pokemon() {
-                Ok(_) => info!("Pokemon card DB auto-downloaded"),
-                Err(e) => error!(error = %e, "Failed to reload Pokemon after auto-download"),
-            },
-            Err(e) => error!(error = %e, "Auto-download of Pokemon card DB failed"),
-        }
-        match pokemon.update_prices().await {
-            Ok(_) => info!("Pokemon price DB auto-downloaded"),
-            Err(e) => error!(error = %e, "Auto-download of Pokemon price DB failed"),
-        }
+        run_exclusive(retrieval, "PokemonSql", async {
+            match pokemon.update_backend().await {
+                Ok(_) => match retrieval.lock().await.reload_pokemon() {
+                    Ok(_) => info!("Pokemon card DB auto-downloaded"),
+                    Err(e) => error!(error = %e, "Failed to reload Pokemon after auto-download"),
+                },
+                Err(e) => error!(error = %e, "Auto-download of Pokemon card DB failed"),
+            }
+        })
+        .await;
+        run_exclusive(retrieval, "PokemonSql-prices", async {
+            match pokemon.update_prices().await {
+                Ok(_) => info!("Pokemon price DB auto-downloaded"),
+                Err(e) => error!(error = %e, "Auto-download of Pokemon price DB failed"),
+            }
+        })
+        .await;
     }
 }
 
 /// Spawns the periodic auto-download loop. Resumes from the persisted
 /// last-run timestamp instead of restarting the interval on every boot.
 pub fn spawn(retrieval: Arc<Mutex<RetrievalState>>, gathers_dir: PathBuf, interval_hours: u64) {
-    let interval_hours = interval_hours.max(1);
+    let interval_hours = interval_hours.clamp(1, MAX_INTERVAL_HOURS);
     let interval = Duration::from_secs(interval_hours * 3600);
     info!(interval_hours, "Periodic DB auto-download enabled");
     tokio::spawn(async move {

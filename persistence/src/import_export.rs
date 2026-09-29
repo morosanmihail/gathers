@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait as _};
 
-use crate::{CollectionCard, CollectionCardsParams, PersistenceSystem, PersistenceSystemTrait as _};
+use crate::{CollectionCard, CollectionCardsParams, PersistenceError, PersistenceSystem, PersistenceSystemTrait as _};
 use crate::csv_models::{CSVCard, CsvField, CsvFieldMapping};
 
 fn systems_by_name<'a>(retrievals: &'a [RetrievalSystem]) -> HashMap<&'a str, &'a RetrievalSystem> {
@@ -48,8 +48,14 @@ fn read_csv(filename: &str, mapping: &CsvFieldMapping) -> eyre::Result<Vec<CSVCa
         let parse_count = |field: CsvField| -> eyre::Result<u32> {
             match get(field) {
                 Some(v) => v
-                    .parse()
-                    .map_err(|_| eyre::eyre!("invalid value {v:?} in '{}' column", mapping.header_for(field))),
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n <= i32::MAX as u32)
+                    .ok_or_else(|| eyre::eyre!(
+                        "invalid value {v:?} in '{}' column (expected a whole number from 0 to {})",
+                        mapping.header_for(field),
+                        i32::MAX
+                    )),
                 None => Ok(0),
             }
         };
@@ -64,6 +70,31 @@ fn read_csv(filename: &str, mapping: &CsvFieldMapping) -> eyre::Result<Vec<CSVCa
     Ok(cards)
 }
 
+/// Folds rows naming the same card (same provider, set and collector number)
+/// into one, summing their quantities — otherwise only the first such row
+/// would be matched back to the resolved card and the rest silently lost.
+/// Sums saturate at `i32::MAX`, the most a collection row can hold.
+fn merge_duplicate_rows(cards: Vec<CSVCard>) -> Vec<CSVCard> {
+    let mut merged: Vec<CSVCard> = Vec::with_capacity(cards.len());
+    let mut index: HashMap<(String, String, String), usize> = HashMap::new();
+    for card in cards {
+        let key = (card.provider.clone(), card.set_code.clone(), card.collector_number.clone());
+        match index.get(&key) {
+            Some(&i) => {
+                let max = i32::MAX as u32;
+                let existing = &mut merged[i];
+                existing.quantity = existing.quantity.saturating_add(card.quantity).min(max);
+                existing.foil_quantity = existing.foil_quantity.saturating_add(card.foil_quantity).min(max);
+            }
+            None => {
+                index.insert(key, merged.len());
+                merged.push(card);
+            }
+        }
+    }
+    merged
+}
+
 impl PersistenceSystem {
     pub async fn import_csv(
         &mut self,
@@ -76,31 +107,43 @@ impl PersistenceSystem {
         const DEFAULT_PROVIDER: &str = "MagicSQLite";
         const BULK_CHUNK_SIZE: usize = 500;
 
-        let cards = read_csv(&filename, mapping)?;
+        // Everything that can go wrong from here until the collection is
+        // written is down to the file's contents, not storage.
+        let invalid = |e: eyre::Report| PersistenceError::InvalidInput(format!("{e:#}"));
+
+        let cards = merge_duplicate_rows(read_csv(&filename, mapping).map_err(invalid)?);
 
         let by_name = systems_by_name(retrievals);
 
-        // Group cards by provider, treating an empty provider as DEFAULT_PROVIDER.
+        // Group cards by provider. A file without providers (gathers' own
+        // original format, and every third-party preset) is MTG, or whatever
+        // single system is configured when MTG isn't.
         let mut groups: HashMap<&str, Vec<&CSVCard>> = Default::default();
         for card in &cards {
-            let provider = if card.provider.is_empty() {
-                DEFAULT_PROVIDER
-            } else {
-                card.provider.as_str()
-            };
-            groups.entry(provider).or_default().push(card);
+            groups.entry(card.provider.as_str()).or_default().push(card);
         }
 
-        // Resolve each group against its retrieval system, falling back to the
-        // first available system when the named provider is not configured.
         // (uuid, quantity, foil_quantity, provider_name)
         let mut cta: Vec<(String, u32, u32, String)> = vec![];
         for (provider, group) in &groups {
-            let system = by_name
-                .get(provider)
-                .copied()
-                .or_else(|| retrievals.first())
-                .ok_or_else(|| eyre::eyre!("No retrieval system available for import"))?;
+            let system = if provider.is_empty() {
+                by_name
+                    .get(DEFAULT_PROVIDER)
+                    .copied()
+                    .or_else(|| retrievals.first())
+                    .ok_or_else(|| eyre::eyre!("No retrieval system available for import"))?
+            } else {
+                // Looking an unknown provider's set codes up in some other
+                // game would at best find nothing and at worst the wrong cards.
+                by_name.get(provider).copied().ok_or_else(|| {
+                    let mut known: Vec<&str> = by_name.keys().copied().collect();
+                    known.sort_unstable();
+                    PersistenceError::InvalidInput(format!(
+                        "Unknown provider '{provider}' in CSV (configured: {})",
+                        known.join(", ")
+                    ))
+                })?
+            };
 
             let input: Vec<(String, String)> = group
                 .iter()
@@ -123,7 +166,10 @@ impl PersistenceSystem {
         }
 
         if cta.is_empty() {
-            return Err(eyre::eyre!("No cards could be resolved from the CSV"));
+            return Err(PersistenceError::InvalidInput(
+                "No cards could be resolved from the CSV".to_string(),
+            )
+            .into());
         }
 
         let now = chrono::Utc::now();
@@ -464,5 +510,73 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Quantity"));
+    }
+
+    /// Imports `csv` into a fresh in-memory store under the test MTG DB,
+    /// returning the store and the import result.
+    async fn import_str(csv: &str) -> (PersistenceSystem, eyre::Result<()>) {
+        let path = std::env::temp_dir().join(format!("gathers_test_{}.csv", uuid::Uuid::new_v4()));
+        std::fs::write(&path, csv).unwrap();
+        let mut s = PersistenceSystem::SQLitePersistenceSystem(
+            SQLitePersistenceSystem::new(true, None).unwrap(),
+        );
+        let r = RetrievalSystem::MagicSQLiteRetrievalSystem(
+            MagicSQLiteRetrievalSystem::new(None, None).unwrap(),
+        );
+        let result = s
+            .import_csv(
+                path.to_string_lossy().to_string(),
+                "Imported".to_string(),
+                &[r],
+                None,
+                &CsvFieldMapping::default(),
+            )
+            .await;
+        std::fs::remove_file(&path).ok();
+        (s, result)
+    }
+
+    #[tokio::test]
+    async fn test_import_sums_duplicate_rows() {
+        let (s, result) = import_str("Set,CollectorNumber,Quantity,FoilQuantity\nM13,39,2,0\nM13,39,5,1\n").await;
+        result.unwrap();
+        let cards = s
+            .get_cards_in_collection_paginated(&"Imported".to_string(), CollectionCardsParams::new(0, 10))
+            .await
+            .unwrap();
+        let normal = cards.iter().find(|c| c.finish.is_empty()).unwrap();
+        assert_eq!(normal.quantity, 7);
+        let foil = cards.iter().find(|c| c.finish == "foil").unwrap();
+        assert_eq!(foil.quantity, 1);
+    }
+
+    #[tokio::test]
+    async fn test_import_rejects_quantity_out_of_range() {
+        let (s, result) = import_str("Set,CollectorNumber,Quantity,FoilQuantity\nM13,39,3000000000,0\n").await;
+        let err = result.unwrap_err();
+        assert!(matches!(err.downcast_ref::<PersistenceError>(), Some(PersistenceError::InvalidInput(_))));
+        assert!(!s.list_collections(None).await.unwrap().contains(&"Imported".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_import_rejects_unknown_provider() {
+        let (_, result) = import_str("Set,CollectorNumber,Quantity,FoilQuantity,Provider\nM13,39,1,0,MagicSQLit\n").await;
+        let err = result.unwrap_err();
+        assert!(matches!(err.downcast_ref::<PersistenceError>(), Some(PersistenceError::InvalidInput(_))));
+        assert!(err.to_string().contains("MagicSQLit"));
+    }
+
+    #[test]
+    fn test_merge_duplicate_rows_saturates() {
+        let row = |q| CSVCard {
+            set_code: "M13".into(),
+            collector_number: "39".into(),
+            quantity: q,
+            foil_quantity: 0,
+            provider: String::new(),
+        };
+        let merged = merge_duplicate_rows(vec![row(i32::MAX as u32), row(10)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].quantity, i32::MAX as u32);
     }
 }
