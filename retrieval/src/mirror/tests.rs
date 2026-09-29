@@ -353,18 +353,52 @@ fn test_reseed_state_from_published_no_prior_publish_is_noop() {
     );
 }
 
+/// Lock that points `GATHERS_MIRRORS_PATH` at `path` for as long as it's held, resetting it
+/// afterwards.
+///
+/// `GATHERS_MIRROR_PATH` is process-global, but `cargo test` runs multiple tests that need it on
+/// parallel threads, so one test's path may be visible to another's `load_mirror_urls` call.
+struct MirrorsPathGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous: Option<String>,
+}
+
+impl MirrorsPathGuard {
+    fn set(path: impl AsRef<std::ffi::OsStr>) -> Self {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // A test panicking while holding the lock poisons it, but there's no real state to be left
+        // inconsistent
+        let lock = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var("GATHERS_MIRRORS_PATH").ok();
+        // SAFETY: the lock ensures this is the only thread in the crate reading or writing the
+        // variable for as long as it lives
+        unsafe { std::env::set_var("GATHERS_MIRRORS_PATH", path) };
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+}
+
+impl Drop for MirrorsPathGuard {
+    fn drop(&mut self) {
+        // SAFETY: the lock is held until this returns (see above)
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var("GATHERS_MIRRORS_PATH", value),
+                None => std::env::remove_var("GATHERS_MIRRORS_PATH"),
+            }
+        }
+    }
+}
+
 #[test]
 fn test_load_mirror_urls_missing_file_returns_empty() {
-    // SAFETY: test runs in its own process slot; no other test in this
-    // crate reads GATHERS_MIRRORS_PATH concurrently.
-    unsafe {
-        std::env::set_var("GATHERS_MIRRORS_PATH", "/nonexistent/path/mirrors.toml");
-    }
+    let _guard = MirrorsPathGuard::set("/nonexistent/path/mirrors.toml");
+
     let urls = load_mirror_urls();
+
     assert!(urls.is_empty());
-    unsafe {
-        std::env::remove_var("GATHERS_MIRRORS_PATH");
-    }
 }
 
 #[test]
@@ -377,14 +411,9 @@ fn test_load_mirror_urls_parses_ordered_list() {
     )
     .unwrap();
 
-    // SAFETY: see above.
-    unsafe {
-        std::env::set_var("GATHERS_MIRRORS_PATH", &config_path);
-    }
+    let _guard = MirrorsPathGuard::set(&config_path);
+
     let urls = load_mirror_urls();
-    unsafe {
-        std::env::remove_var("GATHERS_MIRRORS_PATH");
-    }
 
     assert_eq!(
         urls,
@@ -400,14 +429,9 @@ async fn test_try_mirrors_no_config_returns_false() {
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("AllPrintings.sqlite");
 
-    // SAFETY: see above.
-    unsafe {
-        std::env::set_var("GATHERS_MIRRORS_PATH", "/nonexistent/path/mirrors.toml");
-    }
+    let _guard = MirrorsPathGuard::set("/nonexistent/path/mirrors.toml");
+
     let ok = try_mirrors("AllPrintings.sqlite", &target, None).await;
-    unsafe {
-        std::env::remove_var("GATHERS_MIRRORS_PATH");
-    }
 
     assert!(!ok);
     assert!(!target.exists());
@@ -420,14 +444,9 @@ async fn test_try_mirrors_unreachable_host_falls_through() {
     let config_path = dir.path().join("mirrors.toml");
     fs::write(&config_path, "mirrors = [\"http://127.0.0.1:1\"]\n").unwrap();
 
-    // SAFETY: see above.
-    unsafe {
-        std::env::set_var("GATHERS_MIRRORS_PATH", &config_path);
-    }
+    let _guard = MirrorsPathGuard::set(&config_path);
+
     let ok = try_mirrors("AllPrintings.sqlite", &target, None).await;
-    unsafe {
-        std::env::remove_var("GATHERS_MIRRORS_PATH");
-    }
 
     assert!(!ok, "unreachable mirror must not report success");
     assert!(!target.exists());
