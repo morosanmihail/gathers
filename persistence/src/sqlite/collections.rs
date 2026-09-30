@@ -179,7 +179,7 @@ pub(super) fn rename_collection(
         "UPDATE share_links SET collection_id = ?1 WHERE collection_id = ?2",
         params![new_name, old_name],
     )?;
-    // `deck_cards` follows via ON UPDATE CASCADE; no manual handling needed
+    // `deck_cards` and `deck_meta` follow via ON UPDATE CASCADE; no manual handling needed
     Ok(())
 }
 

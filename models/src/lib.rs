@@ -141,3 +141,40 @@ pub struct DeckCard {
     pub time_added: String,
     pub time_updated: String,
 }
+
+/// Per-deck state that a plain collection has no use for.
+///
+/// A built deck is physically assembled, so its cards are committed and unavailable for
+/// another deck. An unbuilt deck is just a list.
+#[derive(Debug, Clone, Default)]
+pub struct DeckMeta {
+    pub deck: CollectionID,
+    pub built: bool,
+    pub location: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Where the copies of one card currently are.
+///
+/// `owned` counts every copy across all collections; `committed` counts copies allocated to decks
+/// that are currently *built*. `free` is what's left, and may go negative, since over-commitment
+/// is reported rather than prevented.
+#[derive(Debug, Clone)]
+pub struct CardAvailability {
+    pub uuid: CardID,
+    pub owned: i32,
+    pub committed: i32,
+    pub free: i32,
+    pub over_committed: bool,
+    /// Which built decks hold this card, and where those decks physically are.
+    pub holdings: Vec<CardHolding>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CardHolding {
+    pub deck: CollectionID,
+    pub location: Option<String>,
+    pub board: String,
+    pub finish: String,
+    pub quantity: i32,
+}

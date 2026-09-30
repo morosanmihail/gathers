@@ -5,7 +5,7 @@ mod sqlite;
 use enum_dispatch::enum_dispatch;
 use models::CardID;
 use models::CollectionCard;
-use models::{CollectionKind, DeckCard};
+use models::{CardAvailability, CollectionKind, DeckCard, DeckMeta};
 use models::CollectionID;
 use models::filters::SortOrder;
 
@@ -169,6 +169,15 @@ pub trait PersistenceSystemTrait {
         &self,
         name: &CollectionID,
     ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionKind>>>;
+
+    /// Where the copies of each requested card currently are.
+    ///
+    /// How many are owned, how many are committed to *built* decks, and which decks those are.
+    /// Over-commitment is reported, never prevented.
+    fn card_availability(
+        &self,
+        uuids: &[CardID],
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<CardAvailability>>>;
 
     fn list_collection_info(
         &self,
@@ -478,6 +487,13 @@ impl Deck<'_> {
     pub async fn card_count(&self) -> eyre::Result<i64> {
         self.storage.deck_card_count(&self.name).await
     }
+
+    /// Build state and physical location.
+    ///
+    /// A deck with no stored row is simply not built.
+    pub async fn meta(&self) -> eyre::Result<DeckMeta> {
+        self.storage.deck_meta(&self.name).await
+    }
 }
 
 impl DeckMut<'_> {
@@ -519,6 +535,17 @@ impl DeckMut<'_> {
     ) -> eyre::Result<()> {
         self.storage
             .move_deck_card(&self.name, card_uuid, finish, from_board, to_board, quantity)
+            .await
+    }
+
+    pub async fn set_meta(
+        &mut self,
+        built: bool,
+        location: Option<&str>,
+        notes: Option<&str>,
+    ) -> eyre::Result<DeckMeta> {
+        self.storage
+            .set_deck_meta(&self.name, built, location, notes)
             .await
     }
 }

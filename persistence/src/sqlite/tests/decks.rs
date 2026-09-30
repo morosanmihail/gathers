@@ -104,15 +104,16 @@ async fn test_adding_to_a_deck_does_not_touch_the_collection() {
     assert_eq!(qty(&p.deck(&deck).cards().await.unwrap(), "bolt", "main"), 4);
 }
 
-/// A deck can list a card the owner doesn't have at all: a deck row records an intention to play,
-/// not a claim of ownership, so nothing here may fail.
+/// A deck can hold a card the owner doesn't have at all: the over-commitment case is reported,
+/// not prevented, so nothing here may fail.
 #[tokio::test]
 async fn test_deck_can_hold_cards_not_owned() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let deck = new_deck(&mut p, "Burn").await;
     deck_add(&mut p, &deck, "bolt", "main", 4).await;
 
-    assert_eq!(qty(&p.deck(&deck).cards().await.unwrap(), "bolt", "main"), 4);
+    let availability = p.card_availability(&["bolt".to_string()]).await.unwrap();
+    assert_eq!(availability[0].owned, 0);
 }
 
 /// Counts copies, not rows and not distinct cards: a deck is described by how many cards are in
@@ -216,6 +217,137 @@ async fn test_move_more_than_present_moves_what_is_there() {
     assert_eq!(qty(&cards, "bolt", "side"), 2);
 }
 
+// ── build state and availability ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_deck_meta_defaults_to_not_built() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let deck = new_deck(&mut p, "Burn").await;
+
+    let meta = p.deck(&deck).meta().await.unwrap();
+    assert!(!meta.built, "a deck with no stored row is simply not built");
+    assert_eq!(meta.location, None);
+}
+
+#[tokio::test]
+async fn test_deck_meta_round_trips() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let deck = new_deck(&mut p, "Dimir Faeries").await;
+
+    p.deck_mut(&deck).set_meta(true, Some("red deck box"), None)
+        .await
+        .unwrap();
+
+    let meta = p.deck(&deck).meta().await.unwrap();
+    assert!(meta.built);
+    assert_eq!(meta.location.as_deref(), Some("red deck box"));
+}
+
+/// The driving use case: "Dimir Faeries is built and in my red deck box, so if I need my
+/// Spellstutter Sprites for another deck, get them from there."
+#[tokio::test]
+async fn test_availability_points_at_the_built_deck_holding_the_card() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
+    let deck = new_deck(&mut p, "Dimir Faeries").await;
+
+    add_card(&mut p, &col, &"sprite".to_string(), 4, 0).await;
+    deck_add(&mut p, &deck, "sprite", "main", 4).await;
+    p.deck_mut(&deck).set_meta(true, Some("red deck box"), None)
+        .await
+        .unwrap();
+
+    let availability = p.card_availability(&["sprite".to_string()]).await.unwrap();
+    let a = &availability[0];
+
+    assert_eq!(a.owned, 4);
+    assert_eq!(a.committed, 4);
+    assert_eq!(a.free, 0);
+    assert!(!a.over_committed);
+    assert_eq!(a.holdings.len(), 1);
+    assert_eq!(a.holdings[0].deck, "Dimir Faeries");
+    assert_eq!(a.holdings[0].location.as_deref(), Some("red deck box"));
+    assert_eq!(a.holdings[0].board, "main");
+    assert_eq!(a.holdings[0].quantity, 4);
+}
+
+/// An unbuilt deck is only a list; it commits nothing, so the cards stay free.
+#[tokio::test]
+async fn test_unbuilt_decks_do_not_consume_availability() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
+    let deck = new_deck(&mut p, "Burn").await;
+
+    add_card(&mut p, &col, &"bolt".to_string(), 4, 0).await;
+    deck_add(&mut p, &deck, "bolt", "main", 4).await;
+
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.committed, 0);
+    assert_eq!(a.free, 4);
+    assert!(a.holdings.is_empty());
+
+    // Building it commits the cards; taking it apart frees them again.
+    p.deck_mut(&deck).set_meta(true, None, None).await.unwrap();
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.committed, 4);
+    assert_eq!(a.free, 0);
+
+    p.deck_mut(&deck).set_meta(false, None, None).await.unwrap();
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.committed, 0);
+    assert_eq!(a.free, 4);
+}
+
+#[tokio::test]
+async fn test_over_commitment_is_reported_not_blocked() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
+
+    add_card(&mut p, &col, &"bolt".to_string(), 4, 0).await;
+    for name in ["Burn", "Storm"] {
+        let deck = new_deck(&mut p, name).await;
+        deck_add(&mut p, &deck, "bolt", "main", 4).await;
+        p.deck_mut(&deck).set_meta(true, Some("shelf"), None)
+            .await
+            .unwrap();
+    }
+
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.owned, 4);
+    assert_eq!(a.committed, 8);
+    assert_eq!(a.free, -4, "free goes negative rather than clamping");
+    assert!(a.over_committed);
+    assert_eq!(a.holdings.len(), 2, "both built decks are named");
+}
+
+/// Availability aggregates per card, not per finish: a foil copy in a built deck still locates
+/// a playable one.
+#[tokio::test]
+async fn test_availability_aggregates_across_finishes() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = new_collection(&mut p, "Binder".to_string()).await;
+    let deck = new_deck(&mut p, "Burn").await;
+
+    add_card(&mut p, &col, &"bolt".to_string(), 3, 1).await;
+    p.deck_mut(&deck).adjust_card(&"bolt".to_string(), "foil", "main", 1, NOW, "mtg")
+        .await
+        .unwrap();
+    p.deck_mut(&deck).set_meta(true, None, None).await.unwrap();
+
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.owned, 4, "3 nonfoil + 1 foil");
+    assert_eq!(a.committed, 1);
+    assert_eq!(a.holdings[0].finish, "foil", "finish kept as detail");
+}
+
+#[tokio::test]
+async fn test_availability_for_unknown_card_is_all_zero() {
+    let p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let a = &p.card_availability(&["nothing".to_string()]).await.unwrap()[0];
+    assert_eq!((a.owned, a.committed, a.free), (0, 0, 0));
+    assert!(!a.over_committed);
+}
+
 // ── decks never disturb ownership records ────────────────────────────────────
 
 /// Purchase history is keyed on `(collection_id, card_uuid)` with no board.
@@ -240,6 +372,9 @@ async fn test_deck_activity_never_disturbs_purchase_history() {
     p.deck_mut(&deck).move_card(&"bolt".to_string(), "", "main", "side", 2)
         .await
         .unwrap();
+    p.deck_mut(&deck).set_meta(true, Some("red deck box"), None)
+        .await
+        .unwrap();
     deck_add(&mut p, &deck, "bolt", "side", -3).await;
 
     let after = p.get_all_purchase_history(&col).await.unwrap();
@@ -250,13 +385,16 @@ async fn test_deck_activity_never_disturbs_purchase_history() {
 
 // ── cascades ─────────────────────────────────────────────────────────────────
 
-/// `deck_cards` declares real foreign keys, so a rename cascades rather than orphaning the deck's
-/// contents.
+/// `deck_cards` / `deck_meta` declare real foreign keys, so a rename cascades rather than orphaning
+/// the deck's contents.
 #[tokio::test]
-async fn test_renaming_a_deck_carries_its_cards() {
+async fn test_renaming_a_deck_carries_its_cards_and_metadata() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let deck = new_deck(&mut p, "Burn").await;
     deck_add(&mut p, &deck, "bolt", "main", 4).await;
+    p.deck_mut(&deck).set_meta(true, Some("red deck box"), None)
+        .await
+        .unwrap();
 
     p.rename_collection(&deck, &"Mono Red".to_string())
         .await
@@ -267,6 +405,10 @@ async fn test_renaming_a_deck_carries_its_cards() {
         qty(&p.deck(&renamed).cards().await.unwrap(), "bolt", "main"),
         4
     );
+    let meta = p.deck(&renamed).meta().await.unwrap();
+    assert!(meta.built);
+    assert_eq!(meta.location.as_deref(), Some("red deck box"));
+
     assert!(p.deck(&deck).cards().await.unwrap().is_empty());
     assert_eq!(
         p.get_collection_kind(&renamed).await.unwrap(),
@@ -276,28 +418,27 @@ async fn test_renaming_a_deck_carries_its_cards() {
 }
 
 /// Deleting a deck must not leave rows behind: an orphaned `deck_cards` row would keep claiming
-/// the card belongs to a deck that no longer exists.
+/// the card was committed to a deck that no longer exists.
 #[tokio::test]
-async fn test_deleting_a_deck_removes_its_cards() {
+async fn test_deleting_a_deck_removes_its_cards_and_metadata() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = new_collection(&mut p, "Binder".to_string()).await;
     let deck = new_deck(&mut p, "Burn").await;
 
     add_card(&mut p, &col, &"bolt".to_string(), 4, 0).await;
     deck_add(&mut p, &deck, "bolt", "main", 4).await;
+    p.deck_mut(&deck).set_meta(true, Some("red deck box"), None)
+        .await
+        .unwrap();
 
     p.remove_collection(&deck, None).await.unwrap();
 
     assert!(p.deck(&deck).cards().await.unwrap().is_empty());
+    assert!(!p.deck(&deck).meta().await.unwrap().built);
 
-    let owned = p
-        .get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100))
-        .await
-        .unwrap();
-    assert_eq!(
-        owned[0].quantity, 4,
-        "deleting a deck leaves the owner's copies alone"
-    );
+    let a = &p.card_availability(&["bolt".to_string()]).await.unwrap()[0];
+    assert_eq!(a.committed, 0, "a deleted deck commits nothing");
+    assert_eq!(a.free, 4);
 }
 
 /// Merging only makes sense between things that record ownership, so folding a deck into a
@@ -343,8 +484,8 @@ async fn test_deck_cards_require_an_existing_collection() {
     );
 }
 
-/// The other direction is refused for a different reason: `cards` rows written under a deck's name
-/// would never be read again, since a deck's contents come from `deck_cards`.
+/// The other direction is refused for a different reason: `cards` rows written under a deck's
+/// name are orphaned, since a deck's contents come from `deck_cards`.
 #[tokio::test]
 async fn test_merging_a_collection_into_a_deck_is_refused() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();

@@ -11,7 +11,7 @@ mod tests;
 use include_dir::{Dir, include_dir};
 use models::CardID;
 use models::CollectionID;
-use models::{CollectionKind, DeckCard};
+use models::{CardAvailability, CollectionKind, DeckCard, DeckMeta};
 use rusqlite::Connection;
 use rusqlite_migration::Migrations;
 use std::sync::Arc;
@@ -108,6 +108,22 @@ impl SQLitePersistenceSystem {
             &mut conn, deck, card_uuid, finish, from_board, to_board, quantity,
         )
     }
+
+    pub(crate) async fn deck_meta(&self, deck: &CollectionID) -> eyre::Result<DeckMeta> {
+        let conn = self.connection.lock().await;
+        deck_cards::get_meta(&conn, deck)
+    }
+
+    pub(crate) async fn set_deck_meta(
+        &mut self,
+        deck: &CollectionID,
+        built: bool,
+        location: Option<&str>,
+        notes: Option<&str>,
+    ) -> eyre::Result<DeckMeta> {
+        let conn = self.connection.lock().await;
+        deck_cards::set_meta(&conn, deck, built, location, notes)
+    }
 }
 
 impl SQLitePersistenceSystem {
@@ -145,6 +161,11 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<Option<CollectionKind>> {
         let conn = self.connection.lock().await;
         collections::get_collection_kind(&conn, name)
+    }
+
+    async fn card_availability(&self, uuids: &[CardID]) -> eyre::Result<Vec<CardAvailability>> {
+        let conn = self.connection.lock().await;
+        deck_cards::card_availability(&conn, uuids)
     }
 
     async fn remove_collection(
