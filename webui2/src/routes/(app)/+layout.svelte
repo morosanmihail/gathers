@@ -43,6 +43,23 @@
 	const collectionTabs = $derived(app.collections.filter((c) => !isDeck(c)));
 	const deckTabs = $derived(app.collections.filter((c) => isDeck(c)));
 
+	let tabBar = $state<HTMLElement | null>(null);
+
+	// The tab bar scrolls sideways rather than wrapping, and hides its scrollbar, so a tab past
+	// the right edge is reachable but invisible: land on one by URL and nothing on screen is
+	// marked current. Decks share the bar, so overflowing it is now ordinary.
+	$effect(() => {
+		// The active tab changes with the route, and the tabs themselves don't exist until the
+		// collections have loaded, so both are read here.
+		if (!$page.url.pathname || app.collections.length === 0 || !tabBar) return;
+
+		// `nearest` on both axes so an already-visible tab isn't moved, and the page doesn't jump
+		// vertically to chase one that isn't.
+		tabBar
+			.querySelector('.tab-item.active')
+			?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+	});
+
 
 	function selectTheme(t: string) {
 		applyTheme(t);
@@ -162,7 +179,7 @@
 		</div>
 
 		<!-- ─── Tab bar ─── -->
-		<div class="tab-bar">
+		<div class="tab-bar" bind:this={tabBar}>
 			<a href="/" class="tab-item" class:active={$page.url.pathname === '/'}>Home</a>
 			<a href="/search" class="tab-item" class:active={$page.url.pathname === '/search'}>
 				<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
