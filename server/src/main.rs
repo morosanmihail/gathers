@@ -18,7 +18,7 @@ use tracing::{error, info, warn};
 
 use crate::collections::{collection_routes, public_collection_routes};
 use crate::collections::collections_models::APIUniqueMode;
-use crate::decks::deck_routes;
+use crate::decks::{card_routes, deck_routes};
 use crate::mtg_api::mtg_routes;
 use crate::plugin_api::plugin_routes;
 use crate::pokemon_api::pokemon_routes;
@@ -748,6 +748,7 @@ fn api_router(api: &mut OpenApi) -> axum::Router<GathersState> {
         .nest("/api/pokemon", pokemon_routes())
         .nest("/api/collection", collection_routes())
         .nest("/api/deck", deck_routes())
+        .nest("/api/cards", card_routes())
         .nest("/api/share", public_collection_routes())
         .nest("/api/settings", settings_routes())
         .nest("/api/plugins", plugin_routes())
@@ -1238,9 +1239,11 @@ async fn reject_cross_site(
 /// Which setting, if any, has to be on for `path` to be served.
 fn required_feature(path: &str) -> Option<&'static str> {
     // `/api/deck/` counts as collections: a deck is a collection with a kind, so disabling
-    // collections has to close its endpoints too, not just hide them in the UI.
+    // collections has to close its endpoints too, not just hide them in the UI. `/api/cards/`
+    // likewise: availability reports what is owned and which decks hold it
     if path.starts_with("/api/collection/")
         || path.starts_with("/api/deck/")
+        || path.starts_with("/api/cards/")
         || path.starts_with("/api/share/")
     {
         return Some("collections");
@@ -1475,6 +1478,9 @@ mod request_guard_tests {
         assert_eq!(required_feature("/api/share/abc"), Some("collections"));
         assert_eq!(required_feature("/api/deck/cards/Burn/list"), Some("collections"));
         assert_eq!(required_feature("/api/deck/cards/Burn/move"), Some("collections"));
+        assert_eq!(required_feature("/api/deck/meta/Burn"), Some("collections"));
+        // Availability answers from `cards` and `deck_cards`, so it closes with them
+        assert_eq!(required_feature("/api/cards/availability"), Some("collections"));
         assert_eq!(required_feature("/api/mtg/prices"), Some("pricing"));
         assert_eq!(required_feature("/api/pokemon/prices/update"), Some("pricing"));
         assert_eq!(required_feature("/api/mtg/cards/search"), None);

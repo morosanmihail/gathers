@@ -75,6 +75,85 @@ pub struct DeckCardMove {
     pub quantity: i32,
 }
 
+/// Whether a deck is physically assembled, and where it is.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DeckMeta {
+    /// A built deck is assembled in real life, so its cards are committed and unavailable to
+    /// another deck. An unbuilt deck is only a list.
+    pub built: bool,
+    pub location: Option<String>,
+    pub notes: Option<String>,
+}
+
+impl From<models::DeckMeta> for DeckMeta {
+    fn from(meta: models::DeckMeta) -> Self {
+        Self {
+            built: meta.built,
+            location: meta.location,
+            notes: meta.notes,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AvailabilityRequest {
+    /// Card ids to report on. Empty yields an empty response.
+    pub ids: Vec<String>,
+}
+
+/// Where the copies of one card currently are.
+#[derive(Serialize, JsonSchema)]
+pub struct CardAvailability {
+    pub id: String,
+    /// Copies owned across every collection.
+    pub owned: i32,
+    /// Copies allocated to decks that are currently built.
+    pub committed: i32,
+    /// `owned - committed`. Goes negative when more copies are committed than owned, which is
+    /// reported rather than prevented.
+    pub free: i32,
+    #[serde(rename = "overCommitted")]
+    pub over_committed: bool,
+    pub holdings: Vec<CardHolding>,
+}
+
+/// One built deck's claim on a card, and where that deck physically is.
+#[derive(Serialize, JsonSchema)]
+pub struct CardHolding {
+    pub deck: String,
+    pub location: Option<String>,
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub finish: String,
+    pub quantity: i32,
+}
+
+impl From<models::CardAvailability> for CardAvailability {
+    fn from(a: models::CardAvailability) -> Self {
+        Self {
+            id: a.uuid,
+            owned: a.owned,
+            committed: a.committed,
+            free: a.free,
+            over_committed: a.over_committed,
+            holdings: a.holdings.into_iter().map(CardHolding::from).collect(),
+        }
+    }
+}
+
+impl From<models::CardHolding> for CardHolding {
+    fn from(h: models::CardHolding) -> Self {
+        Self {
+            deck: h.deck,
+            location: h.location,
+            board: h.board,
+            finish: h.finish,
+            quantity: h.quantity,
+        }
+    }
+}
+
 fn parse_time(raw: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(raw)
         .map(|dt| dt.with_timezone(&Utc))

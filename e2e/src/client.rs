@@ -2,12 +2,12 @@ use eyre::{Context, bail};
 use reqwest::StatusCode;
 
 use crate::models::{
-    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, CollectionKind, CollectionRemoveResponse,
-    CollectionRenameRequest, CollectionToAdd, CollectionValueCards, CollectionValueHistory,
-    DeckCard, DeckCardAdjustment, DeckCardMove, MtgCard, PriceHistoryResponse,
-    PublicCollectionPage, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse,
-    SystemInfo, SystemMeta,
+    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, AvailabilityRequest, CardAvailability,
+    CardToAdd, Collection, CollectionAddResponse, CollectionCard, CollectionKind,
+    CollectionRemoveResponse, CollectionRenameRequest, CollectionToAdd, CollectionValueCards,
+    CollectionValueHistory, DeckCard, DeckCardAdjustment, DeckCardMove, DeckMeta, MtgCard,
+    PriceHistoryResponse, PublicCollectionPage, PurchaseHistoryResponse, ShareLink,
+    ShareLinkRevokeResponse, SystemInfo, SystemMeta,
 };
 
 /// HTTP client for the GatheRs server.
@@ -463,6 +463,38 @@ impl GathersClient {
         .await
     }
 
+    pub async fn deck_meta(&self, deck: &str) -> eyre::Result<DeckMeta> {
+        self.get(&format!("/api/deck/meta/{}", urlenc(deck))).await
+    }
+
+    pub async fn set_deck_meta(
+        &self,
+        deck: &str,
+        built: bool,
+        location: Option<&str>,
+    ) -> eyre::Result<DeckMeta> {
+        self.put(
+            &format!("/api/deck/meta/{}", urlenc(deck)),
+            &DeckMeta {
+                built,
+                location: location.map(str::to_string),
+                notes: None,
+            },
+        )
+        .await
+    }
+
+    /// Where the copies of each card currently are: owned, committed to built decks, and which
+    /// decks those are.
+    pub async fn card_availability(&self, ids: &[&str]) -> eyre::Result<Vec<CardAvailability>> {
+        self.post(
+            "/api/cards/availability",
+            &AvailabilityRequest {
+                ids: ids.iter().map(|s| s.to_string()).collect(),
+            },
+        )
+        .await
+    }
 
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {
         let url = format!("{}{path}", self.base_url);
@@ -489,6 +521,22 @@ impl GathersClient {
             .await
             .with_context(|| format!("POST {url}"))?;
         parse_response(resp, "POST", &url).await
+    }
+
+    async fn put<B: serde::Serialize + ?Sized, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> eyre::Result<T> {
+        let url = format!("{}{path}", self.base_url);
+        let resp = self
+            .client
+            .put(&url)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("PUT {url}"))?;
+        parse_response(resp, "PUT", &url).await
     }
 
     async fn post_empty<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {

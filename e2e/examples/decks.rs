@@ -16,6 +16,10 @@
 //!      deck can never accumulate orphaned rows in `cards`
 //!   8. adjusting a want quantity on a deck is an error, since deck rows
 //!      have no want quantity at all
+//!   9. an unbuilt deck commits nothing; building it commits its cards and
+//!      says where they physically are, and dismantling it releases them
+//!  10. over-commitment is reported, never refused
+//!  11. build state and location survive a rename
 //!
 //! Deploys its own server (see `e2e::harness`), on a copy of
 //! `data/testPrintings.db`:
@@ -229,6 +233,78 @@ async fn run(
     )?;
     ok("the two card APIs don't cross");
 
+    // ── 10. Only a built deck commits its cards ─────────────────────────────
+    step("10. Build a deck, then take it apart");
+
+    client.adjust_deck_card(deck2, CARD_A, "", "main", 3).await?;
+
+    let a = availability(client, CARD_A).await?;
+    eq(a.owned, 4, "owned counts the collection")?;
+    eq(a.committed, 0, "an unbuilt deck commits nothing")?;
+    ensure(a.holdings.is_empty(), "an unbuilt deck isn't a holding")?;
+    ok("an unbuilt deck is only a list");
+
+    client.set_deck_meta(deck2, true, Some("shelf")).await?;
+
+    let a = availability(client, CARD_A).await?;
+    eq(a.committed, 3, "a built deck commits its cards")?;
+    eq(a.free, 1, "free is what's left after what's committed")?;
+    let holding = a
+        .holdings
+        .iter()
+        .find(|h| h.deck == deck2 && h.board == "main")
+        .ok_or_else(|| eyre::eyre!("a built deck should appear in the holdings"))?;
+    eq(
+        holding.location.as_deref(),
+        Some("shelf"),
+        "a holding says where the deck physically is",
+    )?;
+    ok("building a deck commits its cards, and says where they are");
+
+    ensure(client.deck_meta(deck2).await?.built, "build state round-trips")?;
+
+    client.set_deck_meta(deck2, false, None).await?;
+    eq(
+        availability(client, CARD_A).await?.committed,
+        0,
+        "dismantling a deck releases its cards",
+    )?;
+    ok("taking a deck apart frees its cards again");
+
+    // ── 11. Over-commitment is reported, not refused ────────────────────────
+    step("11. Commit more copies than are owned");
+
+    client.set_deck_meta(deck2, true, Some("shelf")).await?;
+    client.adjust_deck_card(deck2, CARD_A, "", "side", 5).await?;
+
+    let a = availability(client, CARD_A).await?;
+    eq(a.owned, 4, "still own exactly what the collection holds")?;
+    eq(a.committed, 8, "3 on the mainboard and 5 on the sideboard")?;
+    ensure(a.over_committed, "over-commitment is flagged")?;
+    ensure(a.free < 0, "free goes negative rather than clamping at zero")?;
+    ok("over-commitment is reported rather than blocked");
+
+    // ── 12. Build state survives a rename ───────────────────────────────────
+    step("12. Rename a built deck");
+
+    let renamed2 = format!("{deck2}-renamed");
+    client.rename_collection(deck2, &renamed2).await?;
+
+    let meta = client.deck_meta(&renamed2).await?;
+    ensure(meta.built, "build state follows the rename")?;
+    eq(
+        meta.location.as_deref(),
+        Some("shelf"),
+        "so does where the deck is",
+    )?;
+    eq(
+        availability(client, CARD_A).await?.committed,
+        8,
+        "a renamed deck still commits its cards",
+    )?;
+    client.remove_collection(&renamed2).await?;
+    ok("a renamed deck keeps its build state");
+
     // The collection is still exactly as it was at step 1, despite everything the decks did to it.
     let owned = client.list_cards(col).await?;
     eq(
@@ -252,6 +328,19 @@ fn qty(cards: &[DeckCard], id: &str, board: &str) -> i32 {
         .find(|c| c.id == id && c.board == board)
         .map(|c| c.quantity)
         .unwrap_or(0)
+}
+
+/// The availability entry for one card, which is always exactly one row per requested id.
+async fn availability(
+    client: &GathersClient,
+    id: &str,
+) -> eyre::Result<e2e::models::CardAvailability> {
+    client
+        .card_availability(&[id])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| eyre::eyre!("no availability returned for '{id}'"))
 }
 
 fn ensure(cond: bool, msg: &str) -> eyre::Result<()> {

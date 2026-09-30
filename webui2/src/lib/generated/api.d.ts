@@ -1944,6 +1944,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deck/meta/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether a deck is physically assembled, and where it is. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckMeta"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Whether a deck is physically assembled, and where it is. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeckMeta"];
+                };
+            };
+            responses: {
+                /** @description Whether a deck is physically assembled, and where it is. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckMeta"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cards/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AvailabilityRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CardAvailability"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/share/{token}": {
         parameters: {
             query?: never;
@@ -2475,9 +2572,46 @@ export interface components {
              */
             provider: string | null;
         };
+        AvailabilityRequest: {
+            /** @description Card ids to report on. Empty yields an empty response. */
+            ids: string[];
+        };
         BulkPricesQuery: {
             /** @default [] */
             ids: string[];
+        };
+        /** @description Where the copies of one card currently are. */
+        CardAvailability: {
+            /**
+             * Format: int32
+             * @description Copies allocated to decks that are currently built.
+             */
+            committed: number;
+            /**
+             * Format: int32
+             * @description `owned - committed`. Goes negative when more copies are committed than owned, which is
+             *     reported rather than prevented.
+             */
+            free: number;
+            holdings: components["schemas"]["CardHolding"][];
+            id: string;
+            overCommitted: boolean;
+            /**
+             * Format: int32
+             * @description Copies owned across every collection.
+             */
+            owned: number;
+        };
+        /** @description One built deck's claim on a card, and where that deck physically is. */
+        CardHolding: {
+            /** @default  */
+            board: string;
+            deck: string;
+            /** @default  */
+            finish: string;
+            location?: string | null;
+            /** Format: int32 */
+            quantity: number;
         };
         CardIdentInner: {
             scryfallId: string;
@@ -2859,6 +2993,16 @@ export interface components {
             quantity: number;
             /** @default  */
             toBoard: string;
+        };
+        /** @description Whether a deck is physically assembled, and where it is. */
+        DeckMeta: {
+            /**
+             * @description A built deck is assembled in real life, so its cards are committed and unavailable to
+             *     another deck. An unbuilt deck is only a list.
+             */
+            built: boolean;
+            location?: string | null;
+            notes?: string | null;
         };
         DownloadProgressInfo: {
             /** Format: uint64 */

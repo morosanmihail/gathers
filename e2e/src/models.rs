@@ -294,6 +294,41 @@ pub struct DeckCardMove {
     pub quantity: i32,
 }
 
+/// Whether a deck is physically assembled, and where it is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckMeta {
+    pub built: bool,
+    pub location: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AvailabilityRequest {
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CardAvailability {
+    pub id: String,
+    pub owned: i32,
+    pub committed: i32,
+    pub free: i32,
+    #[serde(rename = "overCommitted")]
+    pub over_committed: bool,
+    pub holdings: Vec<CardHolding>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CardHolding {
+    pub deck: String,
+    pub location: Option<String>,
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub finish: String,
+    pub quantity: i32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CollectionRenameRequest {
     pub new_id: String,

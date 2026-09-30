@@ -11,7 +11,9 @@ use crate::collections::{card_not_found, resolve_provider};
 use crate::{bad_request, demo_err, demo_mode, storage_error};
 use crate::{ApiError, ErrorPayload, GathersState};
 
-use decks_models::{DeckCard, DeckCardAdjustment, DeckCardMove};
+use decks_models::{
+    AvailabilityRequest, CardAvailability, DeckCard, DeckCardAdjustment, DeckCardMove, DeckMeta,
+};
 
 /// Confirms `id` names a deck, rejecting a missing collection or a plain one.
 ///
@@ -167,11 +169,81 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         Ok(Json(cards.into_iter().map(DeckCard::from).collect()))
     }
 
+    async fn meta_get(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<DeckMeta>, ApiError> {
+        let storage = &state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let meta = storage
+            .deck(&id)
+            .meta()
+            .await
+            .map_err(|e| storage_error("Failed to get deck state", e))?;
+
+        Ok(Json(meta.into()))
+    }
+
+    /// Records whether the deck is assembled and where it physically is.
+    ///
+    /// This is what makes its cards count as committed in `/availability`.
+    async fn meta_set(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<DeckMeta>,
+    ) -> Result<Json<DeckMeta>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let meta = storage
+            .deck_mut(&id)
+            .set_meta(
+                input.built,
+                input.location.as_deref(),
+                input.notes.as_deref(),
+            )
+            .await
+            .map_err(|e| storage_error("Failed to update deck state", e))?;
+
+        Ok(Json(meta.into()))
+    }
+
     ApiRouter::new()
         .api_route("/cards/{id}/list", get(cards_list))
         .api_route("/cards/{id}/count", get(cards_count))
         .api_route("/cards/{id}/adjust", post(cards_adjust))
         .api_route("/cards/{id}/move", post(cards_move))
+        .api_route("/meta/{id}", get(meta_get).put(meta_set))
+}
+
+/// Card-scoped queries that span decks and collections.
+///
+/// Mounted apart from `/api/deck` because the question these answer is about a card ("where
+/// are my copies of this?"), even though most of the answer comes from what decks have claimed.
+/// A client asking it isn't holding a deck.
+pub fn card_routes() -> ApiRouter<GathersState> {
+    /// How many copies of each requested card are owned, how many are committed to decks that are
+    /// currently built, and which decks those are.
+    ///
+    /// Takes a list so a client rendering a deck can ask once rather than once per row.
+    async fn availability(
+        State(state): State<GathersState>,
+        Json(input): Json<AvailabilityRequest>,
+    ) -> Result<Json<Vec<CardAvailability>>, ApiError> {
+        let storage = &state.1.lock().await.storage;
+        let availability = storage
+            .card_availability(&input.ids)
+            .await
+            .map_err(|e| storage_error("Failed to compute card availability", e))?;
+
+        Ok(Json(
+            availability.into_iter().map(CardAvailability::from).collect(),
+        ))
+    }
+
+    ApiRouter::new().api_route("/availability", post(availability))
 }
 
 #[cfg(test)]
