@@ -30,6 +30,8 @@ export interface DeckCard extends PartialBy<DeckEntry, 'timeAdded' | 'timeUpdate
 	finishes?: string[];
 }
 
+export type CardAvailability = components['schemas']['CardAvailability'];
+export type DeckMeta = components['schemas']['DeckMeta'];
 
 /**
  * Human label for a board value. `""` is a deck's default zone, which for a

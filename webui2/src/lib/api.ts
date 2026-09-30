@@ -18,7 +18,9 @@ import type {
 	PartialBy,
 	CollectionKind,
 	DeckEntry,
-	DeckCard
+	DeckCard,
+	DeckMeta,
+	CardAvailability
 } from './types';
 import type { components } from './generated/api';
 import { demoAlert } from './demoAlert.svelte';
@@ -208,6 +210,32 @@ export async function moveDeckCard(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ id, finish, fromBoard, toBoard, quantity })
 	});
+}
+
+export async function getDeckMeta(deck: string): Promise<DeckMeta> {
+	return fetchJSON(`/api/deck/meta/${encodeURIComponent(deck)}`);
+}
+
+export async function setDeckMeta(deck: string, meta: DeckMeta): Promise<DeckMeta> {
+	return fetchJSON<DeckMeta>(`/api/deck/meta/${encodeURIComponent(deck)}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(meta)
+	});
+}
+
+/**
+ * Where the copies of each card currently are: owned, committed to built
+ * decks, and which decks those are. Asked once per list rather than per row.
+ */
+export async function getCardAvailability(ids: string[]): Promise<Record<string, CardAvailability>> {
+	if (ids.length === 0) return {};
+	const results = await fetchJSON<CardAvailability[]>('/api/cards/availability', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ids })
+	});
+	return Object.fromEntries(results.map(a => [a.id, a]));
 }
 
 // Collection cards — raw entries (id + quantities only)

@@ -1,7 +1,7 @@
 <script lang="ts">
 	// A deck's page. Separate from the collection page rather than a mode of it: a deck has boards
-	// but no prices, wants, purchase history, or pagination, so sharing the route would have meant a
-	// screen full of controls that don't apply.
+	// and a build state but no prices, wants, purchase history, or pagination, so sharing the route
+	// would have meant a screen full of controls that don't apply.
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import DeckBoard from '$lib/components/DeckBoard.svelte';
@@ -9,18 +9,23 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
 		getDeckCards, adjustDeckCard, moveDeckCard,
+		getDeckMeta, setDeckMeta, getCardAvailability,
 		renameCollection, deleteCollection, invalidateCache
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { boardsInUse, boardsToOffer, boardLabel } from '$lib/types';
-	import type { DeckCard } from '$lib/types';
+	import type { CardAvailability, DeckCard, DeckMeta } from '$lib/types';
 
 	const deckId = $derived(decodeURIComponent($page.params.id ?? ''));
 
 	let cards = $state<DeckCard[]>([]);
+	let meta = $state<DeckMeta>({ built: false, location: null, notes: null });
+	let availability = $state<Record<string, CardAvailability>>({});
 	let loading = $state(true);
 	let searchOpen = $state(false);
 	let addBoard = $state('main');
+	let locationDraft = $state('');
+	let savingMeta = $state(false);
 	let renaming = $state(false);
 	let renameValue = $state('');
 	let renameError = $state('');
@@ -43,7 +48,12 @@
 		loading = true;
 		loadError = '';
 		try {
-			cards = await getDeckCards(deckId);
+			const [deckCards, deckMeta] = await Promise.all([getDeckCards(deckId), getDeckMeta(deckId)]);
+			cards = deckCards;
+			meta = deckMeta;
+			locationDraft = deckMeta.location ?? '';
+			// One lookup for the whole list rather than one per row.
+			availability = await getCardAvailability([...new Set(deckCards.map((c) => c.id))]);
 		} catch (e) {
 			// Unlike a collection's card list, these endpoints genuinely refuse: 404 for a name
 			// that isn't a deck any more, 400 for a collection's name. Without this the page
@@ -65,6 +75,10 @@
 		load();
 	});
 
+	async function refreshAvailability() {
+		availability = await getCardAvailability([...new Set(cards.map((c) => c.id))]);
+	}
+
 	async function adjust(card: DeckCard, delta: number) {
 		actionError = '';
 		try {
@@ -76,6 +90,8 @@
 						: c
 				)
 				.filter((c) => (c.quantity ?? 0) > 0);
+			// A built deck's contents change what every card is short by.
+			if (meta.built) refreshAvailability();
 		} catch (e) {
 			console.error('[gathers] deck adjust failed:', e);
 			actionError = `Couldn't change that quantity. ${e}`;
@@ -115,8 +131,8 @@
 			invalidateCache('collections');
 			await app.loadCollections();
 			renaming = false;
-			// The deck's cards follow the rename (the foreign keys on deck_cards cascade), so the
-			// new page is the same deck under a new name.
+			// The deck's cards and build state follow the rename (the foreign keys on deck_cards
+			// and deck_meta cascade), so the new page is the same deck under a new name.
 			goto(`/deck/${encodeURIComponent(newName)}`);
 		} catch (err) {
 			renameError = String(err);
@@ -132,6 +148,25 @@
 			goto('/');
 		} catch (e) {
 			console.error('[gathers] deck delete failed:', e);
+		}
+	}
+
+	async function saveMeta(next: Partial<DeckMeta>) {
+		actionError = '';
+		savingMeta = true;
+		try {
+			meta = await setDeckMeta(deckId, {
+				built: next.built ?? meta.built,
+				location: next.location !== undefined ? next.location : meta.location,
+				notes: meta.notes
+			});
+			locationDraft = meta.location ?? '';
+			await refreshAvailability();
+		} catch (e) {
+			console.error('[gathers] deck meta save failed:', e);
+			actionError = `Couldn't save the deck's build state. ${e}`;
+		} finally {
+			savingMeta = false;
 		}
 	}
 </script>
@@ -153,6 +188,27 @@
 				{/each}
 			</select>
 		</label>
+
+		<label class="deck-built-toggle" title="A built deck is assembled in real life, so its cards count as committed">
+			<input
+				type="checkbox"
+				checked={meta.built}
+				disabled={savingMeta}
+				onchange={(e) => saveMeta({ built: e.currentTarget.checked })}
+			/>
+			Built
+		</label>
+
+		{#if meta.built}
+			<input
+				class="input deck-location-input"
+				placeholder="Where is it? e.g. red deck box"
+				bind:value={locationDraft}
+				disabled={savingMeta}
+				onblur={() => locationDraft !== (meta.location ?? '') && saveMeta({ location: locationDraft || null })}
+				onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+			/>
+		{/if}
 
 		<div class="toolbar-sep"></div>
 
@@ -191,6 +247,11 @@
 		<h1 class="page-title">{deckId}</h1>
 		{#if !loading}
 			<span class="page-subtitle">{total.toLocaleString()} card{total !== 1 ? 's' : ''}</span>
+			{#if meta.built}
+				<span class="deck-badge deck-badge-built">
+					Built{meta.location ? ` (${meta.location})` : ''}
+				</span>
+			{/if}
 		{/if}
 	</div>
 
@@ -217,8 +278,10 @@
 		<div class="deck-boards">
 			{#each boards as board (board)}
 				<DeckBoard
+					deck={deckId}
 					{board}
 					cards={cardsOn(board)}
+					{availability}
 					boards={addBoards}
 					onAdjust={adjust}
 					onMove={move}

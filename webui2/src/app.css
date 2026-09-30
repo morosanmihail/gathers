@@ -1341,7 +1341,8 @@ label.field-label {
 
 .add-collection-kind { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
 
-.deck-add-board {
+.deck-add-board,
+.deck-built-toggle {
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -1351,6 +1352,7 @@ label.field-label {
 }
 
 .deck-add-board .select { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
+.deck-location-input { width: 210px; height: 28px; padding: 3px 8px; font-size: 0.82rem; }
 
 .deck-boards {
 	display: flex;
@@ -1375,7 +1377,7 @@ label.field-label {
 
 .deck-row {
 	display: grid;
-	grid-template-columns: 1fr 110px 200px;
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 200px;
 	align-items: center;
 	gap: 8px;
 	padding: 6px 4px;
@@ -1388,6 +1390,7 @@ label.field-label {
 .deck-row-name { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .deck-row-finish { font-size: 0.7rem; color: var(--text2); text-transform: lowercase; }
 .deck-row-set { font-size: 0.78rem; color: var(--text2); }
+.deck-row-note { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .deck-row-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 .deck-move-select { height: 24px; padding: 1px 4px; font-size: 0.72rem; }
@@ -1427,6 +1430,30 @@ label.field-label {
 	background: color-mix(in srgb, var(--danger) 14%, transparent);
 	color: var(--danger);
 	font-size: 0.8rem;
+}
+
+/* On a tile the note sits between the card body and the controls, so it carries its own
+   padding rather than inheriting a row's. */
+.deck-tile-note { padding: 4px 8px 0; }
+
+.deck-badge {
+	font-size: 0.7rem;
+	padding: 1px 6px;
+	border-radius: var(--radius);
+	background: var(--surface3);
+	color: var(--text2);
+	white-space: nowrap;
+}
+
+.deck-badge-warn {
+	background: color-mix(in srgb, var(--danger) 18%, transparent);
+	color: var(--danger);
+}
+
+.deck-badge-built {
+	background: color-mix(in srgb, var(--success) 18%, transparent);
+	color: var(--success);
+	margin-left: 8px;
 }
 
 @media (max-width: 860px) {

@@ -30,7 +30,7 @@
 	});
 
 	// Derive current collection or deck from URL. Decks get a separate route, since their page has
-	// boards rather than prices and wants.
+	// boards and a build state rather than prices and wants.
 	const currentCollection = $derived(
 		$page.url.pathname.startsWith('/collection/') || $page.url.pathname.startsWith('/deck/')
 			? decodeURIComponent($page.url.pathname.split('/')[2] ?? '')

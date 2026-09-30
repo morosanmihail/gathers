@@ -3,9 +3,9 @@
 	// cards between boards. Honours the global grid/list toggle, like every other card view.
 	//
 	// Deliberately not `CardResultsList`: a deck row has no price column and no want quantity, but
-	// does have a board, so reusing the collection row would have meant adding a deck flag to it
-	// and to everything it renders.
-	import type { DeckCard } from '$lib/types';
+	// does have a board and an availability note, so reusing the collection row would have meant
+	// adding a deck flag to it and to everything it renders.
+	import type { CardAvailability, DeckCard } from '$lib/types';
 	import { boardLabel, finishLabel } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import CardImageTooltip from './CardImageTooltip.svelte';
@@ -13,8 +13,11 @@
 	import SetTooltip from './SetTooltip.svelte';
 
 	interface Props {
+		deck: string;
 		board: string;
 		cards: DeckCard[];
+		/** Keyed by card id; absent while the lookup is still in flight. */
+		availability?: Record<string, CardAvailability>;
 		/** Every board this deck uses, for the "move to" control. */
 		boards: string[];
 		onAdjust: (card: DeckCard, delta: number) => void;
@@ -22,10 +25,26 @@
 		onclick?: (card: DeckCard) => void;
 	}
 
-	let { board, cards, boards, onAdjust, onMove, onclick }: Props = $props();
+	let { deck, board, cards, availability = {}, boards, onAdjust, onMove, onclick }: Props = $props();
 
 	const count = $derived(cards.reduce((n, c) => n + (c.quantity ?? 0), 0));
 	const otherBoards = $derived(boards.filter((b) => b !== board));
+
+	/**
+	 * Copies of this card sitting in *other* built decks.
+	 *
+	 * The deck being viewed is excluded: naming it is noise, and the other decks
+	 * are the ones that would have to be raided.
+	 */
+	function elsewhere(card: DeckCard) {
+		return (availability[card.id]?.holdings ?? []).filter((h) => h.deck !== deck);
+	}
+
+	function shortfall(card: DeckCard): number {
+		const a = availability[card.id];
+		if (!a) return 0;
+		return Math.max(0, a.committed - a.owned);
+	}
 </script>
 
 <section class="deck-board">
@@ -39,12 +58,14 @@
 	{:else if app.viewMode === 'grid'}
 		<div class="card-grid">
 			{#each cards as card (card.id + ':' + (card.finish ?? '') + ':' + (card.board ?? ''))}
-				<DeckTile {card} {otherBoards} {onAdjust} {onMove} {onclick} />
+				<DeckTile {card} {otherBoards} others={elsewhere(card)} short={shortfall(card)} {onAdjust} {onMove} {onclick} />
 			{/each}
 		</div>
 	{:else}
 		<div class="deck-row-list">
 			{#each cards as card (card.id + ':' + (card.finish ?? '') + ':' + (card.board ?? ''))}
+				{@const others = elsewhere(card)}
+				{@const short = shortfall(card)}
 				<div
 					class="deck-row"
 					role="row"
@@ -60,6 +81,19 @@
 					</div>
 
 					<div class="deck-row-set mono"><SetTooltip setCode={card.setCode} /></div>
+
+					<div class="deck-row-note">
+						{#if short > 0}
+							<span class="deck-badge deck-badge-warn" title="More copies are committed to built decks than you own">
+								⚠ {short} short
+							</span>
+						{/if}
+						{#each others as h (h.deck + ':' + h.board + ':' + h.finish)}
+							<span class="deck-badge" title="This many copies are in a deck that's currently built">
+								{h.quantity} in {h.deck}{h.location ? ` (${h.location})` : ''}
+							</span>
+						{/each}
+					</div>
 
 					<div class="deck-row-controls" role="presentation" onclick={(e) => e.stopPropagation()}>
 						<div class="qty-row">

@@ -5,7 +5,7 @@
 	// Separate from `CardTile`, for the same reason `DeckBoard` is separate from
 	// `CardResultsList`: the quantity badge there is built from a `CardGroup`'s entries, which a
 	// deck card has no equivalent of.
-	import type { DeckCard } from '$lib/types';
+	import type { CardAvailability, DeckCard } from '$lib/types';
 	import { boardLabel, cardImageUrl, finishLabel } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import SetTooltip from './SetTooltip.svelte';
@@ -14,12 +14,16 @@
 		card: DeckCard;
 		/** Boards other than the one this tile sits on, for the move control. */
 		otherBoards: string[];
+		/** Copies in other built decks; see `DeckBoard.elsewhere`. */
+		others?: CardAvailability['holdings'];
+		/** Copies committed beyond what is owned; see `DeckBoard.shortfall`. */
+		short?: number;
 		onAdjust: (card: DeckCard, delta: number) => void;
 		onMove: (card: DeckCard, toBoard: string) => void;
 		onclick?: (card: DeckCard) => void;
 	}
 
-	let { card, otherBoards, onAdjust, onMove, onclick }: Props = $props();
+	let { card, otherBoards, others = [], short = 0, onAdjust, onMove, onclick }: Props = $props();
 
 	const rawImgUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 
@@ -63,6 +67,21 @@
 			<div class="card-tile-meta"><SetTooltip setCode={card.setCode} /></div>
 		{/if}
 	</div>
+
+	{#if short > 0 || others.length > 0}
+		<div class="deck-row-note deck-tile-note">
+			{#if short > 0}
+				<span class="deck-badge deck-badge-warn" title="More copies are committed to built decks than are owned">
+					&#9888; {short} short
+				</span>
+			{/if}
+			{#each others as h (h.deck + ':' + h.board + ':' + h.finish)}
+				<span class="deck-badge" title="This many copies are in a deck that is currently built">
+					{h.quantity} in {h.deck}{h.location ? ` ()` : ''}
+				</span>
+			{/each}
+		</div>
+	{/if}
 
 	<div class="deck-tile-controls" role="presentation" onclick={(e) => e.stopPropagation()}>
 		<div class="qty-row">
