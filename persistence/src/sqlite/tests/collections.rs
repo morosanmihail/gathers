@@ -290,3 +290,28 @@ async fn test_remove_collection_move_to_merges_quantities() {
     assert_eq!(unique.quantity, 5);
     assert!(unique.finish.is_empty());
 }
+
+// get_cards_in_collection_count is the pagination total for get_cards_in_collection_paginated, so
+// the two must count the same thing: entries (one row per finish), not distinct cards.
+#[tokio::test]
+async fn test_cards_count_matches_paginated_entry_count() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Binder".to_string()).await.unwrap();
+
+    // One card owned in two finishes, plus a second card in one finish: 2 distinct cards, 3
+    // entries
+    add_card(&mut p, &col, &"bolt".to_string(), 3, 1).await;
+    add_card(&mut p, &col, &"path".to_string(), 2, 0).await;
+
+    let count = p
+        .get_cards_in_collection_count(col.clone(), &[], None)
+        .await
+        .unwrap();
+    let rows = p
+        .get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100))
+        .await
+        .unwrap();
+
+    assert_eq!(count, rows.len(), "count must match what pagination returns");
+    assert_eq!(count, 3, "three entries across two cards");
+}

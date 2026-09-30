@@ -151,3 +151,69 @@ fn test_new_creates_parent_directories() {
     assert!(p.is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Columns of `table`'s PRIMARY KEY, in key order.
+fn primary_key_columns(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
+    let mut cols: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(5)?, r.get::<_, String>(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .into_iter()
+        .filter(|(pk, _)| *pk > 0)
+        .collect();
+    cols.sort_by_key(|(pk, _)| *pk);
+    cols.into_iter().map(|(_, name)| name).collect()
+}
+
+/// Indexes on `table` that were created by an explicit `CREATE INDEX` (origin `c`), paired with
+/// their columns. Excludes SQLite's implicit indexes for PRIMARY KEY / UNIQUE constraints.
+fn explicit_indexes(conn: &rusqlite::Connection, table: &str) -> Vec<(String, Vec<String>)> {
+    let names: Vec<String> = {
+        let mut stmt = conn.prepare(&format!("PRAGMA index_list({table})")).unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        rows.into_iter()
+            .filter(|(_, origin)| origin == "c")
+            .map(|(name, _)| name)
+            .collect()
+    };
+
+    names
+        .into_iter()
+        .map(|name| {
+            let mut stmt = conn.prepare(&format!("PRAGMA index_info({name})")).unwrap();
+            let cols: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(2))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            (name, cols)
+        })
+        .collect()
+}
+
+// SQLite already maintains an implicit index for a table's PRIMARY KEY
+#[test]
+fn test_cards_has_no_index_duplicating_the_primary_key() {
+    let mut conn = rusqlite::Connection::open(":memory:").unwrap();
+    super::MIGRATIONS.to_latest(&mut conn).unwrap();
+
+    let pk = primary_key_columns(&conn, "cards");
+    assert_eq!(
+        pk,
+        vec!["uuid", "finish", "collection"],
+        "unexpected primary key on `cards` — update this test deliberately"
+    );
+
+    for (name, cols) in explicit_indexes(&conn, "cards") {
+        assert_ne!(
+            cols, pk,
+            "index `{name}` duplicates the primary key on `cards`; drop it"
+        );
+    }
+}

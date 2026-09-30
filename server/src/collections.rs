@@ -63,6 +63,10 @@ fn compute_value_breakdown(
     // Wanted-only entries (nothing owned yet) aren't part of the collection's
     // owned value — exclude them so price totals and the priced/total ratio
     // only ever reflect quantities actually owned.
+    //
+    // Counts are per *entry* (one row per finish), matching the "N entries"
+    // figure the collection page shows above this breakdown; `priced_count` is
+    // counted the same way so priced/total stays a self-consistent ratio.
     let total_count = cards.iter().filter(|c| c.quantity > 0).count();
 
     let mut total_value: f64 = 0.0;

@@ -136,6 +136,7 @@ pub(super) fn rename_collection(
     Ok(())
 }
 
+/// Number of card *entries* (rows) in a collection.
 pub(super) fn get_cards_count(
     conn: &Connection,
     collection_id: &CollectionID,
@@ -158,6 +159,10 @@ pub(super) fn get_cards_count(
         query_params.extend(scope_params);
     }
 
+    // Deliberately COUNT(*), not COUNT(DISTINCT uuid): since 08-card-finishes, a card owned in
+    // several finishes is one row per finish, and this count is the pagination total for
+    // get_cards_in_collection_paginated, which yields those same rows. Counting distinct cards here
+    // would under-report the total and make the tail of a collection unreachable in the UI.
     let query = format!("SELECT COUNT(*) FROM cards WHERE {}", conditions.join(" AND "));
     let mut stmt = conn.prepare(&query)?;
     let count = stmt.query_row(rusqlite::params_from_iter(query_params.iter()), |r| {
