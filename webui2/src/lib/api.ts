@@ -657,7 +657,7 @@ export async function restartServer(timeoutMs = 60_000): Promise<void> {
 }
 
 export async function triggerUpdate(endpoint: string): Promise<string> {
-	const result = await fetchJSON<string | boolean>(endpoint);
+	const result = await fetchJSON<string | boolean>(endpoint, { method: 'POST' });
 	return typeof result === 'string' ? result : 'Done';
 }
 
