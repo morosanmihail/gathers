@@ -25,6 +25,7 @@ services:
       - source: gathers-mirrors
         target: /home/app/.local/share/gathers/mirrors.toml
     environment:
+      # These override the same settings in server.toml.
       # Comma-separated list of systems to enable.
       # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
       # Add "sql" for offline MTG (downloads AllPrintings.db on first start).

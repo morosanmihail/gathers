@@ -6,18 +6,54 @@ use axum::{Json, extract::State, http::StatusCode};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::{ErrorPayload, GathersState, RESTART, ServerConfig, demo_mode, demo_err};
+use crate::{
+    ErrorPayload, GathersState, PATH_ENV_VARS, RESTART, ServerConfig, demo_err, demo_mode,
+    env_systems,
+};
 
 pub fn settings_routes() -> ApiRouter<GathersState> {
     ApiRouter::new()
         .api_route("/", get(get_settings).post(post_settings))
         .api_route("/restart", post(restart_server))
+        .api_route("/env_overrides", get(get_env_overrides))
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct RestartResponse {
     /// Always true: the server is shutting down to re-exec itself.
     restarting: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct EnvOverride {
+    /// The `server.toml` key being overridden, e.g. `mtg_db_path`.
+    field: String,
+    /// The environment variable overriding it, e.g. `MTG_DB_PATH`.
+    var: String,
+    /// The variable's value, which the server uses instead of the config file's.
+    value: String,
+}
+
+/// Lists the settings that environment variables override at startup. For
+/// these, editing `server.toml` (or saving on the Settings page) has no
+/// effect while the variable stays set.
+async fn get_env_overrides() -> Result<Json<Vec<EnvOverride>>, (StatusCode, Json<ErrorPayload>)> {
+    if demo_mode() {
+        return Err(demo_err());
+    }
+    let mut overrides = Vec::new();
+    // Only counts when something in it parses; otherwise the server ignores it.
+    if env_systems(false).is_some()
+        && let Ok(value) = std::env::var("GATHERS_SYSTEMS")
+    {
+        overrides.push(EnvOverride { field: "system".into(), var: "GATHERS_SYSTEMS".into(), value });
+    }
+    for (field, var) in PATH_ENV_VARS {
+        if let Ok(value) = std::env::var(var) {
+            overrides.push(EnvOverride { field: (*field).into(), var: (*var).into(), value });
+        }
+    }
+    Ok(Json(overrides))
 }
 
 /// Restarts the server in place (same binary, args and environment). The

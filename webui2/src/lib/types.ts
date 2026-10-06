@@ -224,6 +224,7 @@ export function bestPrice(cardPrices: CardPrices): string | null {
 
 export type ValueBreakdown = components['schemas']['CollectionValueBreakdown'];
 export type Settings = components['schemas']['ServerConfig'];
+export type EnvOverride = components['schemas']['EnvOverride'];
 export type PluginConfig = components['schemas']['PluginConfig'];
 export type System = components['schemas']['Systems'];
 
