@@ -13,6 +13,7 @@ import type {
 	CardPrices,
 	ValueBreakdown,
 	Settings,
+	EnvOverride,
 	PartialBy
 } from './types';
 import type { components } from './generated/api';
@@ -627,6 +628,12 @@ export async function getPurchaseHistory(collection: string, cardId: string): Pr
 // Settings
 export async function getSettings(): Promise<Settings> {
 	return fetchJSON('/api/settings');
+}
+
+// Settings that environment variables override at startup, so editing them
+// here doesn't take effect while the variable is set.
+export async function getEnvOverrides(): Promise<EnvOverride[]> {
+	return fetchJSON('/api/settings/env_overrides');
 }
 
 export async function saveSettings(settings: Settings): Promise<Settings> {

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { saveSettings, triggerUpdate, restartServer, invalidateSystemInfo } from '$lib/api';
+	import { saveSettings, triggerUpdate, restartServer, invalidateSystemInfo, getEnvOverrides } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import type { PluginConfig, Settings, System } from '$lib/types';
+	import type { EnvOverride, PluginConfig, Settings, System } from '$lib/types';
 
 	let config = $state<Settings | null>(null);
 	let error = $state('');
@@ -11,6 +11,8 @@
 	let demoMode = $state(false);
 	let restarting = $state(false);
 	let confirmRestart = $state(false);
+	// Keyed by server.toml field name.
+	let envOverrides = $state<Record<string, EnvOverride>>({});
 
 	// Set by the server when a save changed something that only applies after
 	// a restart; the restart itself clears it.
@@ -62,7 +64,12 @@
 			config = await res.json();
 		} catch (e) {
 			error = String(e);
+			return;
 		}
+		// Only a hint, so the page works without it.
+		getEnvOverrides()
+			.then((list) => { envOverrides = Object.fromEntries(list.map((o) => [o.field, o])); })
+			.catch(() => {});
 	});
 
 	function toggleSystem(sys: System) {
@@ -270,6 +277,11 @@
 							Systems
 						</div>
 						<div style="padding: 16px;">
+							{#if envOverrides.system}
+								<div class="env-override" style="margin-bottom: 12px;">
+									Overridden by <code>{envOverrides.system.var}={envOverrides.system.value}</code>. Changes here are saved to server.toml but won't apply while it is set.
+								</div>
+							{/if}
 							{#each ALL_SYSTEMS as sys}
 								{@const actions = SYSTEM_ACTIONS[sys]}
 								<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
@@ -468,6 +480,11 @@
 										onchange={flushSave}
 										placeholder="(default)"
 									/>
+									{#if envOverrides[key]}
+										<div class="env-override">
+											Overridden by <code>{envOverrides[key].var}</code>: <code>{envOverrides[key].value}</code>
+										</div>
+									{/if}
 								</div>
 							{/each}
 						</div>
@@ -482,6 +499,13 @@
 	.settings-page {
 		padding: 0 20px 40px;
 		max-width: 1100px;
+	}
+
+	.env-override {
+		margin-top: 4px;
+		font-size: 0.75rem;
+		color: var(--info);
+		overflow-wrap: anywhere;
 	}
 
 	.save-status {

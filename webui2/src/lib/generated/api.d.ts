@@ -1590,6 +1590,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/env_overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EnvOverride"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugins": {
         parameters: {
             query?: never;
@@ -2099,6 +2133,14 @@ export interface components {
             phase: string;
             /** Format: uint64 */
             total: number;
+        };
+        EnvOverride: {
+            /** @description The `server.toml` key being overridden, e.g. `mtg_db_path`. */
+            field: string;
+            /** @description The variable's value, which the server uses instead of the config file's. */
+            value: string;
+            /** @description The environment variable overriding it, e.g. `MTG_DB_PATH`. */
+            var: string;
         };
         MagicRetrieveQuery: {
             /** @default [] */

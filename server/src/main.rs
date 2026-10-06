@@ -596,6 +596,48 @@ impl ServerConfig {
     }
 }
 
+/// `server.toml` path keys and the env vars that override them.
+pub const PATH_ENV_VARS: &[(&str, &str)] = &[
+    ("mtg_db_path", "MTG_DB_PATH"),
+    ("mtg_prices_path", "MTG_PRICES_PATH"),
+    ("riftbound_db_path", "RIFTBOUND_DB_PATH"),
+    ("pokemon_db_path", "POKEMON_DB_PATH"),
+    ("pokemon_prices_path", "POKEMON_PRICES_PATH"),
+    ("storage_db_path", "STORAGE_DB_PATH"),
+];
+
+/// Systems from `GATHERS_SYSTEMS` (comma-separated, e.g. "scryfall,riftbound-sql"),
+/// or `None` when unset or nothing in it parses. Unknown entries are reported
+/// on stderr when `warn` is set.
+pub fn env_systems(warn: bool) -> Option<Vec<Systems>> {
+    let val = std::env::var("GATHERS_SYSTEMS").ok()?;
+    let parsed: Vec<Systems> = val
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            Systems::from_str(s, true).map_err(|e| {
+                if warn {
+                    eprintln!("warning: unknown system in GATHERS_SYSTEMS '{s}': {e}");
+                }
+            }).ok()
+        })
+        .collect();
+    (!parsed.is_empty()).then_some(parsed)
+}
+
+/// Origins from `GATHERS_CORS_ORIGINS` (comma-separated), trailing slashes trimmed.
+fn env_cors_origins() -> Vec<String> {
+    std::env::var("GATHERS_CORS_ORIGINS")
+        .map(|val| {
+            val.split(',')
+                .map(|o| o.trim().trim_end_matches('/').to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Parser, Debug)]
 #[command(version = env!("GATHERS_VERSION"), about)]
 struct Args {
@@ -686,12 +728,18 @@ async fn main() -> eyre::Result<()> {
         info!(config = %config_path.display(), "Config loaded");
         cfg
     } else {
-        let systems = if args.system.is_empty() {
-            vec![Systems::RiftboundSql]
-        } else {
-            args.system.clone()
-        };
+        // Seed the new config from the same env vars that override it at
+        // runtime, so the file on disk reflects what the server actually uses.
+        let systems = env_systems(false)
+            .or_else(|| (!args.system.is_empty()).then(|| args.system.clone()))
+            .unwrap_or_else(|| vec![Systems::RiftboundSql]);
         let port = args.port.unwrap_or(5234);
+        let path_or_default = |var: &str, file: &str| {
+            Some(
+                std::env::var(var)
+                    .unwrap_or_else(|_| db_dir.join(file).to_string_lossy().into_owned()),
+            )
+        };
         let cfg = ServerConfig {
             system: systems,
             port,
@@ -699,24 +747,14 @@ async fn main() -> eyre::Result<()> {
             collections_enabled: true,
             auto_download_enabled: false,
             auto_download_interval_hours: 24,
-            mtg_db_path: Some(
-                db_dir
-                    .join("AllPrintings.db")
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-            mtg_prices_path: Some(
-                db_dir
-                    .join("AllPricesToday.sqlite")
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-            riftbound_db_path: Some(db_dir.join("riftbound.db").to_string_lossy().into_owned()),
-            pokemon_db_path: Some(db_dir.join("pokemon.db").to_string_lossy().into_owned()),
-            pokemon_prices_path: Some(db_dir.join("pokemon_prices.sqlite").to_string_lossy().into_owned()),
-            storage_db_path: Some(db_dir.join("storage.db").to_string_lossy().into_owned()),
+            mtg_db_path: path_or_default("MTG_DB_PATH", "AllPrintings.db"),
+            mtg_prices_path: path_or_default("MTG_PRICES_PATH", "AllPricesToday.sqlite"),
+            riftbound_db_path: path_or_default("RIFTBOUND_DB_PATH", "riftbound.db"),
+            pokemon_db_path: path_or_default("POKEMON_DB_PATH", "pokemon.db"),
+            pokemon_prices_path: path_or_default("POKEMON_PRICES_PATH", "pokemon_prices.sqlite"),
+            storage_db_path: path_or_default("STORAGE_DB_PATH", "storage.db"),
             plugins: Vec::new(),
-            cors_allowed_origins: Vec::new(),
+            cors_allowed_origins: env_cors_origins(),
         };
         if let Err(e) = std::fs::create_dir_all(&gathers_dir) {
             eprintln!(
@@ -761,20 +799,8 @@ async fn main() -> eyre::Result<()> {
     }
 
     // GATHERS_SYSTEMS env var overrides config (comma-separated, e.g. "scryfall,riftbound-sql")
-    if let Ok(val) = std::env::var("GATHERS_SYSTEMS") {
-        let parsed: Vec<Systems> = val
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| {
-                Systems::from_str(s, true).map_err(|e| {
-                    eprintln!("warning: unknown system in GATHERS_SYSTEMS '{s}': {e}");
-                }).ok()
-            })
-            .collect();
-        if !parsed.is_empty() {
-            config.system = parsed;
-        }
+    if let Some(systems) = env_systems(true) {
+        config.system = systems;
     }
 
     // Env vars override config for DB paths
@@ -979,12 +1005,11 @@ async fn main() -> eyre::Result<()> {
     let mut api = openapi_doc();
 
     let mut allowed_origins = config.cors_allowed_origins.clone();
-    if let Ok(val) = std::env::var("GATHERS_CORS_ORIGINS") {
-        allowed_origins.extend(
-            val.split(',')
-                .map(|o| o.trim().trim_end_matches('/').to_string())
-                .filter(|o| !o.is_empty()),
-        );
+    for origin in env_cors_origins() {
+        // A config created on first run already holds the env origins.
+        if !allowed_origins.contains(&origin) {
+            allowed_origins.push(origin);
+        }
     }
     let allowed_origins = Arc::new(allowed_origins);
     let cors = {
