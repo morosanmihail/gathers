@@ -24,8 +24,9 @@ use crate::{
         CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
         CollectionAllPurchaseHistoryResponse, CollectionListEntry, CollectionPurchaseHistoryEntry,
         CollectionRemoveQuery,
-        CollectionRenameRequest, CollectionValueBreakdown, CollectionsSearchQuery,
-        PriceHistoryResponse, PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
+        CollectionKindChange, CollectionRenameRequest, CollectionValueBreakdown,
+        CollectionsSearchQuery, PriceHistoryResponse, PublicCollectionPage,
+        PurchaseHistoryResponse, ResultCard, ResultCardInner,
         ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
@@ -895,6 +896,38 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
         Ok(Json(Collection {
             id: input.new_id,
+            kind: kind.into(),
+        }))
+    }
+
+    /// Converts a collection to a deck or back, carrying its cards across.
+    ///
+    /// Lives here rather than on `/api/deck` because it changes what the collection *is*, and the
+    /// target may not be a deck yet; `require_deck` would reject half the calls.
+    async fn set_kind(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<CollectionKindChange>,
+    ) -> Result<Json<Collection>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+        let kind: models::CollectionKind = input.kind.into();
+        if !storage
+            .set_collection_kind(&id, kind)
+            .await
+            .map_err(|e| crate::storage_error("Failed to convert collection", e))?
+        {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorPayload {
+                    error: format!("Collection '{id}' not found"),
+                }),
+            ));
+        }
+
+        Ok(Json(Collection {
+            id,
             kind: kind.into(),
         }))
     }
@@ -1914,6 +1947,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/add", post(add))
         .api_route("/remove/{id}", post(remove))
         .api_route("/rename/{id}", post(rename))
+        .api_route("/kind/{id}", post(set_kind))
         .api_route("/move/{id}", post(move_to))
         .api_route("/share/{id}", get(share_list).post(share_create))
         .api_route("/share/{id}/{token}", delete(share_revoke))
@@ -1939,10 +1973,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
 
 /// A shared deck's card list, in the same merged shape as a shared collection's.
 ///
-/// Decks are bounded, so this reads the whole list and pages in memory. Rows are summed across
-/// boards into one entry per `(uuid, finish)`: the public page keys a card's entries by finish
-/// alone, so a mainboard and a sideboard row of one printing would collide. There is no want
-/// quantity.
+/// Decks are bounded, so this reads the whole list and pages in memory. Rows are merged per
+/// `(uuid, finish, board)` and each carries the board it sits on, so a shared deck reads as the
+/// deck does rather than as one undifferentiated pile.
 async fn public_deck_cards(
     state: &GathersState,
     deck: &String,
@@ -1977,12 +2010,17 @@ async fn public_deck_cards(
         .filter(|r| wanted.is_empty() || wanted.contains(&r.provider))
         .collect();
 
-    rows.sort_by(|a, b| (&a.uuid, &a.finish).cmp(&(&b.uuid, &b.finish)));
+    // Board is part of the key, so a shared deck shows its mainboard and sideboard apart as the
+    // deck view does, rather than folding them into one list
+    rows.sort_by(|a, b| (&a.board, &a.uuid, &a.finish).cmp(&(&b.board, &b.uuid, &b.finish)));
     let mut merged: Vec<models::DeckCard> = Vec::new();
     for row in rows {
         match merged.last_mut() {
-            Some(prev) if prev.uuid == row.uuid && prev.finish == row.finish => {
+            Some(prev)
+                if prev.uuid == row.uuid && prev.finish == row.finish && prev.board == row.board =>
+            {
                 prev.quantity = prev.quantity.saturating_add(row.quantity);
+                prev.want_quantity = prev.want_quantity.saturating_add(row.want_quantity);
             }
             _ => merged.push(row),
         }
@@ -1998,9 +2036,7 @@ async fn public_deck_cards(
             }
             APICollectionSortField::Quantity => merged.sort_by_key(|r| r.quantity),
             APICollectionSortField::Provider => merged.sort_by(|a, b| a.provider.cmp(&b.provider)),
-            // Deck rows report a want quantity of 0 across the board, so this leaves the
-            // merge order alone
-            APICollectionSortField::WantQuantity => {}
+            APICollectionSortField::WantQuantity => merged.sort_by_key(|r| r.want_quantity),
         }
         if query.sort_order == Some(APISortOrder::Desc) {
             merged.reverse();
@@ -2029,7 +2065,13 @@ async fn public_deck_cards(
             obj.insert("id".to_string(), serde_json::Value::String(row.uuid));
             obj.insert("finish".to_string(), serde_json::Value::String(row.finish));
             obj.insert("quantity".to_string(), serde_json::Value::from(row.quantity));
-            obj.insert("wantQuantity".to_string(), serde_json::Value::from(0));
+            obj.insert(
+                "wantQuantity".to_string(),
+                serde_json::Value::from(row.want_quantity),
+            );
+            // The board a row sits on, which a plain collection has no equivalent of; the shared
+            // page groups by it when it is there
+            obj.insert("board".to_string(), serde_json::Value::String(row.board));
             obj.insert("collectionId".to_string(), serde_json::Value::String(deck.clone()));
             obj.insert(
                 "timeAdded".to_string(),

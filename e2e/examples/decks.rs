@@ -3,7 +3,8 @@
 //!
 //! The property everything else rests on is that decks are *additive*: a deck
 //! records what is to be played, a collection records what is physically
-//! owned, and putting a card in a deck doesn't deduct it from anywhere.
+//! owned, and putting a card in a deck doesn't deduct it from anywhere. The
+//! transfer endpoint is the deliberate exception, and says so.
 //!
 //! Covers:
 //!   1. adding to a deck leaves the source collection's quantity untouched
@@ -11,15 +12,21 @@
 //!   3. boards are open-ended, not a fixed main/side pair
 //!   4. moving between boards conserves copies
 //!   5. a deck's cards survive a rename, and vanish with a delete
-//!   6. a shared deck serves its cards rather than an empty page
+//!   6. a shared deck serves its cards, one row per board
 //!   7. the collection card endpoints refuse a deck (and vice versa), so a
 //!      deck can never accumulate orphaned rows in `cards`
-//!   8. adjusting a want quantity on a deck is an error, since deck rows
-//!      have no want quantity at all
+//!   8. the collection want endpoint refuses a deck, whose wanted copies are its own rows'
+//!      business rather than the cards table's
 //!   9. an unbuilt deck commits nothing; building it commits its cards and
 //!      says where they physically are, and dismantling it releases them
 //!  10. over-commitment is reported, never refused
 //!  11. build state and location survive a rename
+//!  12. a deck row carries owned and wanted counts at once, and the deck's size
+//!      counts the greater of them rather than their sum
+//!  13. boards are free-form and user-editable: added, renamed (carrying their
+//!      cards), and reordered
+//!  14. a card can be transferred between a collection and a deck, and a
+//!      collection converted to a deck and back
 //!
 //! Cross-printing matching (owning the Revised printing satisfying a deck that
 //! lists the M13 one) is covered by unit tests in `server::decks` instead: the
@@ -31,10 +38,11 @@
 //!   cargo run --example decks
 
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use e2e::GathersClient;
 use e2e::harness::{Harness, ServerSetup};
-use e2e::models::{CollectionKind, DeckCard};
+use e2e::models::{CollectionKind, DeckCard, Transfer};
 
 // War Priest of Thune, M13 #39
 const CARD_A: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1";
@@ -156,30 +164,35 @@ async fn run(
     let link = client.create_share_link(renamed).await?;
     let page = client.public_cards(&link.token, 0, 100).await?;
 
-    // Boards are summed away rather than carried: the public page has no board column, and one
-    // row per board would put two entries of the same printing on the same key.
-    let distinct: HashSet<(&String, &String)> = rows.iter().map(|c| (&c.id, &c.finish)).collect();
+    // The page carries the board, so a mainboard and a sideboard copy of the same printing stay
+    // apart rather than being summed into one row the reader can't take apart again.
+    let distinct: HashSet<(&String, &String, &String)> =
+        rows.iter().map(|c| (&c.id, &c.finish, &c.board)).collect();
     eq(
         page.total,
         distinct.len(),
-        "a shared deck has one row per card and finish",
+        "a shared deck has one row per card, finish and board",
     )?;
 
     let shared = page
         .cards
         .iter()
-        .find(|c| c["id"] == CARD_A)
-        .ok_or_else(|| eyre::eyre!("shared deck is missing its cards"))?;
+        .find(|c| c["id"] == CARD_A && c["board"] == "main")
+        .ok_or_else(|| eyre::eyre!("shared deck is missing its mainboard cards"))?;
     eq(
         shared["quantity"].as_i64(),
-        Some(i64::from(qty(&rows, CARD_A, "main") + qty(&rows, CARD_A, "side"))),
-        "a shared row sums the card across every board it sits on",
+        Some(i64::from(qty(&rows, CARD_A, "main"))),
+        "a shared row reports what its own board holds",
+    )?;
+    ensure(
+        page.cards.iter().all(|c| c["board"].is_string()),
+        "every shared deck row names the board it sits on",
     )?;
     ensure(
         shared["name"].is_string(),
         "a shared row is hydrated with its card details",
     )?;
-    ok("a shared deck serves its list");
+    ok("a shared deck serves its list, boards and all");
 
     step("7. Delete the deck");
 
@@ -222,7 +235,7 @@ async fn run(
 
     ensure(
         client.adjust_want(deck2, CARD_B, 1).await.is_err(),
-        "a deck has no want quantity, so adjusting one is an error",
+        "the collection want endpoint writes to cards, so it refuses a deck",
     )?;
     ok("a deck can't accumulate rows in `cards`");
 
@@ -319,8 +332,136 @@ async fn run(
     )?;
     ok("ownership was never touched by any deck operation");
 
+    step("13. Owned and wanted copies on one row");
+
+    let wants = format!("{deck}-wants");
+    client.add_deck(&wants).await?;
+
+    eq(
+        client.deck_boards(&wants).await?.iter().map(|b| b.board.as_str()).collect::<Vec<_>>(),
+        vec!["Mainboard", "Sideboard"],
+        "a new deck starts with the default boards",
+    )?;
+
+    // Four wanted, three to hand: four cards of the deck, not seven
+    client.adjust_deck_card_counts(&wants, CARD_A, "", "Mainboard", 3, 4).await?;
+    let row = client
+        .deck_cards(&wants)
+        .await?
+        .into_iter()
+        .find(|c| c.id == CARD_A)
+        .ok_or_else(|| eyre::eyre!("the card wasn't on the deck"))?;
+    eq(row.quantity, 3, "owned copies")?;
+    eq(row.want_quantity, 4, "wanted copies")?;
+    eq(row.slots(), 4, "the greater of the two, not the sum")?;
+    eq(
+        client.deck_card_count(&wants).await?,
+        4,
+        "and the deck's size counts it once",
+    )?;
+    ok("a deck row carries both counts, and the size takes the greater");
+
+    step("14. Free-form, editable boards");
+
+    client.add_deck_board(&wants, "Mainboard:Lands").await?;
+    client.adjust_deck_card(&wants, CARD_B, "", "Mainboard:Lands", 2).await?;
+
+    let boards = client.rename_deck_board(&wants, "Mainboard:Lands", "Manabase").await?;
+    eq(
+        boards.iter().map(|b| b.board.as_str()).collect::<Vec<_>>(),
+        vec!["Mainboard", "Sideboard", "Manabase"],
+        "the renamed board keeps its place",
+    )?;
+    eq(
+        client
+            .deck_cards(&wants)
+            .await?
+            .iter()
+            .find(|c| c.id == CARD_B)
+            .map(|c| c.board.as_str()),
+        Some("Manabase"),
+        "and takes its cards with it",
+    )?;
+
+    ensure(
+        client.rename_deck_board(&wants, "Manabase", "Sideboard").await.is_err(),
+        "renaming onto a name the deck already uses is refused rather than merged",
+    )?;
+
+    let boards = client.reorder_deck_boards(&wants, &["Manabase"]).await?;
+    eq(
+        boards.iter().map(|b| b.board.as_str()).collect::<Vec<_>>(),
+        vec!["Manabase", "Mainboard", "Sideboard"],
+        "boards left out of the order keep their place after the ones in it",
+    )?;
+    ok("boards are added, renamed, and reordered freely");
+
+    step("15. Move a card between a collection and a deck");
+
+    let two = NonZeroU32::new(2).expect("2 is not zero");
+    let before = card_quantity(client, col, CARD_A).await?;
+    let moved = client
+        .transfer_deck_card(&wants, col, CARD_A, "", "Mainboard", Transfer::IntoDeck(two))
+        .await?;
+    eq(moved, 2, "two copies moved")?;
+    eq(
+        card_quantity(client, col, CARD_A).await?,
+        before - 2,
+        "a transfer deducts from the collection, unlike an allocation",
+    )?;
+
+    let moved = client
+        .transfer_deck_card(&wants, col, CARD_A, "", "Mainboard", Transfer::OutOfDeck(two))
+        .await?;
+    eq(moved, 2, "and they come back")?;
+    eq(
+        card_quantity(client, col, CARD_A).await?,
+        before,
+        "leaving the collection where it started",
+    )?;
+    ok("cards move between a collection and a deck, both ways");
+
+    step("16. Convert a collection to a deck and back");
+
+    let convert = format!("e2e-decks-convert-{}", std::process::id());
+    client.add_collection(&convert).await?;
+    client.add_cards(&convert, CARD_A, "", 4, None).await?;
+
+    client.set_collection_kind(&convert, CollectionKind::Deck).await?;
+    eq(
+        client
+            .deck_cards(&convert)
+            .await?
+            .iter()
+            .find(|c| c.id == CARD_A)
+            .map(|c| (c.quantity, c.board.as_str())),
+        Some((4, "Mainboard")),
+        "the cards come across onto the first default board",
+    )?;
+
+    client.set_collection_kind(&convert, CollectionKind::Collection).await?;
+    eq(
+        card_quantity(client, &convert, CARD_A).await?,
+        4,
+        "and back again",
+    )?;
+    client.remove_collection(&convert).await?;
+    client.remove_collection(&wants).await?;
+    ok("a collection converts to a deck and back, carrying its cards");
+
     println!("\n✓ All assertions passed");
     Ok(())
+}
+
+/// How many copies of a card a collection holds, or 0 if it holds none.
+async fn card_quantity(client: &GathersClient, collection: &str, id: &str) -> eyre::Result<i32> {
+    Ok(client
+        .list_cards(collection)
+        .await?
+        .iter()
+        .find(|c| c.id == id && c.finish.is_empty())
+        .map(|c| c.quantity)
+        .unwrap_or(0))
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

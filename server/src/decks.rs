@@ -1,12 +1,12 @@
 pub mod decks_models;
 
-use aide::axum::{ApiRouter, routing::get, routing::post};
+use aide::axum::{ApiRouter, routing::delete, routing::get, routing::post};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use models::CollectionKind;
+use models::{CollectionKind, DEFAULT_BOARDS};
 use retrieval::RetrievalSystemTrait;
-use persistence::{PersistenceSystem, PersistenceSystemTrait};
+use persistence::{BoardRenameResult, PersistenceSystem, PersistenceSystemTrait};
 
 use std::collections::HashMap;
 
@@ -17,7 +17,9 @@ use crate::{bad_request, demo_err, demo_mode, storage_error};
 use crate::{ApiError, ErrorPayload, GathersState};
 
 use decks_models::{
-    AvailabilityRequest, CardAvailability, DeckCard, DeckCardAdjustment, DeckCardMove, DeckMeta,
+    AvailabilityRequest, BoardCreate, BoardRename, BoardReorder, CardAvailability, DeckBoard,
+    DeckCard, DeckCardAdjustment, DeckCardMove, DeckCardTransfer, DeckCardTransferResult, DeckMeta,
+    Transfer,
 };
 
 /// Confirms `id` names a deck, rejecting a missing collection or a plain one.
@@ -58,11 +60,42 @@ fn unresolvable_add(quantity: i32, provider: &str) -> bool {
     quantity > 0 && provider.is_empty()
 }
 
+/// The board a request meant, filling in the deck's first one when it didn't name any.
+///
+/// Board names are free-form, so there is no fixed constant to fall back on: a deck the user has
+/// renamed down to one board called Deck should take cards there, not silently grow a Mainboard.
+/// A deck with no boards left falls back to the default name, which the write then declares.
+async fn default_board(
+    storage: &PersistenceSystem,
+    deck: &String,
+    requested: &str,
+) -> Result<String, ApiError> {
+    // Trimmed here, where every write that names a board passes through: the add-board endpoint
+    // trims too, and a card landing on " Mainboard " would otherwise declare a second board that
+    // only differs by whitespace
+    let requested = requested.trim();
+    if !requested.is_empty() {
+        return Ok(requested.to_string());
+    }
+
+    let boards = storage
+        .deck(deck)
+        .boards()
+        .await
+        .map_err(|e| storage_error("Failed to get deck boards", e))?;
+
+    Ok(boards
+        .first()
+        .map(|b| b.board.clone())
+        .unwrap_or_else(|| DEFAULT_BOARDS[0].to_string()))
+}
+
 /// Endpoints for a deck's *contents*: its cards and the boards they sit on.
 ///
 /// A deck's *identity* (creating, renaming, deleting, listing) stays on `/api/collection`, since
 /// a deck is a collection with `kind = "deck"` and shares that plumbing. Only the card list
-/// differs: a board instead of a want quantity, a separate table, no purchase history.
+/// differs: its rows carry a board and live in a separate table, and a deck has no purchase
+/// history. The owned/wanted pair means the same as a collection's.
 ///
 /// Paths mirror `/api/collection`'s: `/cards/{id}/<action>`, not `/{id}/cards`.
 pub fn deck_routes() -> ApiRouter<GathersState> {
@@ -82,10 +115,11 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         Ok(Json(cards.into_iter().map(DeckCard::from).collect()))
     }
 
-    /// Copies in the deck, summed across all boards.
+    /// Slots filled in the deck, across all boards.
     ///
     /// Counts copies where the collection endpoint counts distinct cards: a deck is described by
-    /// how many cards are in it.
+    /// how many cards are in it. Each card counts the greater of its owned and wanted copies,
+    /// never their sum.
     async fn cards_count(
         State(state): State<GathersState>,
         Path(id): Path<String>,
@@ -102,10 +136,10 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         Ok(Json(count))
     }
 
-    /// Changes one card's quantity on one board.
+    /// Changes one card's owned and wanted counts on one board.
     ///
     /// Never touches any collection: putting a card in a deck doesn't deduct it from what is
-    /// owned.
+    /// owned. `/cards/{id}/transfer` is the endpoint for copies that actually move.
     async fn cards_adjust(
         State(state): State<GathersState>,
         Path(id): Path<String>,
@@ -114,27 +148,31 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         // Adding is allowed in demo mode and removing isn't, matching `cards_add` and
         // `cards_remove`. This endpoint is one signed change rather than two routes, so the
         // split is on the sign instead of on the path
-        if demo_mode() && input.quantity < 0 { return Err(demo_err()); }
+        if demo_mode() && (input.quantity < 0 || input.want_quantity < 0) {
+            return Err(demo_err());
+        }
 
         // Resolved before taking the storage lock: `resolve_provider` locks state itself, so doing
         // it while holding the lock would deadlock
         let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
-        if unresolvable_add(input.quantity, &provider) {
+        // A wanted copy is stored the same way, so it needs the same guard against a nameless row
+        if unresolvable_add(input.quantity.max(input.want_quantity), &provider) {
             return Err(card_not_found(&input.id));
         }
         let now = chrono::Utc::now().to_rfc3339();
 
         let storage = &mut state.1.lock().await.storage;
         require_deck(storage, &id).await?;
+        let board = default_board(storage, &id, &input.board).await?;
 
         let card = storage
             .deck_mut(&id)
             .adjust_card(
                 &input.id,
                 &input.finish,
-                &input.board,
+                &board,
                 input.quantity,
-                0,
+                input.want_quantity,
                 &now,
                 &provider,
             )
@@ -157,14 +195,13 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         require_deck(storage, &id).await?;
 
         let mut deck = storage.deck_mut(&id);
-        // The request still carries a signed count here; the next revision makes it unsigned
         deck.move_card(
             &input.id,
             &input.finish,
             &input.from_board,
             &input.to_board,
-            input.quantity.max(0) as u32,
-            0,
+            input.quantity,
+            input.want_quantity,
         )
         .await
         .map_err(|e| storage_error("Failed to move deck card", e))?;
@@ -175,6 +212,177 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
             .map_err(|e| storage_error("Failed to get deck cards", e))?;
 
         Ok(Json(cards.into_iter().map(DeckCard::from).collect()))
+    }
+
+    /// Moves copies between a collection and one of the deck's boards.
+    ///
+    /// A transfer, unlike `cards_adjust`: the copies leave the collection, or go back to it.
+    async fn cards_transfer(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<DeckCardTransfer>,
+    ) -> Result<Json<DeckCardTransferResult>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        // The other end has to be a collection: moving between two decks is what cards_move does,
+        // board to board, and the cards table has no row to credit for a deck
+        if storage
+            .get_collection_kind(&input.collection)
+            .await
+            .map_err(|e| storage_error("Failed to look up collection", e))?
+            != Some(CollectionKind::Collection)
+        {
+            return Err(bad_request(format!(
+                "'{}' is not a collection", input.collection
+            )));
+        }
+
+        let board = default_board(storage, &id, &input.board).await?;
+        let mut deck = storage.deck_mut(&id);
+        // Awaited in each arm: the two calls have distinct opaque future types, so they can't be
+        // the two halves of one expression
+        let moved = match input.transfer {
+            Transfer::IntoDeck(copies) => {
+                deck.take_card_from(&input.collection, &input.id, &input.finish, &board, copies.get())
+                    .await
+            }
+            Transfer::OutOfDeck(copies) => {
+                deck.give_card_to(&input.collection, &input.id, &input.finish, &board, copies.get())
+                    .await
+            }
+        }
+        .map_err(|e| storage_error("Failed to move card", e))?;
+
+        Ok(Json(DeckCardTransferResult { moved }))
+    }
+
+    async fn boards_list(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<Vec<DeckBoard>>, ApiError> {
+        let storage = &state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let boards = storage
+            .deck(&id)
+            .boards()
+            .await
+            .map_err(|e| storage_error("Failed to get deck boards", e))?;
+
+        Ok(Json(boards.into_iter().map(DeckBoard::from).collect()))
+    }
+
+    async fn boards_add(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<BoardCreate>,
+    ) -> Result<Json<Vec<DeckBoard>>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let name = input.board.trim();
+        if name.is_empty() {
+            return Err(bad_request("A board needs a name"));
+        }
+
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let boards = storage
+            .deck_mut(&id)
+            .add_board(name)
+            .await
+            .map_err(|e| storage_error("Failed to add board", e))?;
+
+        Ok(Json(boards.into_iter().map(DeckBoard::from).collect()))
+    }
+
+    /// Renames a board, taking its cards with it.
+    async fn boards_rename(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<BoardRename>,
+    ) -> Result<Json<Vec<DeckBoard>>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let result = storage
+            .deck_mut(&id)
+            .rename_board(&input.from, input.to.trim())
+            .await
+            .map_err(|e| storage_error("Failed to rename board", e))?;
+
+        match result {
+            BoardRenameResult::Renamed => {}
+            BoardRenameResult::NoSuchBoard => {
+                return Err(bad_request(format!(
+                    "Deck '{id}' has no board '{}'", input.from
+                )));
+            }
+            // Refused rather than merged: folding one board's cards into another's can't be undone
+            BoardRenameResult::NameTaken => {
+                return Err(bad_request(format!(
+                    "Deck '{id}' already has a board '{}'", input.to
+                )));
+            }
+            BoardRenameResult::InvalidName => {
+                return Err(bad_request("A board needs a name"));
+            }
+        }
+
+        let boards = storage
+            .deck(&id)
+            .boards()
+            .await
+            .map_err(|e| storage_error("Failed to get deck boards", e))?;
+
+        Ok(Json(boards.into_iter().map(DeckBoard::from).collect()))
+    }
+
+    /// Removes a board and every card on it.
+    async fn boards_delete(
+        State(state): State<GathersState>,
+        Path((id, board)): Path<(String, String)>,
+    ) -> Result<Json<Vec<DeckBoard>>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        if !storage
+            .deck_mut(&id)
+            .delete_board(&board)
+            .await
+            .map_err(|e| storage_error("Failed to delete board", e))?
+        {
+            return Err(bad_request(format!("Deck '{id}' has no board '{board}'")));
+        }
+
+        let boards = storage
+            .deck(&id)
+            .boards()
+            .await
+            .map_err(|e| storage_error("Failed to get deck boards", e))?;
+
+        Ok(Json(boards.into_iter().map(DeckBoard::from).collect()))
+    }
+
+    async fn boards_reorder(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<BoardReorder>,
+    ) -> Result<Json<Vec<DeckBoard>>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+        let storage = &mut state.1.lock().await.storage;
+        require_deck(storage, &id).await?;
+
+        let boards = storage
+            .deck_mut(&id)
+            .reorder_boards(&input.boards)
+            .await
+            .map_err(|e| storage_error("Failed to reorder boards", e))?;
+
+        Ok(Json(boards.into_iter().map(DeckBoard::from).collect()))
     }
 
     async fn meta_get(
@@ -223,6 +431,10 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/count", get(cards_count))
         .api_route("/cards/{id}/adjust", post(cards_adjust))
         .api_route("/cards/{id}/move", post(cards_move))
+        .api_route("/cards/{id}/transfer", post(cards_transfer))
+        .api_route("/boards/{id}", get(boards_list).post(boards_add).put(boards_rename))
+        .api_route("/boards/{id}/order", post(boards_reorder))
+        .api_route("/boards/{id}/{board}", delete(boards_delete))
         .api_route("/meta/{id}", get(meta_get).put(meta_set))
 }
 
@@ -343,13 +555,27 @@ fn merge_printings(
     let mut owned = 0;
     let mut committed = 0;
     let mut holdings: Vec<models::CardHolding> = vec![];
+    let mut copies: Vec<models::CardCopies> = vec![];
 
     for sibling in siblings {
         let Some(row) = by_uuid.get(sibling.as_str()) else { continue };
         owned += row.owned;
         committed += row.committed;
         holdings.extend(row.holdings.iter().cloned());
+        copies.extend(row.copies.iter().cloned());
     }
+
+    // Same collapse as the holdings below, keyed by collection: two interchangeable printings in
+    // the same binder is one line, not two
+    copies.sort_by(|a, b| a.collection.cmp(&b.collection));
+    copies.dedup_by(|dropped, kept| {
+        if kept.collection == dropped.collection {
+            kept.quantity += dropped.quantity;
+            true
+        } else {
+            false
+        }
+    });
 
     // Sorting first puts equal keys next to each other, so the merge is one pass over adjacent
     // pairs rather than a scan of everything collected so far per holding. The sort has to happen
@@ -381,7 +607,7 @@ fn merge_printings(
         free: owned - committed,
         over_committed: committed > owned,
         holdings,
-        copies: vec![],
+        copies,
     }
     .into()
 }
@@ -514,6 +740,58 @@ mod deck_adjust_guard_tests {
     }
 }
 
+/// The transfer body pairs its direction with its count through an adjacently tagged enum, which
+/// is easy to get subtly wrong: the wire form has to stay two plain fields, and a count that isn't
+/// a positive number has to be refused at parse time rather than by the handler.
+#[cfg(test)]
+mod transfer_body_tests {
+    use std::num::NonZeroU32;
+
+    use super::*;
+
+    fn parse(json: &str) -> Result<DeckCardTransfer, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    #[test]
+    fn test_direction_and_count_parse_from_two_flat_fields() {
+        let body = parse(
+            r#"{"id":"c1","collection":"Binder","board":"Mainboard",
+                "direction":"intoDeck","quantity":3}"#,
+        )
+        .expect("a well-formed transfer");
+
+        assert_eq!(body.transfer, Transfer::IntoDeck(NonZeroU32::new(3).unwrap()));
+        assert_eq!(body.collection, "Binder");
+    }
+
+    #[test]
+    fn test_the_other_direction_parses_too() {
+        let body = parse(r#"{"id":"c1","collection":"Binder","direction":"outOfDeck","quantity":1}"#)
+            .expect("a well-formed transfer");
+
+        assert_eq!(body.transfer, Transfer::OutOfDeck(NonZeroU32::new(1).unwrap()));
+        assert_eq!(body.board, "", "an omitted board is filled in by the handler");
+    }
+
+    /// What the enum buys over a direction flag beside a plain integer: these were runtime checks.
+    #[test]
+    fn test_a_count_that_moves_nothing_is_refused_at_parse_time() {
+        for json in [
+            r#"{"id":"c1","collection":"B","direction":"intoDeck","quantity":0}"#,
+            r#"{"id":"c1","collection":"B","direction":"intoDeck","quantity":-2}"#,
+        ] {
+            assert!(parse(json).is_err(), "should refuse: {json}");
+        }
+    }
+
+    #[test]
+    fn test_a_direction_without_a_count_is_refused() {
+        assert!(parse(r#"{"id":"c1","collection":"B","direction":"intoDeck"}"#).is_err());
+        assert!(parse(r#"{"id":"c1","collection":"B","quantity":2}"#).is_err());
+    }
+}
+
 #[cfg(test)]
 mod printing_merge_tests {
     use super::*;
@@ -537,7 +815,10 @@ mod printing_merge_tests {
             free: owned - committed,
             over_committed: committed > owned,
             holdings,
-            copies: vec![],
+            copies: vec![models::CardCopies {
+                collection: "Binder".to_string(),
+                quantity: owned,
+            }],
         }
     }
 

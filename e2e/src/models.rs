@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,20 +258,28 @@ pub struct CollectionToAdd {
 }
 
 /// A card allocated to one board of a deck.
-///
-/// No want quantity: a deck is a list to be played, not a wishlist.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeckCard {
     pub id: String,
     #[serde(default)]
     pub finish: String,
-    /// Which zone of the deck: `""` (default), `"main"`, `"side"`, or whatever a given game calls
-    /// its zones.
+    /// Which zone of the deck: `"Mainboard"` and `"Sideboard"` by default, or whatever the user
+    /// has renamed them to.
     #[serde(default)]
     pub board: String,
     pub quantity: i32,
+    /// Copies the deck calls for; never added to `quantity`, since the two overlap.
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
     #[serde(default)]
     pub provider: String,
+}
+
+impl DeckCard {
+    /// How many of the deck's slots this row accounts for.
+    pub fn slots(&self) -> i32 {
+        self.quantity.max(self.want_quantity)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,7 +289,10 @@ pub struct DeckCardAdjustment {
     pub finish: String,
     #[serde(default)]
     pub board: String,
+    #[serde(default)]
     pub quantity: i32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,7 +304,68 @@ pub struct DeckCardMove {
     pub from_board: String,
     #[serde(rename = "toBoard")]
     pub to_board: String,
-    pub quantity: i32,
+    #[serde(default)]
+    pub quantity: u32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: u32,
+}
+
+/// One zone of a deck, and where it sits in the deck's order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckBoard {
+    pub board: String,
+    pub position: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardCreate {
+    pub board: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardRename {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardReorder {
+    pub boards: Vec<String>,
+}
+
+/// Which way a transfer goes, and how many copies go that way.
+///
+/// The count rides on the variant so the two can't disagree; adjacently tagged, so the wire form
+/// is still a `direction` and a `quantity` field.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "direction", content = "quantity", rename_all = "camelCase")]
+pub enum Transfer {
+    IntoDeck(NonZeroU32),
+    OutOfDeck(NonZeroU32),
+}
+
+/// Moves copies between a collection and one of a deck's boards.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeckCardTransfer {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    pub collection: String,
+    #[serde(default)]
+    pub board: String,
+    #[serde(flatten)]
+    pub transfer: Transfer,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeckCardTransferResult {
+    pub moved: i32,
+}
+
+/// Converts a collection to a deck or back.
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionKindChange {
+    pub kind: CollectionKind,
 }
 
 /// Whether a deck is physically assembled, and where it is.

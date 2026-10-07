@@ -2,12 +2,13 @@ use eyre::{Context, bail};
 use reqwest::StatusCode;
 
 use crate::models::{
-    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, AvailabilityRequest, CardAvailability,
-    CardToAdd, Collection, CollectionAddResponse, CollectionCard, CollectionKind,
-    CollectionRemoveResponse, CollectionRenameRequest, CollectionToAdd, CollectionValueCards,
-    CollectionValueHistory, DeckCard, DeckCardAdjustment, DeckCardMove, DeckMeta, MtgCard,
-    PriceHistoryResponse, PublicCollectionPage, PurchaseHistoryResponse, ShareLink,
-    ShareLinkRevokeResponse, SystemInfo, SystemMeta,
+    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, AvailabilityRequest, BoardCreate,
+    BoardRename, BoardReorder, CardAvailability, CardToAdd, Collection, CollectionAddResponse,
+    CollectionCard, CollectionKind, CollectionKindChange, CollectionRemoveResponse,
+    CollectionRenameRequest, CollectionToAdd, CollectionValueCards, CollectionValueHistory,
+    DeckBoard, DeckCard, DeckCardAdjustment, DeckCardMove, DeckCardTransfer,
+    DeckCardTransferResult, DeckMeta, MtgCard, PriceHistoryResponse, PublicCollectionPage,
+    PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo, SystemMeta, Transfer,
 };
 
 /// HTTP client for the GatheRs server.
@@ -413,14 +414,16 @@ impl GathersClient {
         self.get(&format!("/api/deck/cards/{}/list", urlenc(deck))).await
     }
 
-    /// Copies in the deck, summed across boards; the server's count, not a sum of `deck_cards`.
+    /// Slots filled in the deck; the server's count, which takes the greater of a row's owned
+    /// and wanted copies rather than their sum.
     pub async fn deck_card_count(&self, deck: &str) -> eyre::Result<i64> {
         self.get(&format!("/api/deck/cards/{}/count", urlenc(deck))).await
     }
 
-    /// Changes one card's quantity on one board.
+    /// Changes one card's owned count on one board.
     ///
-    /// Never changes what any collection says is owned.
+    /// Never changes what any collection says is owned; `transfer_deck_card` is for copies that
+    /// actually move.
     pub async fn adjust_deck_card(
         &self,
         deck: &str,
@@ -429,6 +432,19 @@ impl GathersClient {
         board: &str,
         quantity: i32,
     ) -> eyre::Result<Option<DeckCard>> {
+        self.adjust_deck_card_counts(deck, card_id, finish, board, quantity, 0).await
+    }
+
+    /// Changes both of a card's counts on one board.
+    pub async fn adjust_deck_card_counts(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+        want_quantity: i32,
+    ) -> eyre::Result<Option<DeckCard>> {
         self.post(
             &format!("/api/deck/cards/{}/adjust", urlenc(deck)),
             &DeckCardAdjustment {
@@ -436,6 +452,7 @@ impl GathersClient {
                 finish: finish.to_string(),
                 board: board.to_string(),
                 quantity,
+                want_quantity,
             },
         )
         .await
@@ -448,7 +465,7 @@ impl GathersClient {
         finish: &str,
         from_board: &str,
         to_board: &str,
-        quantity: i32,
+        quantity: u32,
     ) -> eyre::Result<Vec<DeckCard>> {
         self.post(
             &format!("/api/deck/cards/{}/move", urlenc(deck)),
@@ -458,9 +475,87 @@ impl GathersClient {
                 from_board: from_board.to_string(),
                 to_board: to_board.to_string(),
                 quantity,
+                want_quantity: 0,
             },
         )
         .await
+    }
+
+    /// Moves copies between a collection and one of a deck's boards.
+    pub async fn transfer_deck_card(
+        &self,
+        deck: &str,
+        collection: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        transfer: Transfer,
+    ) -> eyre::Result<i32> {
+        let result: DeckCardTransferResult = self
+            .post(
+                &format!("/api/deck/cards/{}/transfer", urlenc(deck)),
+                &DeckCardTransfer {
+                    id: card_id.to_string(),
+                    finish: finish.to_string(),
+                    collection: collection.to_string(),
+                    board: board.to_string(),
+                    transfer,
+                },
+            )
+            .await?;
+        Ok(result.moved)
+    }
+
+    pub async fn deck_boards(&self, deck: &str) -> eyre::Result<Vec<DeckBoard>> {
+        self.get(&format!("/api/deck/boards/{}", urlenc(deck))).await
+    }
+
+    pub async fn add_deck_board(&self, deck: &str, board: &str) -> eyre::Result<Vec<DeckBoard>> {
+        self.post(
+            &format!("/api/deck/boards/{}", urlenc(deck)),
+            &BoardCreate { board: board.to_string() },
+        )
+        .await
+    }
+
+    pub async fn rename_deck_board(
+        &self,
+        deck: &str,
+        from: &str,
+        to: &str,
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        self.put(
+            &format!("/api/deck/boards/{}", urlenc(deck)),
+            &BoardRename { from: from.to_string(), to: to.to_string() },
+        )
+        .await
+    }
+
+    pub async fn reorder_deck_boards(
+        &self,
+        deck: &str,
+        boards: &[&str],
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        self.post(
+            &format!("/api/deck/boards/{}/order", urlenc(deck)),
+            &BoardReorder { boards: boards.iter().map(|b| b.to_string()).collect() },
+        )
+        .await
+    }
+
+    /// Converts a collection to a deck or back, carrying its cards across.
+    pub async fn set_collection_kind(
+        &self,
+        collection: &str,
+        kind: CollectionKind,
+    ) -> eyre::Result<()> {
+        let _: serde_json::Value = self
+            .post(
+                &format!("/api/collection/kind/{}", urlenc(collection)),
+                &CollectionKindChange { kind },
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn deck_meta(&self, deck: &str) -> eyre::Result<DeckMeta> {

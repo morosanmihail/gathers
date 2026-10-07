@@ -642,3 +642,9 @@ pub struct DatedPrice {
     pub day: chrono::NaiveDate,
     pub price: f64,
 }
+
+/// Converts a collection to a deck or back.
+#[derive(Deserialize, JsonSchema)]
+pub struct CollectionKindChange {
+    pub kind: APICollectionKind,
+}
