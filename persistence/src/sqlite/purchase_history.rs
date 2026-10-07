@@ -11,14 +11,15 @@ fn insert_purchase_row(
     finish: &str,
     quantity: i32,
     price_per_unit: Option<f64>,
+    currency: &str,
     provider: &str,
     recorded_at: &str,
 ) -> eyre::Result<()> {
     conn.execute(
         "INSERT INTO purchase_history \
-         (collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at],
+         (collection_id, card_uuid, finish, quantity, price_per_unit, currency, provider, recorded_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![collection_id, card_uuid, finish, quantity, price_per_unit, currency, provider, recorded_at],
     )?;
     Ok(())
 }
@@ -30,10 +31,12 @@ pub(super) fn record_purchase(
     finish: &str,
     quantity: i32,
     price_per_unit: Option<f64>,
+    currency: &str,
     provider: &str,
     recorded_at: &str,
 ) -> eyre::Result<()> {
-    insert_purchase_row(conn, collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at)
+    crate::validate_currency(currency).map_err(|e| eyre::eyre!(e))?;
+    insert_purchase_row(conn, collection_id, card_uuid, finish, quantity, price_per_unit, currency, provider, recorded_at)
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<PurchaseHistoryEntry> {
@@ -43,12 +46,13 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<PurchaseHistoryEntry> {
         finish: row.get(2)?,
         quantity: row.get(3)?,
         price_per_unit: row.get(4)?,
-        provider: row.get(5)?,
-        recorded_at: row.get(6)?,
+        currency: row.get(5)?,
+        provider: row.get(6)?,
+        recorded_at: row.get(7)?,
     })
 }
 
-const SELECT_FIELDS: &str = "SELECT id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at";
+const SELECT_FIELDS: &str = "SELECT id, card_uuid, finish, quantity, price_per_unit, currency, provider, recorded_at";
 
 pub(super) fn get_history(
     conn: &Connection,
@@ -122,6 +126,7 @@ struct TrimEntry {
     id: i64,
     qty: i32,
     price: Option<f64>,
+    currency: String,
     provider: String,
     recorded_at: String,
 }
@@ -148,7 +153,7 @@ fn trim_by_finish(
     let mut excess = total - i64::from(target);
 
     let mut stmt = conn.prepare(
-        "SELECT id, quantity, price_per_unit, provider, recorded_at \
+        "SELECT id, quantity, price_per_unit, currency, provider, recorded_at \
          FROM purchase_history \
          WHERE collection_id = ?1 AND card_uuid = ?2 AND finish = ?3 AND quantity > 0 \
          ORDER BY price_per_unit ASC NULLS FIRST, id ASC",
@@ -159,8 +164,9 @@ fn trim_by_finish(
                 id: row.get(0)?,
                 qty: row.get(1)?,
                 price: row.get(2)?,
-                provider: row.get(3)?,
-                recorded_at: row.get(4)?,
+                currency: row.get(3)?,
+                provider: row.get(4)?,
+                recorded_at: row.get(5)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -176,7 +182,7 @@ fn trim_by_finish(
             params![remove, entry.id],
         )?;
         if let Some(dst) = transfer_to {
-            insert_purchase_row(conn, dst, card_uuid, finish, remove, entry.price, &entry.provider, &entry.recorded_at)?;
+            insert_purchase_row(conn, dst, card_uuid, finish, remove, entry.price, &entry.currency, &entry.provider, &entry.recorded_at)?;
         }
         excess -= i64::from(remove);
     }
@@ -204,6 +210,7 @@ pub(super) fn update_entry(
     entry_id: i64,
     quantity: i32,
     price_per_unit: Option<f64>,
+    currency: Option<&str>,
 ) -> eyre::Result<UpdateEntryResult> {
     let row: Option<(String, String)> = conn
         .query_row(
@@ -224,6 +231,11 @@ pub(super) fn update_entry(
     }
     if let Some(price) = price_per_unit
         && let Err(msg) = crate::validate_price(price)
+    {
+        return Ok(UpdateEntryResult::ValidationError(msg));
+    }
+    if let Some(currency) = currency
+        && let Err(msg) = crate::validate_currency(currency)
     {
         return Ok(UpdateEntryResult::ValidationError(msg));
     }
@@ -251,8 +263,9 @@ pub(super) fn update_entry(
     }
 
     conn.execute(
-        "UPDATE purchase_history SET quantity = ?1, price_per_unit = ?2 WHERE id = ?3 AND collection_id = ?4",
-        params![quantity, price_per_unit, entry_id, collection_id],
+        "UPDATE purchase_history SET quantity = ?1, price_per_unit = ?2, currency = COALESCE(?3, currency) \
+         WHERE id = ?4 AND collection_id = ?5",
+        params![quantity, price_per_unit, currency, entry_id, collection_id],
     )?;
     Ok(UpdateEntryResult::Updated)
 }
@@ -260,26 +273,31 @@ pub(super) fn update_entry(
 pub(super) fn get_collection_totals(
     conn: &Connection,
     collection_id: &CollectionID,
-) -> eyre::Result<HashMap<(CardID, String), PurchaseSummary>> {
+) -> eyre::Result<HashMap<(CardID, String), Vec<PurchaseSummary>>> {
     let mut stmt = conn.prepare(
-        "SELECT card_uuid, finish, \
+        "SELECT card_uuid, finish, currency, \
                 SUM(COALESCE(price_per_unit, 0.0) * quantity), \
                 min(SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END), 2147483647) \
          FROM purchase_history \
          WHERE collection_id = ?1 \
-         GROUP BY card_uuid, finish \
-         HAVING SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END) > 0",
+         GROUP BY card_uuid, finish, currency \
+         HAVING SUM(CASE WHEN price_per_unit IS NOT NULL THEN quantity ELSE 0 END) > 0 \
+         ORDER BY currency",
     )?;
-    let map = stmt
-        .query_map(params![collection_id], |row| {
-            Ok((
-                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
-                PurchaseSummary {
-                    total_paid: row.get::<_, f64>(2)?,
-                    quantity: row.get::<_, i32>(3)?,
-                },
-            ))
-        })?
-        .collect::<Result<HashMap<_, _>, _>>()?;
+    let rows = stmt.query_map(params![collection_id], |row| {
+        Ok((
+            (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+            PurchaseSummary {
+                currency: row.get(2)?,
+                total_paid: row.get::<_, f64>(3)?,
+                quantity: row.get::<_, i32>(4)?,
+            },
+        ))
+    })?;
+    let mut map: HashMap<(CardID, String), Vec<PurchaseSummary>> = HashMap::new();
+    for row in rows {
+        let (key, summary) = row?;
+        map.entry(key).or_default().push(summary);
+    }
     Ok(map)
 }

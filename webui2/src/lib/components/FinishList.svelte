@@ -1,13 +1,13 @@
 <script lang="ts">
 	import type { CardGroup, CardPrices } from '$lib/types';
-	import { formatFinishPrice } from '$lib/currency.svelte';
+	import { finishPrice, type Money } from '$lib/currency.svelte';
 	import { finishLabel, availableFinishesToAdd } from '$lib/types';
 	import QtyControls from './QtyControls.svelte';
 
 	interface Props {
 		group: CardGroup;
 		cardPrices?: CardPrices;
-		onAdjust: (finish: string, delta: number, purchasePrice?: number | null) => void;
+		onAdjust: (finish: string, delta: number, purchase?: Money | null) => void;
 		busy?: boolean;
 	}
 
@@ -33,9 +33,9 @@
 		<QtyControls
 			quantity={entry.quantity ?? 0}
 			label={finishLabel(entry.finish ?? '')}
-			price={formatFinishPrice(cardPrices, entry.finish ?? '')}
+			price={finishPrice(cardPrices, entry.finish ?? '')}
 			{busy}
-			onAdjust={(delta, purchasePrice) => onAdjust(entry.finish ?? '', delta, purchasePrice)}
+			onAdjust={(delta, purchase) => onAdjust(entry.finish ?? '', delta, purchase)}
 		/>
 	{/each}
 

@@ -1996,6 +1996,12 @@ export interface components {
              */
             provider: string | null;
             /**
+             * @description ISO 4217 code `purchasePrice` is in. Defaults to the server's
+             *     `preferred_currency`.
+             * @default null
+             */
+            purchaseCurrency: string | null;
+            /**
              * Format: double
              * @default null
              */
@@ -2072,6 +2078,8 @@ export interface components {
         CollectionPurchaseHistoryEntry: {
             card_name?: string | null;
             card_uuid: string;
+            /** @description ISO 4217 code `price_per_unit` is in. */
+            currency: string;
             finish: string;
             /** Format: int64 */
             id: number;
@@ -2251,6 +2259,8 @@ export interface components {
         };
         PurchaseHistoryEntry: {
             card_uuid: string;
+            /** @description ISO 4217 code `price_per_unit` is in. */
+            currency: string;
             finish: string;
             /** Format: int64 */
             id: number;
@@ -2438,6 +2448,11 @@ export interface components {
         /** @enum {string} */
         Systems: "Scryfall" | "Sql" | "RiftboundSql" | "PokemonSql";
         UpdatePurchaseEntryBody: {
+            /**
+             * @description ISO 4217 code; left unchanged when omitted.
+             * @default null
+             */
+            currency: string | null;
             /** Format: double */
             price_per_unit?: number | null;
             /** Format: int32 */

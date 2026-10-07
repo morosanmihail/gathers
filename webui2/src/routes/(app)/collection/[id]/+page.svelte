@@ -17,7 +17,7 @@
 	import { goto } from '$app/navigation';
 	import { defaultFilters, groupByCard } from '$lib/types';
 	import type { CollectionCard, CardGroup, CardPrices, ValueBreakdown } from '$lib/types';
-	import { formatMoney, formatMoneyList } from '$lib/currency.svelte';
+	import { formatMoney, formatMoneyList, type Money } from '$lib/currency.svelte';
 	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
@@ -34,6 +34,9 @@
 	let valueBreakdown = $state<ValueBreakdown | null>(null);
 	const currencyTotals = $derived(
 		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.total_value }))
+	);
+	const profitTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.profit }))
 	);
 	const untrackedTotals = $derived(
 		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.untracked_value }))
@@ -136,10 +139,10 @@
 		}
 	}
 
-	async function adjustCardQty(group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) {
+	async function adjustCardQty(group: CardGroup, finish: string, delta: number, purchase?: Money | null) {
 		try {
 			if (delta > 0) {
-				await addCardToCollection(collectionId, group.id, finish, delta, purchasePrice, group.provider);
+				await addCardToCollection(collectionId, group.id, finish, delta, purchase, group.provider);
 			} else {
 				await deleteCardFromCollection(collectionId, group.id, finish, -delta);
 			}
@@ -272,7 +275,7 @@
 				{#if valueHover}
 					<div class="value-breakdown-tooltip">
 						{#each valueBreakdown.currencies as cur (cur.currency)}
-							{#if cur.total_value > 0}
+							{#if cur.total_value > 0 || cur.profit !== 0}
 								<div class="vb-row">
 									<span class="vb-label">Profit ({cur.currency})</span>
 									<span class="vb-val" style="color: {cur.profit >= 0 ? 'var(--success)' : 'var(--danger)'}">
@@ -281,6 +284,14 @@
 								</div>
 							{/if}
 						{/each}
+						{#if profitTotals.filter(m => m.value !== 0).length > 1}
+							<!-- Cost and value can sit in different currencies; only
+							     their converted sum is the real profit. -->
+							<div class="vb-row">
+								<span class="vb-label">Profit (total)</span>
+								<span class="vb-val"><ConvertedTotal items={profitTotals} /></span>
+							</div>
+						{/if}
 						{#if untrackedTotals.some(m => m.value > 0)}
 							<div class="vb-row">
 								<span class="vb-label">No purchase data</span>

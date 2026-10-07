@@ -114,7 +114,7 @@ struct CurrencyAccumulator {
 fn compute_value_breakdown(
     cards: &[models::CollectionCard],
     unit_prices: &HashMap<String, UnitPrices>,
-    purchase_totals: &HashMap<(String, String), persistence::PurchaseSummary>,
+    purchase_totals: &HashMap<(String, String), Vec<persistence::PurchaseSummary>>,
 ) -> collections_models::CollectionValueBreakdown {
     // Wanted-only entries (nothing owned yet) aren't part of the collection's
     // owned value — exclude them so price totals and the priced/total ratio
@@ -152,21 +152,25 @@ fn compute_value_breakdown(
         acc.total_value += current;
         acc.priced_count += 1;
 
-        if let Some(summary) = purchase_totals.get(&(card.uuid.clone(), card.finish.clone())) {
-            let paid = summary.quantity.min(card.quantity);
-            let cost = if summary.quantity > 0 {
-                summary.total_paid * paid as f64 / summary.quantity as f64
-            } else {
-                0.0
-            };
+        let summaries = purchase_totals
+            .get(&(card.uuid.clone(), card.finish.clone()))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let recorded: i32 = summaries.iter().map(|s| s.quantity).fold(0, i32::saturating_add);
+        let paid = recorded.min(card.quantity);
+        // Only `paid` of the `recorded` copies are still owned; scale each
+        // currency's cost down proportionally.
+        let owned_share = if recorded > 0 { paid as f64 / recorded as f64 } else { 0.0 };
 
-            let current_of_paid = unit_price * paid as f64;
-            acc.profit += current_of_paid - cost;
-
-            let unpaid = (card.quantity - paid).max(0);
-            acc.untracked_value += unit_price * unpaid as f64;
-        } else {
-            acc.untracked_value += current;
+        acc.profit += unit_price * paid as f64;
+        acc.untracked_value += unit_price * (card.quantity - paid).max(0) as f64;
+        // Cost is booked in the currency it was paid in. Without exchange
+        // rates the server can't net it against a value in another currency,
+        // so per-currency profits may be partial, but their converted sum is
+        // the true profit.
+        for summary in summaries {
+            by_currency.entry(summary.currency.clone()).or_default().profit -=
+                summary.total_paid * owned_share;
         }
     }
 
@@ -882,10 +886,17 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         if input.quantity <= 0 {
             return Err(crate::bad_request("Quantity must be at least 1"));
         }
-        let pricing_enabled = state.0.lock().await.pricing_enabled;
+        let (pricing_enabled, preferred_currency) = {
+            let ret = state.0.lock().await;
+            (ret.pricing_enabled, ret.preferred_currency.clone())
+        };
         let purchase_price = input.purchase_price.filter(|_| pricing_enabled);
         if let Some(price) = purchase_price {
             persistence::validate_price(price).map_err(crate::bad_request)?;
+        }
+        let purchase_currency = input.purchase_currency.clone().unwrap_or(preferred_currency);
+        if purchase_price.is_some() {
+            persistence::validate_currency(&purchase_currency).map_err(crate::bad_request)?;
         }
 
         let provider = resolve_provider(&state, &input.id, input.provider.as_deref()).await;
@@ -916,6 +927,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     &input.finish,
                     input.quantity,
                     purchase_price,
+                    &purchase_currency,
                     &provider,
                     &now,
                 )
@@ -1547,6 +1559,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     struct UpdatePurchaseEntryBody {
         quantity: i32,
         price_per_unit: Option<f64>,
+        /// ISO 4217 code; left unchanged when omitted.
+        #[serde(default)]
+        currency: Option<String>,
     }
 
     async fn delete_purchase_entry(
@@ -1584,6 +1599,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 entry_id,
                 body.quantity,
                 body.price_per_unit,
+                body.currency.as_deref(),
             )
             .await
             .map_err(|e| (
@@ -1642,6 +1658,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     finish: e.finish,
                     quantity: e.quantity,
                     price_per_unit: e.price_per_unit,
+                    currency: e.currency,
                     provider: e.provider,
                     recorded_at: e.recorded_at,
                 }
@@ -1948,6 +1965,46 @@ mod value_breakdown_tests {
         assert_eq!(breakdown.priced_count, 3);
         // Largest total first.
         assert_eq!(breakdown.currencies[0].currency, "USD");
+    }
+
+    #[test]
+    fn profit_books_cost_in_purchase_currency() {
+        // 3 owned, valued at $10 each; 2 bought for €6 each, 1 for $4.
+        let cards = vec![card("a", "", 3, 0)];
+        let unit_prices = HashMap::from([("a".to_string(), usd(10.0, 10.0))]);
+        let summary = |currency: &str, total_paid: f64, quantity: i32| persistence::PurchaseSummary {
+            currency: currency.to_string(),
+            total_paid,
+            quantity,
+        };
+        let purchase_totals = HashMap::from([(
+            ("a".to_string(), String::new()),
+            vec![summary("EUR", 12.0, 2), summary("USD", 4.0, 1)],
+        )]);
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        let usd_totals = cur(&breakdown, "USD");
+        assert_eq!(usd_totals.total_value, 30.0);
+        assert_eq!(usd_totals.profit, 26.0); // $30 value - $4 paid
+        assert_eq!(usd_totals.untracked_value, 0.0);
+        let eur = cur(&breakdown, "EUR");
+        assert_eq!(eur.total_value, 0.0);
+        assert_eq!(eur.profit, -12.0); // €12 paid
+    }
+
+    #[test]
+    fn profit_scales_cost_when_fewer_copies_owned_than_recorded() {
+        let cards = vec![card("a", "", 1, 0)];
+        let unit_prices = HashMap::from([("a".to_string(), usd(10.0, 10.0))]);
+        let purchase_totals = HashMap::from([(
+            ("a".to_string(), String::new()),
+            vec![persistence::PurchaseSummary { currency: "USD".to_string(), total_paid: 8.0, quantity: 2 }],
+        )]);
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(cur(&breakdown, "USD").profit, 6.0); // $10 - half of $8
     }
 
     #[test]

@@ -112,10 +112,14 @@ jobs:
         run: |
           {
             echo "tags<<EOF"
-            echo "ghcr.io/morosanmihail/${{ matrix.image }}:latest"
             echo "ghcr.io/morosanmihail/${{ matrix.image }}:sha-${{ github.sha }}"
             if [ "${{ github.ref_type }}" = "tag" ]; then
               echo "ghcr.io/morosanmihail/${{ matrix.image }}:${{ github.ref_name }}"
+            fi
+            # Only plain release tags (v1.2.3) move `latest` — not main
+            # pushes, PR builds or pre-release tags (v1.2.3-rc1).
+            if [ "${{ github.ref_type }}" = "tag" ] && [[ "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ghcr.io/morosanmihail/${{ matrix.image }}:latest"
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"

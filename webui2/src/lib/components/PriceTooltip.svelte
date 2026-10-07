@@ -63,7 +63,7 @@
 	}
 
 	function fmtHistPrice(e: PurchaseEntry) {
-		return e.price_per_unit != null ? `$${e.price_per_unit.toFixed(2)}` : '—';
+		return e.price_per_unit != null ? formatMoney(e.price_per_unit, e.currency) : '—';
 	}
 </script>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Money } from '$lib/currency.svelte';
 	import type { CollectionCard, CardGroup, MtgCard, AnyCard, CardPrices } from '$lib/types';
 	import { rarityClass, isWantOnly, catalogFinishes } from '$lib/types';
 	import { app } from '$lib/state.svelte';
@@ -19,7 +20,7 @@
 		onAdd?: (card: AnyCard | CollectionCard) => void;
 		onAddFinish?: (card: AnyCard | CollectionCard, finish: string) => void;
 		onAddWanted?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) => void;
+		onAdjust?: (group: CardGroup, finish: string, delta: number, purchase?: Money | null) => void;
 		onWantAdjust?: (card: CollectionCard, delta: number) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 	}
@@ -70,7 +71,7 @@
 				<FinishList
 					group={col}
 					{cardPrices}
-					onAdjust={(finish, delta, purchasePrice) => onAdjust(col, finish, delta, purchasePrice)}
+					onAdjust={(finish, delta, purchase) => onAdjust(col, finish, delta, purchase)}
 				/>
 			{:else}
 				<div style="display:flex;gap:8px;">

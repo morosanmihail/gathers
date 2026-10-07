@@ -1,34 +1,38 @@
 <script lang="ts">
+	import { currencySymbol, preferredCurrency, type Money } from '$lib/currency.svelte';
 	// +/- stepper for a single card finish (e.g. the "" / normal row, or a
 	// "foil" row) — one of these renders per finish in `FinishList`, rather
 	// than a single component owning a hardcoded normal+foil pair.
 	interface Props {
 		quantity: number;
-		onAdjust: (delta: number, purchasePrice?: number | null) => void;
-		price?: string | null;
+		onAdjust: (delta: number, purchase?: Money | null) => void;
+		/** Market price of this finish; pre-fills the purchase price and sets
+		 *  its currency. */
+		price?: Money | null;
 		label?: string;
 		busy?: boolean;
 	}
 
 	let { quantity, onAdjust, price = null, label, busy = false }: Props = $props();
 
-	// Currency symbol of the formatted market price ("€0.80" → "€").
-	const symbol = $derived(price?.replace(/[0-9.,\s]/g, '') || '$');
+	// Purchases are recorded in the market price's currency, or the preferred
+	// one when there's no market price.
+	const currency = $derived(price?.currency ?? preferredCurrency());
+	const symbol = $derived(currencySymbol(currency));
 
 	// Pending add: waiting for user to confirm purchase price
 	let pending = $state(false);
 	let priceStr = $state('');
 
 	function startAdd() {
-		// Strip currency symbol if present
-		priceStr = price?.replace(/[^0-9.]/g, '') ?? '';
+		priceStr = price ? price.value.toFixed(2) : '';
 		pending = true;
 	}
 
 	function confirmAdd() {
 		const parsed = priceStr !== '' ? parseFloat(priceStr) : null;
-		const purchasePrice = parsed != null && isFinite(parsed) && parsed > 0 ? parsed : null;
-		onAdjust(1, purchasePrice);
+		const purchase = parsed != null && isFinite(parsed) && parsed > 0 ? { value: parsed, currency } : null;
+		onAdjust(1, purchase);
 		pending = false;
 	}
 
