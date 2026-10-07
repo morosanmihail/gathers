@@ -18,7 +18,7 @@
 	import { defaultFilters, groupByCard } from '$lib/types';
 	import type { CollectionCard, CardGroup, CardPrices, ValueBreakdown } from '$lib/types';
 	import { formatMoney, formatMoneyList } from '$lib/currency.svelte';
-	import EurTotal from '$lib/components/EurTotal.svelte';
+	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
 
@@ -268,7 +268,7 @@
 				onmouseleave={() => valueHover = false}
 			>
 				≈ {formatMoneyList(currencyTotals) || formatMoney(0)}
-				<EurTotal items={currencyTotals} />
+				<ConvertedTotal items={currencyTotals} />
 				{#if valueHover}
 					<div class="value-breakdown-tooltip">
 						{#each valueBreakdown.currencies as cur (cur.currency)}

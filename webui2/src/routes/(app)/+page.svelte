@@ -4,7 +4,7 @@
 	import { app } from '$lib/state.svelte';
 	import { getCollectionCount, getCollectionValue } from '$lib/api';
 	import { formatMoneyList, sumByCurrency, type Money } from '$lib/currency.svelte';
-	import EurTotal from '$lib/components/EurTotal.svelte';
+	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 
 	interface CollectionStats {
 		id: string;
@@ -69,8 +69,8 @@
 			{#if app.pricingEnabled && hasValue(totalValues)}
 				<div class="stat-card">
 					<div class="stat-label">Total Value</div>
-					<div class="stat-value">{formatMoneyList(totalValues)}</div>
-					<div class="stat-sub">Estimated market value <EurTotal items={totalValues} /></div>
+					<div class="stat-value">{formatMoneyList(totalValues)} <ConvertedTotal items={totalValues} /></div>
+					<div class="stat-sub">Estimated market value</div>
 				</div>
 			{/if}
 		</div>

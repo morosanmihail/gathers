@@ -42,30 +42,45 @@ struct UnitPrices {
     currency: String,
 }
 
-/// Retailer whose prices a card is valued at: "raw" (Pokemon), else
-/// cardmarket, else the retailer with the cheapest listing (ties broken by
-/// name, so the choice never depends on HashMap order). Mirrored by
+/// Retailer whose prices a card is valued at: "raw" (Pokemon), else — among
+/// retailers listing it in `preferred_currency`, or all of them when none do —
+/// cardmarket, else the one with the cheapest listing (ties broken by name, so
+/// the choice never depends on HashMap order). Mirrored by
 /// `preferredRetailer` in the webui so list prices match collection totals.
-fn preferred_retailer(prices: &models::CardPrices) -> Option<&models::RetailerPrices> {
+fn preferred_retailer<'a>(
+    prices: &'a models::CardPrices,
+    preferred_currency: &str,
+) -> Option<&'a models::RetailerPrices> {
+    if let Some(raw) = prices.paper.get("raw") {
+        return Some(raw);
+    }
     let cheapest = |rp: &models::RetailerPrices| {
         rp.normal.into_iter().chain(rp.foil).fold(f64::INFINITY, f64::min)
     };
-    prices
+    let listed: Vec<(&String, &models::RetailerPrices)> = prices
         .paper
-        .get("raw")
-        .or_else(|| prices.paper.iter().find(|(k, _)| k.to_lowercase() == "cardmarket").map(|(_, v)| v))
+        .iter()
+        .filter(|(_, rp)| rp.normal.is_some() || rp.foil.is_some())
+        .collect();
+    let in_preferred: Vec<_> = listed
+        .iter()
+        .copied()
+        .filter(|(_, rp)| rp.currency == preferred_currency)
+        .collect();
+    let candidates = if in_preferred.is_empty() { listed } else { in_preferred };
+    candidates
+        .iter()
+        .find(|(k, _)| k.to_lowercase() == "cardmarket")
         .or_else(|| {
-            prices
-                .paper
+            candidates
                 .iter()
-                .filter(|(_, rp)| rp.normal.is_some() || rp.foil.is_some())
                 .min_by(|(ka, a), (kb, b)| cheapest(a).total_cmp(&cheapest(b)).then_with(|| ka.cmp(kb)))
-                .map(|(_, v)| v)
         })
+        .map(|(_, v)| *v)
 }
 
-fn preferred_unit_prices(prices: &models::CardPrices) -> Option<UnitPrices> {
-    let rp = preferred_retailer(prices)?;
+fn preferred_unit_prices(prices: &models::CardPrices, preferred_currency: &str) -> Option<UnitPrices> {
+    let rp = preferred_retailer(prices, preferred_currency)?;
     Some(UnitPrices {
         normal: rp.normal.or(rp.foil).unwrap_or(0.0),
         foil: rp.foil.or(rp.normal).unwrap_or(0.0),
@@ -1466,6 +1481,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<CollectionValueBreakdown>, ApiError> {
         let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
         let enabled_plugins = enabled_plugin_providers(&state).await;
+        let preferred_currency = state.0.lock().await.preferred_currency.clone();
 
         let storage_guard = state.1.lock().await;
 
@@ -1513,7 +1529,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
                 if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
                     for card in cards {
-                        if let Some(unit) = prices_map.get(&card.uuid).and_then(preferred_unit_prices) {
+                        if let Some(unit) = prices_map
+                            .get(&card.uuid)
+                            .and_then(|p| preferred_unit_prices(p, &preferred_currency)) {
                             unit_prices.insert(card.uuid.clone(), unit);
                         }
                     }
@@ -1944,7 +1962,7 @@ mod value_breakdown_tests {
             ]),
         };
 
-        assert_eq!(preferred_unit_prices(&prices), Some(usd(7.76, 7.76)));
+        assert_eq!(preferred_unit_prices(&prices, "EUR"), Some(usd(7.76, 7.76)));
     }
 
     #[test]
@@ -1963,6 +1981,10 @@ mod value_breakdown_tests {
             ]),
         };
 
-        assert_eq!(preferred_unit_prices(&prices), Some(priced(0.8, 2.0, "EUR")));
+        assert_eq!(preferred_unit_prices(&prices, "EUR"), Some(priced(0.8, 2.0, "EUR")));
+        // USD preferred: the USD retailer wins over cardmarket.
+        assert_eq!(preferred_unit_prices(&prices, "USD"), Some(usd(1.0, 1.0)));
+        // A currency nobody lists in falls back to cardmarket.
+        assert_eq!(preferred_unit_prices(&prices, "GBP"), Some(priced(0.8, 2.0, "EUR")));
     }
 }

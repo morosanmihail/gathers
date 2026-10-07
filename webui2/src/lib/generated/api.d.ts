@@ -2356,6 +2356,13 @@ export interface components {
             pokemon_prices_path?: string | null;
             /** Format: uint */
             port: number;
+            /**
+             * @description ISO 4217 code (e.g. "EUR", "USD"). When a card is listed by retailers
+             *     in several currencies, prices in this one are used first — for shown
+             *     prices and collection totals alike.
+             * @default EUR
+             */
+            preferred_currency: string;
             /** @default true */
             pricing_enabled: boolean;
             riftbound_db_path?: string | null;
@@ -2394,6 +2401,11 @@ export interface components {
              *     store cards under, and doesn't support the same search filters.
              */
             plugins: string[];
+            /**
+             * @description ISO 4217 code of the currency card prices are taken in when a card is
+             *     listed in several (see `ServerConfig::preferred_currency`).
+             */
+            preferred_currency: string;
             /** @description Whether pricing support is enabled (market prices, purchase history, etc.). */
             pricing_enabled: boolean;
             /**
