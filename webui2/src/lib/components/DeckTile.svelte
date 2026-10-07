@@ -6,7 +6,7 @@
 	// `CardResultsList`: the quantity badge there is built from a `CardGroup`'s entries, which a
 	// deck card has no equivalent of.
 	import type { CardAvailability, DeckCard } from '$lib/types';
-	import { boardLabel, cardImageUrl, finishLabel } from '$lib/types';
+	import { cardImageUrl, deckSlots, finishLabel } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import SetTooltip from './SetTooltip.svelte';
 
@@ -18,12 +18,18 @@
 		others?: CardAvailability['holdings'];
 		/** Copies committed beyond what is owned; see `DeckBoard.shortfall`. */
 		short?: number;
-		onAdjust: (card: DeckCard, delta: number) => void;
+		/** Which collections hold a copy; see `DeckBoard.inCollections`. */
+		owned?: CardAvailability['copies'];
+		onAdjust: (card: DeckCard, delta: number, field?: 'quantity' | 'wantQuantity') => void;
 		onMove: (card: DeckCard, toBoard: string) => void;
 		onclick?: (card: DeckCard) => void;
 	}
 
-	let { card, otherBoards, others = [], short = 0, onAdjust, onMove, onclick }: Props = $props();
+	let { card, otherBoards, others = [], short = 0, owned = [], onAdjust, onMove, onclick }: Props =
+		$props();
+
+	// What the board still has to fill, which is what a want is for
+	const missing = $derived(Math.max(0, (card.wantQuantity ?? 0) - (card.quantity ?? 0)));
 
 	const rawImgUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 
@@ -47,7 +53,7 @@
 	onkeydown={(e) => e.key === 'Enter' && onclick?.(card)}
 >
 	<div class="card-tile-qty">
-		{card.quantity ?? 0}{#if card.finish}&nbsp;{finishLabel(card.finish)}{/if}
+		{deckSlots(card)}{#if card.finish}&nbsp;{finishLabel(card.finish)}{/if}
 	</div>
 
 	{#if imgUrl}
@@ -68,8 +74,19 @@
 		{/if}
 	</div>
 
-	{#if short > 0 || others.length > 0}
+	{#if short > 0 || others.length > 0 || missing > 0 || owned.length > 0}
 		<div class="deck-row-note deck-tile-note">
+			{#if missing > 0}
+				<span class="deck-badge deck-badge-want" title="Slots this board still has to fill">
+					{missing} to find
+				</span>
+			{/if}
+			<!-- Where to go and find the missing copies, not just that they are missing -->
+			{#each owned as c (c.collection)}
+				<span class="deck-badge" title="Copies you own in this collection">
+					{c.quantity} in {c.collection}
+				</span>
+			{/each}
 			{#if short > 0}
 				<span class="deck-badge deck-badge-warn" title="More copies are committed to built decks than are owned">
 					&#9888; {short} short
@@ -84,10 +101,25 @@
 	{/if}
 
 	<div class="deck-tile-controls" role="presentation" onclick={(e) => e.stopPropagation()}>
-		<div class="qty-row">
-			<button class="qty-btn" disabled={(card.quantity ?? 0) <= 0} onclick={() => onAdjust(card, -1)}>−</button>
-			<span class="qty-val">{card.quantity ?? 0}</span>
-			<button class="qty-btn add" onclick={() => onAdjust(card, 1)}>+</button>
+		<div class="qty-group">
+			<span class="qty-label" title="Copies this deck has to hand">Have</span>
+			<div class="qty-row">
+				<button class="qty-btn" disabled={(card.quantity ?? 0) <= 0} onclick={() => onAdjust(card, -1)}>−</button>
+				<span class="qty-val">{card.quantity ?? 0}</span>
+				<button class="qty-btn add" onclick={() => onAdjust(card, 1)}>+</button>
+			</div>
+		</div>
+		<div class="qty-group">
+			<span class="qty-label" title="Copies this deck calls for">Want</span>
+			<div class="qty-row">
+				<button
+					class="qty-btn"
+					disabled={(card.wantQuantity ?? 0) <= 0}
+					onclick={() => onAdjust(card, -1, 'wantQuantity')}
+				>−</button>
+				<span class="qty-val">{card.wantQuantity ?? 0}</span>
+				<button class="qty-btn add" onclick={() => onAdjust(card, 1, 'wantQuantity')}>+</button>
+			</div>
 		</div>
 		{#if otherBoards.length > 0}
 			<select
@@ -102,7 +134,7 @@
 			>
 				<option value="">Move to…</option>
 				{#each otherBoards as b (b)}
-					<option value={b}>{boardLabel(b)}</option>
+					<option value={b}>{b}</option>
 				{/each}
 			</select>
 		{/if}

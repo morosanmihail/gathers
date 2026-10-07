@@ -9,6 +9,7 @@
 		deleteCardFromCollection,
 		moveCards,
 		renameCollection,
+		setCollectionKind,
 		invalidateCache
 	} from '$lib/api';
 	import { isDeck } from '$lib/types';
@@ -30,6 +31,7 @@
 	let { collection, groups, onRefresh, onSearchOpen, searchOpen, onHistoryOpen, onShareOpen, onFilterOpen, filterOpen = false, filterActive = false }: Props = $props();
 
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
+	let confirmConvert = $state(false);
 	let moveDest = $state('');
 	let moveError = $state('');
 	// The file picked for import, waiting on its column mapping.
@@ -132,6 +134,19 @@
 			goto(`/collection/${encodeURIComponent(newName)}`);
 		} catch (e) {
 			renameError = String(e);
+		}
+	}
+
+	// Turns the collection into a deck, its cards landing on the first default board
+	async function handleConvert() {
+		confirmConvert = false;
+		try {
+			await app.withOp('Converting to deck', () => setCollectionKind(collection, 'deck'));
+			invalidateCache('collections');
+			await app.loadCollections();
+			goto(`/deck/${encodeURIComponent(collection)}`);
+		} catch (e) {
+			console.error('[gathers] collection convert failed:', e);
 		}
 	}
 
@@ -259,6 +274,11 @@
 		</button>
 	{/if}
 
+	<!-- Convert to a deck: same cards, but gaining boards and a build state -->
+	<button class="btn" onclick={() => confirmConvert = true} title="Make this a deck">
+		Convert to deck
+	</button>
+
 	<!-- Share links -->
 	{#if onShareOpen}
 		<button class="btn" onclick={onShareOpen} title="Manage shareable links">
@@ -328,5 +348,15 @@
 		danger
 		onconfirm={handleDeleteCards}
 		oncancel={() => confirmDelete = null}
+	/>
+{/if}
+
+{#if confirmConvert}
+	<ConfirmDialog
+		title="Convert to deck"
+		message="Turn '{collection}' into a deck? Its cards move onto a Mainboard, and it gains boards and a build state. Prices and purchase history don't apply to a deck."
+		confirmLabel="Convert"
+		onconfirm={handleConvert}
+		oncancel={() => confirmConvert = false}
 	/>
 {/if}

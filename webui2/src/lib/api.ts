@@ -19,6 +19,8 @@ import type {
 	CollectionKind,
 	DeckEntry,
 	DeckCard,
+	DeckBoard,
+	TransferDirection,
 	DeckMeta,
 	CardAvailability
 } from './types';
@@ -163,7 +165,8 @@ export async function getDeckCards(deck: string): Promise<DeckCard[]> {
 
 /**
  * How many cards a deck holds, counting copies rather than distinct cards:
- * a deck is described by how many cards are in it.
+ * a deck is described by how many cards are in it. A card counts the greater
+ * of its owned and wanted copies, not their sum.
  *
  * Cached alongside the collection counts, and answered by the server, so the
  * overview doesn't download every deck's card list to size it.
@@ -176,10 +179,12 @@ export async function getDeckCardCount(deck: string): Promise<number> {
 }
 
 /**
- * Changes one card's quantity on one board.
+ * Changes one card's owned and wanted counts on one board.
  *
  * Additive with respect to ownership: this never changes what any collection
- * says is owned.
+ * says is owned. `transferDeckCard` is for copies that actually move.
+ *
+ * An empty board means the deck's first one, which the server fills in.
  */
 export async function adjustDeckCard(
 	deck: string,
@@ -187,12 +192,20 @@ export async function adjustDeckCard(
 	finish: string,
 	board: string,
 	quantity: number,
-	provider?: string
+	provider?: string,
+	wantQuantity = 0
 ): Promise<void> {
 	await fetchJSON(`/api/deck/cards/${encodeURIComponent(deck)}/adjust`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id, finish, board, quantity, ...(provider ? { provider } : {}) })
+		body: JSON.stringify({
+			id,
+			finish,
+			board,
+			quantity,
+			wantQuantity,
+			...(provider ? { provider } : {})
+		})
 	});
 	invalidateCollectionStats(deck);
 }
@@ -203,13 +216,100 @@ export async function moveDeckCard(
 	finish: string,
 	fromBoard: string,
 	toBoard: string,
-	quantity: number
+	quantity: number,
+	wantQuantity = 0
 ): Promise<DeckEntry[]> {
 	return fetchJSON(`/api/deck/cards/${encodeURIComponent(deck)}/move`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ id, finish, fromBoard, toBoard, quantity })
+		body: JSON.stringify({ id, finish, fromBoard, toBoard, quantity, wantQuantity })
 	});
+}
+
+/**
+ * Moves copies between a collection and one of a deck's boards.
+ *
+ * A transfer, unlike `adjustDeckCard`: the copies leave the collection.
+ * Returns how many actually moved, which the server caps at what the source
+ * holds.
+ */
+export async function transferDeckCard(
+	deck: string,
+	collection: string,
+	id: string,
+	finish: string,
+	board: string,
+	direction: TransferDirection,
+	quantity = 1
+): Promise<number> {
+	const result = await fetchJSON<{ moved: number }>(
+		`/api/deck/cards/${encodeURIComponent(deck)}/transfer`,
+		{
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ id, finish, collection, board, direction, quantity })
+		}
+	);
+	invalidateCollectionStats(deck);
+	invalidateCollectionStats(collection);
+	return result.moved;
+}
+
+// Boards
+//
+// Names are free-form and the order is the user's, so each of these hands back the deck's whole
+// board list rather than leaving the client to work out what changed.
+
+export async function getDeckBoards(deck: string): Promise<DeckBoard[]> {
+	return fetchJSON(`/api/deck/boards/${encodeURIComponent(deck)}`);
+}
+
+export async function addDeckBoard(deck: string, board: string): Promise<DeckBoard[]> {
+	return fetchJSON(`/api/deck/boards/${encodeURIComponent(deck)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ board })
+	});
+}
+
+export async function renameDeckBoard(
+	deck: string,
+	from: string,
+	to: string
+): Promise<DeckBoard[]> {
+	return fetchJSON(`/api/deck/boards/${encodeURIComponent(deck)}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ from, to })
+	});
+}
+
+/** Removes a board and every card on it. */
+export async function deleteDeckBoard(deck: string, board: string): Promise<DeckBoard[]> {
+	const boards = await fetchJSON<DeckBoard[]>(
+		`/api/deck/boards/${encodeURIComponent(deck)}/${encodeURIComponent(board)}`,
+		{ method: 'DELETE' }
+	);
+	invalidateCollectionStats(deck);
+	return boards;
+}
+
+export async function reorderDeckBoards(deck: string, boards: string[]): Promise<DeckBoard[]> {
+	return fetchJSON(`/api/deck/boards/${encodeURIComponent(deck)}/order`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ boards })
+	});
+}
+
+/** Converts a collection to a deck or back, carrying its cards across. */
+export async function setCollectionKind(id: string, kind: CollectionKind): Promise<void> {
+	await fetchJSON(`/api/collection/kind/${encodeURIComponent(id)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind })
+	});
+	invalidateCollectionStats(id);
 }
 
 export async function getDeckMeta(deck: string): Promise<DeckMeta> {
@@ -385,8 +485,8 @@ async function enrichEntries(entries: CollectionEntry[]): Promise<CollectionCard
 }
 
 // Same shape as `enrichEntries`, for deck rows: batch the detail lookup by provider and merge. Kept
-// separate rather than generalised because a deck entry carries a board and no want quantity, so
-// neither the input nor the output type lines up with the collection version.
+// separate rather than generalised because a deck entry carries a board, so neither the input nor
+// the output type lines up with the collection version.
 async function enrichDeckEntries(entries: DeckEntry[]): Promise<DeckCard[]> {
 	const byProvider: Record<string, string[]> = {};
 	for (const entry of entries) {

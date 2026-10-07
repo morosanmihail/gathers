@@ -15,8 +15,7 @@ export function isDeck(collection: { kind: CollectionKind }): boolean {
 }
 
 // Raw response from /api/deck/{id}/cards: no card details, one row per (uuid, finish, board).
-// Unlike a collection entry there's no want quantity: a deck is a list to be played, not a
-// wishlist.
+// Carries the same owned/wanted pair as a collection entry, plus the board it sits on.
 export type DeckEntry = components['schemas']['DeckCard'];
 
 /** A deck entry merged with its card detail fields, ready to render. */
@@ -34,44 +33,18 @@ export type CardAvailability = components['schemas']['CardAvailability'];
 export type DeckMeta = components['schemas']['DeckMeta'];
 
 /**
- * Human label for a board value. `""` is a deck's default zone, which for a
- * game with only one (Pokemon) is the whole deck; games with several name
- * them, and since `board` is an open string those names come through as-is.
+ * One zone of a deck. Names are free-form and user-editable, so they are shown
+ * verbatim rather than mapped through a label table; the server also decides
+ * the order, which is why these come from the API instead of the card rows.
  */
-export function boardLabel(board: string): string {
-	if (!board) return 'Deck';
-	if (board === 'main') return 'Mainboard';
-	if (board === 'side') return 'Sideboard';
-	return board.charAt(0).toUpperCase() + board.slice(1);
-}
+export type DeckBoard = components['schemas']['DeckBoard'];
 
-/**
- * Boards a deck's cards are spread across, in a stable order: the conventional
- * MTG pair first (that's what the add controls offer), then any other zone the
- * deck actually uses, so a Riftbound legend or a Commander command zone shows
- * up without the UI having to know the game.
- */
-export function boardsInUse(cards: DeckCard[]): string[] {
-	const known = ['main', 'side'];
-	const present = new Set(cards.map(c => c.board ?? ''));
-	const extra = [...present].filter(b => !known.includes(b)).sort();
-	// Only boards actually holding cards: a deck whose rows all sit on the default board `''`
-	// shouldn't render two empty sections above its real one. See `boardsToOffer` for what the add
-	// control lists.
-	return [...known.filter(b => present.has(b)), ...extra];
-}
+/** Which way a card transfer between a collection and a deck board goes. */
+export type TransferDirection = components['schemas']['DeckCardTransfer']['direction'];
 
-/**
- * Boards the add control offers: the conventional MTG pair plus any zone the
- * deck already uses.
- *
- * Wider than `boardsInUse` on purpose, so the first sideboard card can be added
- * to a deck that has none yet.
- */
-export function boardsToOffer(cards: DeckCard[]): string[] {
-	const inUse = boardsInUse(cards);
-	const known = ['main', 'side'];
-	return [...known, ...inUse.filter(b => !known.includes(b))];
+/** How many of a deck's slots a row fills: owned and wanted overlap, so never their sum. */
+export function deckSlots(card: { quantity: number; wantQuantity: number }): number {
+	return Math.max(card.quantity, card.wantQuantity);
 }
 
 export type SystemInfo = components['schemas']['SystemInfo'];

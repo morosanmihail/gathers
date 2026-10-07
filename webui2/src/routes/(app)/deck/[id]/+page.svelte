@@ -1,29 +1,38 @@
 <script lang="ts">
 	// A deck's page. Separate from the collection page rather than a mode of it: a deck has boards
-	// and a build state but no prices, wants, purchase history, or pagination, so sharing the route
-	// would have meant a screen full of controls that don't apply.
+	// and a build state but no prices, purchase history, or pagination, so sharing the route would
+	// have meant a screen full of controls that don't apply.
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import DeckBoard from '$lib/components/DeckBoard.svelte';
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ShareLinksModal from '$lib/components/ShareLinksModal.svelte';
 	import {
-		getDeckCards, adjustDeckCard, moveDeckCard,
+		getDeckCards, adjustDeckCard, moveDeckCard, transferDeckCard,
+		getDeckBoards, addDeckBoard, renameDeckBoard, deleteDeckBoard, reorderDeckBoards,
 		getDeckMeta, setDeckMeta, getCardAvailability,
-		renameCollection, deleteCollection, invalidateCache
+		renameCollection, deleteCollection, setCollectionKind, invalidateCache
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
-	import { boardsInUse, boardsToOffer, boardLabel } from '$lib/types';
-	import type { CardAvailability, DeckCard, DeckMeta } from '$lib/types';
+	import { deckSlots, isDeck } from '$lib/types';
+	import type {
+		CardAvailability,
+		DeckBoard as DeckBoardInfo,
+		DeckCard,
+		DeckMeta,
+		TransferDirection
+	} from '$lib/types';
 
 	const deckId = $derived(decodeURIComponent($page.params.id ?? ''));
 
 	let cards = $state<DeckCard[]>([]);
+	let boardInfo = $state<DeckBoardInfo[]>([]);
 	let meta = $state<DeckMeta>({ built: false, location: null, notes: null });
 	let availability = $state<Record<string, CardAvailability>>({});
 	let loading = $state(true);
 	let searchOpen = $state(false);
-	let addBoard = $state('main');
+	let addBoard = $state('');
 	let locationDraft = $state('');
 	let savingMeta = $state(false);
 	let renaming = $state(false);
@@ -34,11 +43,20 @@
 	let actionError = $state('');
 	let loadError = $state('');
 	let confirmDelete = $state(false);
+	let managingBoards = $state(false);
+	let newBoardName = $state('');
+	let editingBoard = $state<string | null>(null);
+	let boardNameDraft = $state('');
+	let confirmBoardDelete = $state<string | null>(null);
+	let confirmConvert = $state(false);
+	let shareOpen = $state(false);
 
-	const boards = $derived(boardsInUse(cards));
-	// Wider than what's rendered, so a sideboard can be started
-	const addBoards = $derived(boardsToOffer(cards));
-	const total = $derived(cards.reduce((n, c) => n + (c.quantity ?? 0), 0));
+	// The server owns both the names and the order, so these are its answer rather than something
+	// derived from the rows: an empty board is still a board, and the user can reorder them.
+	const boards = $derived(boardInfo.map((b) => b.board));
+	// Wanting four and holding three is four cards of the deck, not seven.
+	const total = $derived(cards.reduce((n, c) => n + deckSlots(c), 0));
+	const collections = $derived(app.collections.filter((c) => !isDeck(c)).map((c) => c.id));
 
 	function cardsOn(board: string): DeckCard[] {
 		return cards.filter((c) => (c.board ?? '') === board);
@@ -48,8 +66,16 @@
 		loading = true;
 		loadError = '';
 		try {
-			const [deckCards, deckMeta] = await Promise.all([getDeckCards(deckId), getDeckMeta(deckId)]);
+			const [deckCards, deckBoards, deckMeta] = await Promise.all([
+				getDeckCards(deckId),
+				getDeckBoards(deckId),
+				getDeckMeta(deckId)
+			]);
 			cards = deckCards;
+			boardInfo = deckBoards;
+			if (!addBoard || !deckBoards.some((b) => b.board === addBoard)) {
+				addBoard = deckBoards[0]?.board ?? '';
+			}
 			meta = deckMeta;
 			locationDraft = deckMeta.location ?? '';
 			// One lookup for the whole list rather than one per row.
@@ -79,17 +105,31 @@
 		availability = await getCardAvailability([...new Set(cards.map((c) => c.id))]);
 	}
 
-	async function adjust(card: DeckCard, delta: number) {
+	function sameRow(a: DeckCard, b: DeckCard): boolean {
+		return a.id === b.id && (a.finish ?? '') === (b.finish ?? '') && (a.board ?? '') === (b.board ?? '');
+	}
+
+	/** Changes one of the row's two counts; `field` picks which. */
+	async function adjust(card: DeckCard, delta: number, field: 'quantity' | 'wantQuantity' = 'quantity') {
 		actionError = '';
+		const want = field === 'wantQuantity';
 		try {
-			await adjustDeckCard(deckId, card.id, card.finish ?? '', card.board ?? '', delta, card.provider);
+			await adjustDeckCard(
+				deckId,
+				card.id,
+				card.finish ?? '',
+				card.board ?? '',
+				want ? 0 : delta,
+				card.provider,
+				want ? delta : 0
+			);
 			cards = cards
 				.map((c) =>
-					c.id === card.id && (c.finish ?? '') === (card.finish ?? '') && (c.board ?? '') === (card.board ?? '')
-						? { ...c, quantity: Math.max(0, (c.quantity ?? 0) + delta) }
-						: c
+					sameRow(c, card) ? { ...c, [field]: Math.max(0, (c[field] ?? 0) + delta) } : c
 				)
-				.filter((c) => (c.quantity ?? 0) > 0);
+				// A row survives until both counts are gone: giving up the last owned copy leaves
+				// the want standing.
+				.filter((c) => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
 			// A built deck's contents change what every card is short by.
 			if (meta.built) refreshAvailability();
 		} catch (e) {
@@ -108,6 +148,105 @@
 		} catch (e) {
 			console.error('[gathers] deck move failed:', e);
 			actionError = `Couldn't move that card. ${e}`;
+		}
+	}
+
+	/**
+	 * Moves copies between a collection and this deck.
+	 *
+	 * Unlike `adjust`, the copies leave the collection, so the deck's own count isn't the only
+	 * thing that changed and the list is reloaded wholesale.
+	 */
+	async function transfer(card: DeckCard, collection: string, direction: TransferDirection) {
+		actionError = '';
+		try {
+			const moved = await transferDeckCard(
+				deckId, collection, card.id, card.finish ?? '', card.board ?? '', direction
+			);
+			if (moved === 0) {
+				actionError = direction === 'intoDeck'
+					? `'${collection}' hasn't got a copy of ${card.name} to move.`
+					: `This board hasn't got a copy of ${card.name} to give back.`;
+				return;
+			}
+			cards = await getDeckCards(deckId);
+			await refreshAvailability();
+		} catch (e) {
+			console.error('[gathers] deck transfer failed:', e);
+			actionError = `Couldn't move that card. ${e}`;
+		}
+	}
+
+	// ── boards ───────────────────────────────────────────────────────────────
+	//
+	// Every board mutation returns the deck's whole board list, so the local copy is replaced
+	// rather than patched. Renames and deletions also move cards, so those reload the rows too.
+
+	async function handleAddBoard(e: Event) {
+		e.preventDefault();
+		const name = newBoardName.trim();
+		if (!name) return;
+		actionError = '';
+		try {
+			boardInfo = await addDeckBoard(deckId, name);
+			newBoardName = '';
+		} catch (err) {
+			actionError = `Couldn't add that board. ${err}`;
+		}
+	}
+
+	async function handleRenameBoard(from: string) {
+		const to = boardNameDraft.trim();
+		editingBoard = null;
+		if (!to || to === from) return;
+		actionError = '';
+		try {
+			boardInfo = await renameDeckBoard(deckId, from, to);
+			cards = await getDeckCards(deckId);
+			if (addBoard === from) addBoard = to;
+		} catch (err) {
+			actionError = `Couldn't rename that board. ${err}`;
+		}
+	}
+
+	async function handleDeleteBoard(board: string) {
+		confirmBoardDelete = null;
+		actionError = '';
+		try {
+			boardInfo = await deleteDeckBoard(deckId, board);
+			cards = await getDeckCards(deckId);
+			if (addBoard === board) addBoard = boardInfo[0]?.board ?? '';
+			if (meta.built) await refreshAvailability();
+		} catch (err) {
+			actionError = `Couldn't delete that board. ${err}`;
+		}
+	}
+
+	async function moveBoard(board: string, delta: number) {
+		const order = boards.slice();
+		const from = order.indexOf(board);
+		const to = from + delta;
+		if (from < 0 || to < 0 || to >= order.length) return;
+		order.splice(to, 0, ...order.splice(from, 1));
+		actionError = '';
+		try {
+			boardInfo = await reorderDeckBoards(deckId, order);
+		} catch (err) {
+			actionError = `Couldn't reorder the boards. ${err}`;
+		}
+	}
+
+	// Turns the deck back into a plain collection, collapsing its boards into one pile
+	async function handleConvert() {
+		confirmConvert = false;
+		try {
+			await app.withOp('Converting to collection', () => setCollectionKind(deckId, 'collection'));
+			invalidateCache('collections');
+			await app.loadCollections();
+			goto(`/collection/${encodeURIComponent(deckId)}`);
+		} catch (e) {
+			console.error('[gathers] deck convert failed:', e);
+			actionError = `Couldn't convert this deck. ${e}`;
 		}
 	}
 
@@ -183,11 +322,15 @@
 		<label class="deck-add-board">
 			Add to
 			<select class="select" bind:value={addBoard}>
-				{#each addBoards as b (b)}
-					<option value={b}>{boardLabel(b)}</option>
+				{#each boards as b (b)}
+					<option value={b}>{b}</option>
 				{/each}
 			</select>
 		</label>
+
+		<button class="btn" onclick={() => (managingBoards = !managingBoards)}>
+			{managingBoards ? 'Done with boards' : 'Edit boards'}
+		</button>
 
 		<label class="deck-built-toggle" title="A built deck is assembled in real life, so its cards count as committed">
 			<input
@@ -235,6 +378,21 @@
 			</button>
 		{/if}
 
+		<!-- A deck is a collection with a kind, so share links work on it unchanged -->
+		<button class="btn" onclick={() => shareOpen = true} title="Manage shareable links">
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+				<circle cx="3" cy="7" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<circle cx="11" cy="3" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<circle cx="11" cy="11" r="1.8" stroke="currentColor" stroke-width="1.3"/>
+				<path d="M4.6 6.2L9.4 3.8M4.6 7.8L9.4 10.2" stroke="currentColor" stroke-width="1.3"/>
+			</svg>
+			Share
+		</button>
+
+		<button class="btn" onclick={() => confirmConvert = true} title="Make this a plain collection">
+			Convert to collection
+		</button>
+
 		<button class="btn btn-danger" onclick={() => confirmDelete = true}>
 			<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
 				<path d="M2 4h10M5 4V3a1 1 0 011-1h2a1 1 0 011 1v1M11 4l-.9 8.1A1 1 0 019.1 13H4.9a1 1 0 01-1-.9L3 4" stroke="currentColor" stroke-width="1.2" fill="none"/>
@@ -242,6 +400,66 @@
 			Delete deck
 		</button>
 	</div>
+
+	{#if managingBoards}
+		<!-- Board names are free-form, so this is a plain text field rather than a fixed set -->
+		<div class="deck-board-manager">
+			<form class="deck-board-add" onsubmit={handleAddBoard}>
+				<input
+					class="input"
+					placeholder="New board, e.g. Maybeboard or Mainboard:Lands"
+					bind:value={newBoardName}
+				/>
+				<button type="submit" class="btn btn-accent" disabled={!newBoardName.trim()}>Add board</button>
+			</form>
+
+			<ul class="deck-board-list">
+				{#each boards as b, i (b)}
+					<li class="deck-board-row">
+						{#if editingBoard === b}
+							<!-- svelte-ignore a11y_autofocus -->
+							<input
+								class="input"
+								bind:value={boardNameDraft}
+								autofocus
+								onblur={() => handleRenameBoard(b)}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') e.currentTarget.blur();
+									if (e.key === 'Escape') editingBoard = null;
+								}}
+							/>
+						{:else}
+							<span class="deck-board-row-name">{b}</span>
+							<span class="deck-board-row-count">
+								{cardsOn(b).reduce((n, c) => n + deckSlots(c), 0)}
+							</span>
+						{/if}
+
+						<button
+							class="btn btn-sm btn-ghost"
+							disabled={i === 0}
+							title="Move up"
+							onclick={() => moveBoard(b, -1)}
+						>↑</button>
+						<button
+							class="btn btn-sm btn-ghost"
+							disabled={i === boards.length - 1}
+							title="Move down"
+							onclick={() => moveBoard(b, 1)}
+						>↓</button>
+						<button
+							class="btn btn-sm"
+							onclick={() => { editingBoard = b; boardNameDraft = b; }}
+						>Rename</button>
+						<button
+							class="btn btn-sm btn-danger"
+							onclick={() => confirmBoardDelete = b}
+						>Delete</button>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 
 	<div class="page-header" style="padding-bottom: 8px;">
 		<h1 class="page-title">{deckId}</h1>
@@ -282,9 +500,11 @@
 					{board}
 					cards={cardsOn(board)}
 					{availability}
-					boards={addBoards}
+					{boards}
+					{collections}
 					onAdjust={adjust}
 					onMove={move}
+					onTransfer={transfer}
 				/>
 			{/each}
 		</div>
@@ -309,4 +529,29 @@
 		onconfirm={handleDelete}
 		oncancel={() => (confirmDelete = false)}
 	/>
+{/if}
+
+{#if confirmBoardDelete}
+	<ConfirmDialog
+		title="Delete board"
+		message="Delete '{confirmBoardDelete}' and the {cardsOn(confirmBoardDelete).length} card{cardsOn(confirmBoardDelete).length === 1 ? '' : 's'} on it? The cards stay in whatever collections you own them in."
+		confirmLabel="Delete"
+		danger
+		onconfirm={() => handleDeleteBoard(confirmBoardDelete!)}
+		oncancel={() => (confirmBoardDelete = null)}
+	/>
+{/if}
+
+{#if confirmConvert}
+	<ConfirmDialog
+		title="Convert to collection"
+		message="Turn '{deckId}' into a plain collection? Its boards collapse into one pile and its build state is dropped, since a collection is never assembled. The cards come with it."
+		confirmLabel="Convert"
+		onconfirm={handleConvert}
+		oncancel={() => (confirmConvert = false)}
+	/>
+{/if}
+
+{#if shareOpen}
+	<ShareLinksModal collection={deckId} onclose={() => shareOpen = false} />
 {/if}

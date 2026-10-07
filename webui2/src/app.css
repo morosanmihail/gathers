@@ -1377,7 +1377,7 @@ label.field-label {
 
 .deck-row {
 	display: grid;
-	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 200px;
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) minmax(0, 320px);
 	align-items: center;
 	gap: 8px;
 	padding: 6px 4px;
@@ -1391,7 +1391,22 @@ label.field-label {
 .deck-row-finish { font-size: 0.7rem; color: var(--text2); text-transform: lowercase; }
 .deck-row-set { font-size: 0.78rem; color: var(--text2); }
 .deck-row-note { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.deck-row-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.deck-row-controls {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+/* Owned and wanted sit side by side and mean different things, so each stepper is labelled */
+.qty-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.qty-label {
+	font-size: 0.62rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text2);
+}
 
 .deck-move-select { height: 24px; padding: 1px 4px; font-size: 0.72rem; }
 
@@ -1448,6 +1463,11 @@ label.field-label {
 .deck-badge-warn {
 	background: color-mix(in srgb, var(--danger) 18%, transparent);
 	color: var(--danger);
+}
+
+.deck-badge-want {
+	background: color-mix(in srgb, var(--accent) 18%, transparent);
+	color: var(--accent);
 }
 
 .deck-badge-built {
@@ -1538,3 +1558,32 @@ label.field-label {
 	.stats-grid { grid-template-columns: 1fr; }
 	.collections-overview { grid-template-columns: 1fr 1fr; }
 }
+
+/* Board management. Shown on demand rather than always: renaming and reordering boards is a
+   setup task, not something done while building a list. */
+.deck-board-manager {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px 20px;
+	margin: 0 20px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface2);
+}
+
+.deck-board-add { display: flex; gap: 8px; align-items: center; }
+.deck-board-add .input { flex: 1; max-width: 360px; }
+
+.deck-board-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.deck-board-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 0;
+}
+
+.deck-board-row-name { font-weight: 600; }
+.deck-board-row-count { font-size: 0.72rem; color: var(--text2); margin-right: auto; }
+.deck-board-row .input { height: 28px; padding: 2px 8px; margin-right: auto; max-width: 280px; }

@@ -11,8 +11,9 @@
 	interface Props {
 		collection: string;
 		/** Set when the target is a deck: which board an added card lands on.
-		 *  Switches adds to the deck endpoint and hides the wantlist action,
-		 *  since a deck has no want quantity. */
+		 *  Switches adds to the deck endpoint and hides the wantlist action.
+		 *  A deck does have wanted copies, but they belong to a board, which
+		 *  is set on the deck page rather than guessed at from here. */
 		deckBoard?: string | null;
 		onclose: () => void;
 		onAdded?: () => void;
