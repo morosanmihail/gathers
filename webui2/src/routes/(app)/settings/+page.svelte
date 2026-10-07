@@ -4,6 +4,7 @@
 	import { app } from '$lib/state.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import type { EnvOverride, PluginConfig, Settings, System } from '$lib/types';
+	import { currencyPrefs, setConvertToEur } from '$lib/currency.svelte';
 
 	let config = $state<Settings | null>(null);
 	let error = $state('');
@@ -263,6 +264,24 @@
 				{error}
 			</div>
 		{/if}
+
+		<!-- Per-browser display preferences; not part of server.toml. -->
+		<div class="panel" style="margin-bottom: 20px;">
+			<div class="panel-title">
+				Display
+			</div>
+			<div style="padding: 16px;">
+				<label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+					<input type="checkbox" checked={currencyPrefs.convertToEur}
+						onchange={(e) => setConvertToEur((e.target as HTMLInputElement).checked)}
+						style="width: 16px; height: 16px; accent-color: var(--accent);" />
+					<div>
+						<div style="font-weight: 600;">Show converted EUR total</div>
+						<div style="font-size: 0.8rem; color: var(--text2);">When value totals span several currencies, also show their sum in EUR using current ECB rates (fetched from frankfurter.dev). Saved in this browser only.</div>
+					</div>
+				</label>
+			</div>
+		</div>
 
 		{#if !demoMode && !config && !error}
 			<div class="loading-row"><div class="spinner"></div> Loading settings…</div>

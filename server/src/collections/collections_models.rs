@@ -405,14 +405,25 @@ pub struct PurchaseHistoryResponse {
 
 #[derive(Serialize, JsonSchema)]
 pub struct CollectionValueBreakdown {
+    /// Totals split by currency, largest total first. Every priced entry counts
+    /// toward exactly one currency (that of its preferred retailer).
+    pub currencies: Vec<CurrencyValue>,
+    pub priced_count: usize,
+    pub total_count: usize,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct CurrencyValue {
+    /// ISO 4217 code, e.g. "USD", "EUR".
+    pub currency: String,
     pub total_value: f64,
     pub profit: f64,
     pub untracked_value: f64,
-    pub priced_count: usize,
-    pub total_count: usize,
     /// Total price of cards on the wishlist (`want_quantity`), independent of
     /// what's owned. Not included in `total_value`.
     pub wanted_value: f64,
+    /// Owned entries priced in this currency.
+    pub priced_count: usize,
 }
 
 #[derive(Serialize, JsonSchema)]

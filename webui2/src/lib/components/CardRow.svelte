@@ -69,7 +69,7 @@
 			{#if onAdjust}
 				<FinishList
 					group={col}
-					{price}
+					{cardPrices}
 					onAdjust={(finish, delta, purchasePrice) => onAdjust(col, finish, delta, purchasePrice)}
 				/>
 			{:else}

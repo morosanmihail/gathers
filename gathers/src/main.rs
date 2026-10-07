@@ -244,7 +244,11 @@ async fn main() -> eyre::Result<()> {
                         prices
                             .get(&card.id)
                             .and_then(|p| {
-                                p.paper.values().filter_map(f).reduce(f64::min).map(|v| format!("${:.2}", v))
+                                p.paper
+                                    .values()
+                                    .filter_map(|r| f(r).map(|v| (v, &r.currency)))
+                                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                                    .map(|(v, cur)| format!("{:.2} {}", v, cur))
                             })
                             .unwrap_or_else(|| "N/A".to_string())
                     };

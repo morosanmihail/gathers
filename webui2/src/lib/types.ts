@@ -215,13 +215,6 @@ export function toggleInList(list: string[], value: string): string[] {
 	return list.includes(value) ? list.filter(v => v !== value) : [...list, value];
 }
 
-export function bestPrice(cardPrices: CardPrices): string | null {
-	if (!cardPrices?.paper) return null;
-	const vals = Object.values(cardPrices.paper).flatMap(r => [r.normal, r.foil].filter(v => v != null)) as number[];
-	if (!vals.length) return null;
-	return `$${Math.min(...vals).toFixed(2)}`;
-}
-
 export type ValueBreakdown = components['schemas']['CollectionValueBreakdown'];
 export type Settings = components['schemas']['ServerConfig'];
 export type EnvOverride = components['schemas']['EnvOverride'];

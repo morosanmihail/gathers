@@ -2098,22 +2098,15 @@ export interface components {
             new_id: string;
         };
         CollectionValueBreakdown: {
+            /**
+             * @description Totals split by currency, largest total first. Every priced entry counts
+             *     toward exactly one currency (that of its preferred retailer).
+             */
+            currencies: components["schemas"]["CurrencyValue"][];
             /** Format: uint */
             priced_count: number;
-            /** Format: double */
-            profit: number;
             /** Format: uint */
             total_count: number;
-            /** Format: double */
-            total_value: number;
-            /** Format: double */
-            untracked_value: number;
-            /**
-             * Format: double
-             * @description Total price of cards on the wishlist (`want_quantity`), independent of
-             *     what's owned. Not included in `total_value`.
-             */
-            wanted_value: number;
         };
         CollectionsSearchQuery: {
             /**
@@ -2126,6 +2119,27 @@ export interface components {
              * @default 24
              */
             page_size: number;
+        };
+        CurrencyValue: {
+            /** @description ISO 4217 code, e.g. "USD", "EUR". */
+            currency: string;
+            /**
+             * Format: uint
+             * @description Owned entries priced in this currency.
+             */
+            priced_count: number;
+            /** Format: double */
+            profit: number;
+            /** Format: double */
+            total_value: number;
+            /** Format: double */
+            untracked_value: number;
+            /**
+             * Format: double
+             * @description Total price of cards on the wishlist (`want_quantity`), independent of
+             *     what's owned. Not included in `total_value`.
+             */
+            wanted_value: number;
         };
         DownloadProgressInfo: {
             /** Format: uint64 */
@@ -2266,6 +2280,11 @@ export interface components {
             setCode: string;
         };
         RetailerPrices: {
+            /**
+             * @description ISO 4217 currency code of `normal`/`foil` (e.g. "USD", "EUR").
+             * @default USD
+             */
+            currency: string;
             /** Format: double */
             foil?: number | null;
             /** Format: double */

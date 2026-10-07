@@ -13,6 +13,7 @@ pub(super) fn row_to_card_prices(uuid: &str, raw: f64, psa10: f64, psa9: f64) ->
             RetailerPrices {
                 normal: Some(raw),
                 foil: None,
+                currency: "USD".to_string(),
             },
         );
     }
@@ -22,6 +23,7 @@ pub(super) fn row_to_card_prices(uuid: &str, raw: f64, psa10: f64, psa9: f64) ->
             RetailerPrices {
                 normal: Some(psa10),
                 foil: None,
+                currency: "USD".to_string(),
             },
         );
     }
@@ -31,6 +33,7 @@ pub(super) fn row_to_card_prices(uuid: &str, raw: f64, psa10: f64, psa9: f64) ->
             RetailerPrices {
                 normal: Some(psa9),
                 foil: None,
+                currency: "USD".to_string(),
             },
         );
     }

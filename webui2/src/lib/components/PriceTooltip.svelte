@@ -4,6 +4,7 @@
 	import { portal } from '$lib/portal';
 	import { createHoverTooltip, clampHorizontal } from '$lib/tooltip.svelte';
 	import { fmtDate } from '$lib/format';
+	import { DEFAULT_CURRENCY, formatMoney } from '$lib/currency.svelte';
 
 	interface Props {
 		cardId: string;
@@ -45,9 +46,11 @@
 	const providerRows = $derived.by(() => {
 		if (!cardPrices?.paper) return [];
 		return Object.entries(cardPrices.paper)
-			.map(([retailer, rp]) => ({ retailer, normal: rp.normal, foil: rp.foil }))
+			.map(([retailer, rp]) => ({ retailer, normal: rp.normal, foil: rp.foil, currency: rp.currency ?? DEFAULT_CURRENCY }))
 			.filter(r => r.normal != null || r.foil != null)
+			// Group by currency so cheapest-first never compares e.g. EUR to USD.
 			.sort((a, b) => {
+				if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
 				const aMin = Math.min(a.normal ?? Infinity, a.foil ?? Infinity);
 				const bMin = Math.min(b.normal ?? Infinity, b.foil ?? Infinity);
 				return aMin - bMin;
@@ -78,17 +81,17 @@
 					<span class="price-tooltip-date" style="text-transform:capitalize;">{row.retailer}</span>
 					{#if row.normal != null}
 						<span class="price-tooltip-qty">normal</span>
-						<span class="price-tooltip-val">${row.normal.toFixed(2)}</span>
+						<span class="price-tooltip-val">{formatMoney(row.normal, row.currency)}</span>
 					{:else}
 						<span class="price-tooltip-qty">foil</span>
-						<span class="price-tooltip-val">${row.foil!.toFixed(2)}✦</span>
+						<span class="price-tooltip-val">{formatMoney(row.foil!, row.currency)}✦</span>
 					{/if}
 				</div>
 				{#if row.normal != null && row.foil != null}
 					<div class="price-tooltip-row">
 						<span class="price-tooltip-date"></span>
 						<span class="price-tooltip-qty">foil</span>
-						<span class="price-tooltip-val">${row.foil.toFixed(2)}✦</span>
+						<span class="price-tooltip-val">{formatMoney(row.foil, row.currency)}✦</span>
 					</div>
 				{/if}
 			{/each}
