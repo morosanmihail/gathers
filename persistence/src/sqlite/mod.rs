@@ -11,7 +11,7 @@ mod tests;
 use include_dir::{Dir, include_dir};
 use models::CardID;
 use models::CollectionID;
-use models::{CardAvailability, CollectionKind, DeckCard, DeckMeta};
+use models::{CardAvailability, CollectionKind, DeckBoard, DeckCard, DeckMeta};
 use rusqlite::Connection;
 use rusqlite_migration::Migrations;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 
 pub use backup::{latest_price_history_schema_version, latest_storage_schema_version};
 
-use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, DailyPrice, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
+use crate::{BoardRenameResult, CollectionCard, CollectionCardsParams, CollectionInfo, DailyPrice, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -85,15 +85,25 @@ impl SQLitePersistenceSystem {
         finish: &str,
         board: &str,
         quantity: i32,
+        want_quantity: i32,
         time_added: &str,
         provider: &str,
     ) -> eyre::Result<Option<DeckCard>> {
         let conn = self.connection.lock().await;
         deck_cards::adjust_card(
-            &conn, deck, card_uuid, finish, board, quantity, time_added, provider,
+            &conn,
+            deck,
+            card_uuid,
+            finish,
+            board,
+            quantity,
+            want_quantity,
+            time_added,
+            provider,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn move_deck_card(
         &mut self,
         deck: &CollectionID,
@@ -101,11 +111,94 @@ impl SQLitePersistenceSystem {
         finish: &str,
         from_board: &str,
         to_board: &str,
-        quantity: i32,
+        quantity: u32,
+        want_quantity: u32,
     ) -> eyre::Result<()> {
         let mut conn = self.connection.lock().await;
         deck_cards::move_between_boards(
-            &mut conn, deck, card_uuid, finish, from_board, to_board, quantity,
+            &mut conn,
+            deck,
+            card_uuid,
+            finish,
+            from_board,
+            to_board,
+            quantity,
+            want_quantity,
+        )
+    }
+
+    pub(crate) async fn deck_boards(&self, deck: &CollectionID) -> eyre::Result<Vec<DeckBoard>> {
+        let conn = self.connection.lock().await;
+        deck_cards::list_boards(&conn, deck)
+    }
+
+    pub(crate) async fn add_deck_board(
+        &mut self,
+        deck: &CollectionID,
+        board: &str,
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        let conn = self.connection.lock().await;
+        deck_cards::ensure_board(&conn, deck, board)?;
+        deck_cards::list_boards(&conn, deck)
+    }
+
+    pub(crate) async fn rename_deck_board(
+        &mut self,
+        deck: &CollectionID,
+        from: &str,
+        to: &str,
+    ) -> eyre::Result<BoardRenameResult> {
+        let conn = self.connection.lock().await;
+        deck_cards::rename_board(&conn, deck, from, to)
+    }
+
+    pub(crate) async fn delete_deck_board(
+        &mut self,
+        deck: &CollectionID,
+        board: &str,
+    ) -> eyre::Result<bool> {
+        let conn = self.connection.lock().await;
+        deck_cards::delete_board(&conn, deck, board)
+    }
+
+    pub(crate) async fn reorder_deck_boards(
+        &mut self,
+        deck: &CollectionID,
+        boards: &[String],
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        let mut conn = self.connection.lock().await;
+        deck_cards::reorder_boards(&mut conn, deck, boards)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn move_card_into_deck(
+        &mut self,
+        collection: &CollectionID,
+        deck: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: u32,
+    ) -> eyre::Result<i32> {
+        let mut conn = self.connection.lock().await;
+        deck_cards::move_from_collection(
+            &mut conn, collection, deck, card_uuid, finish, board, quantity,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn move_card_out_of_deck(
+        &mut self,
+        deck: &CollectionID,
+        collection: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: u32,
+    ) -> eyre::Result<i32> {
+        let mut conn = self.connection.lock().await;
+        deck_cards::move_to_collection(
+            &mut conn, deck, collection, card_uuid, finish, board, quantity,
         )
     }
 
@@ -161,6 +254,15 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     ) -> eyre::Result<Option<CollectionKind>> {
         let conn = self.connection.lock().await;
         collections::get_collection_kind(&conn, name)
+    }
+
+    async fn set_collection_kind(
+        &mut self,
+        name: &CollectionID,
+        kind: CollectionKind,
+    ) -> eyre::Result<bool> {
+        let mut conn = self.connection.lock().await;
+        collections::set_collection_kind(&mut conn, name, kind)
     }
 
     async fn uuids_in_use(&self) -> eyre::Result<Vec<(CardID, String)>> {

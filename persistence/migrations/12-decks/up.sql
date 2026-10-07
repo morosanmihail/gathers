@@ -9,24 +9,38 @@
 ALTER TABLE collection ADD COLUMN kind TEXT NOT NULL DEFAULT 'collection'
   CHECK (kind IN ('collection', 'deck'));
 
--- board is the deck zone a row belongs to, open-ended per game rather than a
--- fixed main/side pair: Riftbound has a legend, runes, and battlefields as
--- well, and Pokemon has one 60-card deck. '' is the default zone. Same
--- reasoning as cards.finish.
---
+-- The deck's zones, stored rather than derived from the cards so a board can be
+-- empty, carry an order, and be renamed. Free-form text per game: Riftbound has
+-- a legend, runes and battlefields, Pokemon has one 60-card deck, and a player
+-- may want 'Mainboard:Lands'. A new deck starts with Mainboard and Sideboard.
+CREATE TABLE deck_boards (
+  deck     TEXT NOT NULL REFERENCES collection(name) ON DELETE CASCADE ON UPDATE CASCADE,
+  board    TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (deck, board)
+);
+
 -- finish is carried so a deck can record that it holds a foil copy
--- specifically. There is no want_quantity: a deck is a list to be played, not
--- a wishlist.
+-- specifically.
+--
+-- quantity and want_quantity mean the same as in cards, and a deck row may
+-- carry both at once: four Tarmogoyf wanted, three of them already to hand.
+-- They are not added together; see deck_cards::count_cards.
+--
+-- The board reference cascades, so renaming a board moves its cards with it and
+-- deleting one takes them away.
 CREATE TABLE deck_cards (
-  deck        TEXT NOT NULL REFERENCES collection(name) ON DELETE CASCADE ON UPDATE CASCADE,
-  uuid        TEXT NOT NULL,
-  finish      TEXT NOT NULL DEFAULT '',
-  board       TEXT NOT NULL DEFAULT '',
-  quantity    INTEGER NOT NULL,
-  provider    TEXT NOT NULL,
-  timeadded   TEXT NULL,
-  timeupdated TEXT NULL,
-  PRIMARY KEY (deck, uuid, finish, board)
+  deck          TEXT NOT NULL REFERENCES collection(name) ON DELETE CASCADE ON UPDATE CASCADE,
+  uuid          TEXT NOT NULL,
+  finish        TEXT NOT NULL DEFAULT '',
+  board         TEXT NOT NULL DEFAULT 'Mainboard',
+  quantity      INTEGER NOT NULL,
+  want_quantity INTEGER NOT NULL DEFAULT 0,
+  provider      TEXT NOT NULL,
+  timeadded     TEXT NULL,
+  timeupdated   TEXT NULL,
+  PRIMARY KEY (deck, uuid, finish, board),
+  FOREIGN KEY (deck, board) REFERENCES deck_boards(deck, board) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- Lists one deck, optionally one board

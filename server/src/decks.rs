@@ -134,6 +134,7 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
                 &input.finish,
                 &input.board,
                 input.quantity,
+                0,
                 &now,
                 &provider,
             )
@@ -156,12 +157,14 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
         require_deck(storage, &id).await?;
 
         let mut deck = storage.deck_mut(&id);
+        // The request still carries a signed count here; the next revision makes it unsigned
         deck.move_card(
             &input.id,
             &input.finish,
             &input.from_board,
             &input.to_board,
-            input.quantity,
+            input.quantity.max(0) as u32,
+            0,
         )
         .await
         .map_err(|e| storage_error("Failed to move deck card", e))?;
@@ -378,6 +381,7 @@ fn merge_printings(
         free: owned - committed,
         over_committed: committed > owned,
         holdings,
+        copies: vec![],
     }
     .into()
 }
@@ -533,6 +537,7 @@ mod printing_merge_tests {
             free: owned - committed,
             over_committed: committed > owned,
             holdings,
+            copies: vec![],
         }
     }
 

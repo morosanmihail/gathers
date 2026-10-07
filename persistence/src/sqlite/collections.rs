@@ -1,4 +1,4 @@
-use models::{CollectionID, CollectionKind};
+use models::{CollectionID, CollectionKind, DEFAULT_BOARDS};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{CollectionInfo, PersistenceError};
@@ -11,12 +11,88 @@ pub(super) fn add_collection(
 ) -> eyre::Result<CollectionID> {
     // `INSERT OR IGNORE` so re-adding an existing name is a no-op, including when the existing row
     // has a *different* kind. A collection cannot be turned into a deck (or back) by re-adding it
-    // under the same name
-    conn.execute(
+    // under the same name; set_collection_kind is the way to convert one
+    let inserted = conn.execute(
         "INSERT OR IGNORE INTO collection (name, can_remove, kind) VALUES (?1, ?2, ?3)",
         params![name, true, kind.as_str()],
     )?;
+
+    // Only for a deck this call actually created: a no-op re-add must not resurrect boards the
+    // user has since deleted
+    if inserted > 0 && kind == CollectionKind::Deck {
+        super::deck_cards::create_default_boards(conn, name)?;
+    }
     Ok(name.clone())
+}
+
+/// Converts a collection to a deck or back, moving its cards between `cards` and `deck_cards`.
+///
+/// The two kinds store their cards in different tables, so this is a migration rather than a flag
+/// change: everything the collection holds is rewritten into the other table in one transaction,
+/// and the originals are dropped only once the copies are in place.
+///
+/// Purchase history is deliberately left where it is. It records what was paid and when, which
+/// stays true whatever the collection is called now, and a round trip through a deck would
+/// otherwise destroy it.
+///
+/// Returns `false` if there is no such collection. Converting to the kind it already has is a
+/// no-op, not an error.
+pub(super) fn set_collection_kind(
+    conn: &mut Connection,
+    name: &CollectionID,
+    kind: CollectionKind,
+) -> eyre::Result<bool> {
+    let Some(current) = get_collection_kind(conn, name)? else {
+        return Ok(false);
+    };
+    if current == kind {
+        return Ok(true);
+    }
+
+    let tx = conn.transaction()?;
+    match kind {
+        // Every card lands on the first default board: a collection has no notion of zones, so
+        // there is nothing to spread them across
+        CollectionKind::Deck => {
+            super::deck_cards::create_default_boards(&tx, name)?;
+            let board = DEFAULT_BOARDS[0];
+            tx.execute(
+                "INSERT INTO deck_cards (deck, uuid, finish, board, quantity, want_quantity, provider, timeadded, timeupdated)
+                 SELECT collection, uuid, finish, ?2, quantity, want_quantity, provider, timeadded, timeupdated
+                 FROM cards WHERE collection = ?1
+                 ON CONFLICT (deck, uuid, finish, board) DO UPDATE SET
+                   quantity = max(min(deck_cards.quantity + EXCLUDED.quantity, 2147483647), 0),
+                   want_quantity = max(min(deck_cards.want_quantity + EXCLUDED.want_quantity, 2147483647), 0)",
+                params![name, board],
+            )?;
+            tx.execute("DELETE FROM cards WHERE collection = ?1", params![name])?;
+        }
+        // Boards collapse: a collection is one undifferentiated pile, so the same card on two
+        // boards has to be summed rather than inserted twice against the (uuid, finish,
+        // collection) key
+        CollectionKind::Collection => {
+            tx.execute(
+                "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, provider, timeadded, timeupdated)
+                 SELECT uuid, finish, deck, SUM(quantity), SUM(want_quantity), MIN(provider), MIN(timeadded), MAX(timeupdated)
+                 FROM deck_cards WHERE deck = ?1 GROUP BY uuid, finish
+                 ON CONFLICT (uuid, finish, collection) DO UPDATE SET
+                   quantity = max(min(cards.quantity + EXCLUDED.quantity, 2147483647), 0),
+                   want_quantity = max(min(cards.want_quantity + EXCLUDED.want_quantity, 2147483647), 0)",
+                params![name],
+            )?;
+            tx.execute("DELETE FROM deck_cards WHERE deck = ?1", params![name])?;
+            tx.execute("DELETE FROM deck_boards WHERE deck = ?1", params![name])?;
+            // Build state describes a deck; a collection is never assembled or put in a box
+            tx.execute("DELETE FROM deck_meta WHERE deck = ?1", params![name])?;
+        }
+    }
+
+    tx.execute(
+        "UPDATE collection SET kind = ?2 WHERE name = ?1",
+        params![name, kind.as_str()],
+    )?;
+    tx.commit()?;
+    Ok(true)
 }
 
 /// A collection's kind, or `None` if no such collection exists.
