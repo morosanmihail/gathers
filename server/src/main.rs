@@ -558,14 +558,7 @@ impl ServerConfig {
         if !(1..=65535).contains(&self.port) {
             return Err(format!("Port must be between 1 and 65535, got {}", self.port));
         }
-        if self.preferred_currency.len() != 3
-            || !self.preferred_currency.chars().all(|c| c.is_ascii_uppercase())
-        {
-            return Err(format!(
-                "Preferred currency must be a 3-letter ISO 4217 code like EUR or USD, got '{}'",
-                self.preferred_currency
-            ));
-        }
+        persistence::validate_currency(&self.preferred_currency)?;
         if self.system.is_empty() {
             return Err("At least one system must be enabled".to_string());
         }

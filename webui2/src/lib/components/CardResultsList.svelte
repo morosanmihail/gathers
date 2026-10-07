@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Money } from '$lib/currency.svelte';
 	import CardTile from './CardTile.svelte';
 	import CardRow from './CardRow.svelte';
 	import Pagination from './Pagination.svelte';
@@ -22,7 +23,7 @@
 		onAdd?: (card: AnyCard | CollectionCard) => void;
 		onAddFinish?: (card: AnyCard | CollectionCard, finish: string) => void;
 		onAddWanted?: (card: AnyCard | CollectionCard) => void;
-		onAdjust?: (group: CardGroup, finish: string, delta: number, purchasePrice?: number | null) => void;
+		onAdjust?: (group: CardGroup, finish: string, delta: number, purchase?: Money | null) => void;
 		onWantAdjust?: (card: CollectionCard, delta: number) => void;
 		onclick?: (card: AnyCard | CollectionCard) => void;
 		sortBy?: string;

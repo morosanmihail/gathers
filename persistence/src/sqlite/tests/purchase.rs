@@ -23,7 +23,7 @@ async fn test_purchase_totals_single_entry() {
     let col = p.add_collection("Col".to_string()).await.unwrap();
     record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 2);
     assert!((s.total_paid - 10.0).abs() < 1e-9);
 }
@@ -35,7 +35,7 @@ async fn test_purchase_totals_multiple_entries_same_card() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
     record_purchase(&mut p, &col, "card1", 1, 0, Some(7.0)).await;
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 3);
     assert!((s.total_paid - 17.0).abs() < 1e-9);
 }
@@ -47,7 +47,7 @@ async fn test_purchase_totals_mixed_null_and_priced() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(5.0)).await;
     record_purchase(&mut p, &col, "card1", 1, 0, None).await;
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 2);
     assert!((s.total_paid - 10.0).abs() < 1e-9);
 }
@@ -59,10 +59,10 @@ async fn test_purchase_totals_foil_and_normal_separate() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(4.0)).await;
     record_purchase(&mut p, &col, "card1", 0, 1, Some(12.0)).await;
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let normal = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let normal = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(normal.quantity, 2);
     assert!((normal.total_paid - 8.0).abs() < 1e-9);
-    let foil = totals.get(&("card1".to_string(), "foil".to_string())).unwrap();
+    let foil = &totals.get(&("card1".to_string(), "foil".to_string())).unwrap()[0];
     assert_eq!(foil.quantity, 1);
     assert!((foil.total_paid - 12.0).abs() < 1e-9);
 }
@@ -74,7 +74,7 @@ async fn test_purchase_totals_partial_history_qty() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(8.0)).await;
     record_purchase(&mut p, &col, "card1", 1, 0, None).await;
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 2);
     assert!((s.total_paid - 16.0).abs() < 1e-9);
 }
@@ -382,7 +382,7 @@ async fn test_delete_purchase_entry_updates_totals() {
     p.delete_purchase_entry(&col, id).await.unwrap();
 
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 1);
     assert!((s.total_paid - 8.0).abs() < 1e-9);
 }
@@ -399,7 +399,7 @@ async fn test_update_purchase_entry_changes_quantity() {
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     let id = hist[0].id;
 
-    let result = p.update_purchase_entry(&col, id, 5, Some(5.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, id, 5, Some(5.0), None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::Updated);
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -417,7 +417,7 @@ async fn test_update_purchase_entry_changes_price() {
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     let id = hist[0].id;
 
-    p.update_purchase_entry(&col, id, 3, Some(9.99)).await.unwrap();
+    p.update_purchase_entry(&col, id, 3, Some(9.99), None).await.unwrap();
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     assert!((hist[0].price_per_unit.unwrap() - 9.99).abs() < 1e-9);
@@ -433,7 +433,7 @@ async fn test_update_purchase_entry_clears_price_to_null() {
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     let id = hist[0].id;
 
-    p.update_purchase_entry(&col, id, 2, None).await.unwrap();
+    p.update_purchase_entry(&col, id, 2, None, None).await.unwrap();
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     assert_eq!(hist[0].price_per_unit, None);
@@ -444,7 +444,7 @@ async fn test_update_purchase_entry_clears_price_to_null() {
 async fn test_update_purchase_entry_returns_false_when_not_found() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let col = p.add_collection("Col".to_string()).await.unwrap();
-    let result = p.update_purchase_entry(&col, 9999, 1, None).await.unwrap();
+    let result = p.update_purchase_entry(&col, 9999, 1, None, None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::NotFound);
 }
 
@@ -459,7 +459,7 @@ async fn test_update_purchase_entry_isolated_by_collection() {
     let hist = p.get_all_purchase_history(&col_a).await.unwrap();
     let id = hist[0].id;
 
-    let result = p.update_purchase_entry(&col_b, id, 2, Some(999.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col_b, id, 2, Some(999.0), None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::NotFound);
 
     let hist = p.get_all_purchase_history(&col_a).await.unwrap();
@@ -478,7 +478,7 @@ async fn test_update_purchase_entry_foil_fields() {
     let id = hist[0].id;
     assert_eq!(hist[0].finish, "foil");
 
-    p.update_purchase_entry(&col, id, 3, Some(7.50)).await.unwrap();
+    p.update_purchase_entry(&col, id, 3, Some(7.50), None).await.unwrap();
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     assert_eq!(hist[0].quantity, 3);
@@ -493,11 +493,11 @@ async fn test_update_purchase_entry_reflects_in_totals() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(3.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    let result = p.update_purchase_entry(&col, hist[0].id, 4, Some(5.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 4, Some(5.0), None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::Updated);
 
     let totals = p.get_collection_purchase_totals(&col).await.unwrap();
-    let s = totals.get(&("card1".to_string(), String::new())).unwrap();
+    let s = &totals.get(&("card1".to_string(), String::new())).unwrap()[0];
     assert_eq!(s.quantity, 4);
     assert!((s.total_paid - 20.0).abs() < 1e-9);
 }
@@ -512,7 +512,7 @@ async fn test_update_entry_rejects_qty_exceeding_collection() {
     record_purchase(&mut p, &col, "card1", 2, 0, Some(1.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    let result = p.update_purchase_entry(&col, hist[0].id, 5, Some(1.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 5, Some(1.0), None).await.unwrap();
     assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -527,7 +527,7 @@ async fn test_update_entry_rejects_foil_qty_exceeding_collection() {
     record_purchase(&mut p, &col, "card1", 0, 1, Some(3.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    let result = p.update_purchase_entry(&col, hist[0].id, 10, Some(3.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 10, Some(3.0), None).await.unwrap();
     assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -542,7 +542,7 @@ async fn test_update_entry_qty_equal_to_collection_is_allowed() {
     record_purchase(&mut p, &col, "card1", 1, 0, Some(2.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    let result = p.update_purchase_entry(&col, hist[0].id, 3, Some(2.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 3, Some(2.0), None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::Updated);
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
@@ -560,10 +560,10 @@ async fn test_update_entry_validation_counts_other_entries() {
     let hist = p.get_all_purchase_history(&col).await.unwrap();
     let id_of_first = hist.iter().find(|e| e.price_per_unit == Some(1.0)).unwrap().id;
 
-    let result = p.update_purchase_entry(&col, id_of_first, 4, Some(1.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, id_of_first, 4, Some(1.0), None).await.unwrap();
     assert!(matches!(result, UpdateEntryResult::ValidationError(_)));
 
-    let result = p.update_purchase_entry(&col, id_of_first, 3, Some(1.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, id_of_first, 3, Some(1.0), None).await.unwrap();
     assert_eq!(result, UpdateEntryResult::Updated);
 }
 
@@ -575,7 +575,7 @@ async fn test_update_entry_error_message_mentions_counts() {
     record_purchase(&mut p, &col, "card1", 1, 0, Some(5.0)).await;
 
     let hist = p.get_all_purchase_history(&col).await.unwrap();
-    let result = p.update_purchase_entry(&col, hist[0].id, 99, Some(5.0)).await.unwrap();
+    let result = p.update_purchase_entry(&col, hist[0].id, 99, Some(5.0), None).await.unwrap();
     if let UpdateEntryResult::ValidationError(msg) = result {
         assert!(msg.contains("99"), "message should mention requested qty: {msg}");
         assert!(msg.contains("2"), "message should mention collection qty: {msg}");
@@ -593,7 +593,7 @@ async fn test_update_purchase_entry_rejects_invalid_values() {
     let id = p.get_all_purchase_history(&col).await.unwrap()[0].id;
 
     for (quantity, price) in [(0, Some(1.0)), (-5, Some(1.0)), (1, Some(-100.0)), (1, Some(f64::INFINITY)), (1, Some(1e300))] {
-        let result = p.update_purchase_entry(&col, id, quantity, price).await.unwrap();
+        let result = p.update_purchase_entry(&col, id, quantity, price, None).await.unwrap();
         assert!(
             matches!(result, UpdateEntryResult::ValidationError(_)),
             "quantity {quantity}, price {price:?} should be rejected, got {result:?}"
@@ -604,5 +604,41 @@ async fn test_update_purchase_entry_rejects_invalid_values() {
     assert_eq!(hist[0].price_per_unit, Some(2.0));
 
     // No price at all is still fine.
-    assert_eq!(p.update_purchase_entry(&col, id, 2, None).await.unwrap(), UpdateEntryResult::Updated);
+    assert_eq!(p.update_purchase_entry(&col, id, 2, None, None).await.unwrap(), UpdateEntryResult::Updated);
+}
+
+// ── currencies ────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_purchase_records_currency() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    p.record_purchase(&col, &"card1".to_string(), "", 1, Some(2.5), "EUR", "prov", OLD_TIME).await.unwrap();
+    let hist = p.get_purchase_history(&col, &"card1".to_string()).await.unwrap();
+    assert_eq!(hist[0].currency, "EUR");
+}
+
+#[tokio::test]
+async fn test_purchase_rejects_invalid_currency() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    assert!(p.record_purchase(&col, &"card1".to_string(), "", 1, Some(2.5), "euro", "prov", OLD_TIME).await.is_err());
+}
+
+#[tokio::test]
+async fn test_purchase_totals_split_per_currency() {
+    let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
+    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let card = "card1".to_string();
+    p.record_purchase(&col, &card, "", 2, Some(5.0), "USD", "prov", OLD_TIME).await.unwrap();
+    p.record_purchase(&col, &card, "", 1, Some(3.0), "EUR", "prov", OLD_TIME).await.unwrap();
+    let totals = p.get_collection_purchase_totals(&col).await.unwrap();
+    let summaries = totals.get(&(card, String::new())).unwrap();
+    assert_eq!(summaries.len(), 2);
+    let eur = summaries.iter().find(|s| s.currency == "EUR").unwrap();
+    assert_eq!(eur.quantity, 1);
+    assert!((eur.total_paid - 3.0).abs() < 1e-9);
+    let usd = summaries.iter().find(|s| s.currency == "USD").unwrap();
+    assert_eq!(usd.quantity, 2);
+    assert!((usd.total_paid - 10.0).abs() < 1e-9);
 }

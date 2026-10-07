@@ -4,6 +4,7 @@
 	import { portal } from '$lib/portal';
 	import { fmtDate } from '$lib/format';
 	import { finishLabel } from '$lib/types';
+	import { formatMoney, PREFERRED_CURRENCY_OPTIONS } from '$lib/currency.svelte';
 
 	interface Props {
 		collection: string;
@@ -26,6 +27,7 @@
 	interface EditState {
 		quantity: string;
 		price: string;
+		currency: string;
 		saving: boolean;
 	}
 	let editing = $state<Map<number, EditState>>(new Map());
@@ -52,6 +54,7 @@
 		m.set(e.id, {
 			quantity: String(e.quantity),
 			price: e.price_per_unit != null ? String(e.price_per_unit) : '',
+			currency: e.currency,
 			saving: false
 		});
 		editing = m;
@@ -73,7 +76,8 @@
 			await updatePurchaseEntry(
 				collection, id,
 				parseInt(s.quantity) || 0,
-				s.price !== '' ? parseFloat(s.price) : null
+				s.price !== '' ? parseFloat(s.price) : null,
+				s.currency
 			);
 			await load();
 		} catch (e) {
@@ -155,6 +159,11 @@
 									<td style="padding: 4px 8px;">
 										<input class="input" style="width:80px;height:28px;padding:3px 6px;text-align:right;font-family:'JetBrains Mono',monospace;"
 											bind:value={ed.price} placeholder="—" />
+										<select class="input" style="width:72px;height:28px;padding:3px 6px;margin-left:4px;" bind:value={ed.currency}>
+											{#each [...new Set([...PREFERRED_CURRENCY_OPTIONS, entry.currency])] as cur (cur)}
+												<option value={cur}>{cur}</option>
+											{/each}
+										</select>
 									</td>
 									<td style="padding: 4px 8px; white-space: nowrap; display: flex; gap: 4px;">
 										<button class="btn btn-sm btn-accent" disabled={ed.saving} onclick={() => saveEdit(entry.id)}>
@@ -167,7 +176,7 @@
 										{entry.quantity}
 									</td>
 									<td style="padding: 8px 14px; text-align:right; font-family:'JetBrains Mono',monospace; color: var(--accent-text);">
-										{entry.price_per_unit != null ? `$${entry.price_per_unit.toFixed(2)}` : '—'}
+										{entry.price_per_unit != null ? formatMoney(entry.price_per_unit, entry.currency) : '—'}
 									</td>
 									<td style="padding: 8px 14px; white-space: nowrap;">
 										<button class="btn btn-sm" onclick={() => startEdit(entry)}>Edit</button>

@@ -6,6 +6,7 @@
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
+	import { currencySymbol, preferredCurrency } from '$lib/currency.svelte';
 
 	interface Props {
 		collection: string;
@@ -86,11 +87,13 @@
 
 	async function addCard(card: AnyCard | CollectionCard, finish = '') {
 		const price = addPrice !== '' ? parseFloat(addPrice) : null;
-		const purchasePrice = price != null && isFinite(price) && price > 0 ? price : null;
+		// The bar applies to whatever card is added next, so it's always in
+		// the preferred currency.
+		const purchase = price != null && isFinite(price) && price > 0 ? { value: price, currency: preferredCurrency() } : null;
 		addPrice = '';
 		try {
 			await app.withOp(`Adding ${card.name}`, () =>
-				addCardToCollection(collection, card.id, finish, 1, purchasePrice, providerFromActiveSystem(activeSystem))
+				addCardToCollection(collection, card.id, finish, 1, purchase, providerFromActiveSystem(activeSystem))
 			);
 			toast = `Added ${card.name}${finish ? ` (${finishLabel(finish)})` : ''}`;
 			setTimeout(() => toast = '', 2000);
@@ -159,7 +162,7 @@
 		<!-- Purchase price bar -->
 		<div style="padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
 			<span style="font-size:0.82rem; color:var(--text2);">Purchase price for next add:</span>
-			<span style="color:var(--text2);">$</span>
+			<span style="color:var(--text2);">{currencySymbol()}</span>
 			<input
 				type="number" min="0" step="0.01" placeholder="optional"
 				class="input" style="width:110px; height:28px; padding:3px 8px; font-family:'JetBrains Mono',monospace; font-size:0.82rem;"

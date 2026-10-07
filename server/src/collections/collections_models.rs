@@ -223,6 +223,10 @@ pub struct CardToAdd {
     pub quantity: i32,
     #[serde(rename = "purchasePrice", default)]
     pub purchase_price: Option<f64>,
+    /// ISO 4217 code `purchasePrice` is in. Defaults to the server's
+    /// `preferred_currency`.
+    #[serde(rename = "purchaseCurrency", default)]
+    pub purchase_currency: Option<String>,
     /// Which system/plugin this card came from, e.g. `RiftboundSQLite` or
     /// `plugin-dummy-books`. Optional so older callers keep working: when
     /// omitted, the server falls back to probing every configured system
@@ -435,6 +439,8 @@ pub struct CollectionPurchaseHistoryEntry {
     pub finish: String,
     pub quantity: i32,
     pub price_per_unit: Option<f64>,
+    /// ISO 4217 code `price_per_unit` is in.
+    pub currency: String,
     pub provider: String,
     pub recorded_at: String,
 }

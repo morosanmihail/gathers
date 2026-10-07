@@ -55,6 +55,15 @@ pub fn validate_price(price: f64) -> Result<(), String> {
     }
 }
 
+/// Checks a currency is a 3-letter uppercase ISO 4217 code like "EUR".
+pub fn validate_currency(currency: &str) -> Result<(), String> {
+    if currency.len() == 3 && currency.chars().all(|c| c.is_ascii_uppercase()) {
+        Ok(())
+    } else {
+        Err(format!("Currency must be a 3-letter ISO 4217 code like EUR or USD, got '{currency}'"))
+    }
+}
+
 /// A collection's name plus whether it may be deleted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectionInfo {
@@ -206,6 +215,7 @@ pub trait PersistenceSystemTrait {
         finish: &str,
         quantity: i32,
         price_per_unit: Option<f64>,
+        currency: &str,
         provider: &str,
         recorded_at: &str,
     ) -> impl std::future::Future<Output = eyre::Result<()>>;
@@ -222,11 +232,11 @@ pub trait PersistenceSystemTrait {
     ) -> impl std::future::Future<Output = eyre::Result<Vec<PurchaseHistoryEntry>>>;
 
     /// Keyed by `(card_uuid, finish)` — each finish of a card has its own
-    /// cost basis.
+    /// cost basis, one summary per currency it was bought in.
     fn get_collection_purchase_totals(
         &self,
         collection_id: &CollectionID,
-    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<(CardID, String), PurchaseSummary>>>;
+    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<(CardID, String), Vec<PurchaseSummary>>>>;
 
     fn delete_purchase_entry(
         &mut self,
@@ -235,13 +245,15 @@ pub trait PersistenceSystemTrait {
     ) -> impl std::future::Future<Output = eyre::Result<bool>>;
 
     /// The entry's `finish` is fixed at creation and can't be changed here
-    /// — only how many copies (of that same finish) and at what price.
+    /// — only how many copies (of that same finish), at what price and, when
+    /// `currency` is given, in which currency.
     fn update_purchase_entry(
         &mut self,
         collection_id: &CollectionID,
         entry_id: i64,
         quantity: i32,
         price_per_unit: Option<f64>,
+        currency: Option<&str>,
     ) -> impl std::future::Future<Output = eyre::Result<UpdateEntryResult>>;
 
     /// Explicitly grants read-only public access to a collection by minting
@@ -290,6 +302,8 @@ pub enum UpdateEntryResult {
 
 #[derive(Debug, Clone)]
 pub struct PurchaseSummary {
+    /// ISO 4217 code `total_paid` is in.
+    pub currency: String,
     pub total_paid: f64,
     pub quantity: i32,
 }
@@ -301,6 +315,8 @@ pub struct PurchaseHistoryEntry {
     pub finish: String,
     pub quantity: i32,
     pub price_per_unit: Option<f64>,
+    /// ISO 4217 code `price_per_unit` is in.
+    pub currency: String,
     pub provider: String,
     pub recorded_at: String,
 }

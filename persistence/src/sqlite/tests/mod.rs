@@ -55,10 +55,10 @@ pub async fn record_purchase(
     price: Option<f64>,
 ) {
     if qty > 0 {
-        p.record_purchase(&col.to_string(), &uuid.to_string(), "", qty, price, "prov", OLD_TIME).await.unwrap();
+        p.record_purchase(&col.to_string(), &uuid.to_string(), "", qty, price, "USD", "prov", OLD_TIME).await.unwrap();
     }
     if foil > 0 {
-        p.record_purchase(&col.to_string(), &uuid.to_string(), "foil", foil, price, "prov", OLD_TIME).await.unwrap();
+        p.record_purchase(&col.to_string(), &uuid.to_string(), "foil", foil, price, "USD", "prov", OLD_TIME).await.unwrap();
     }
 }
 
@@ -140,6 +140,25 @@ async fn test_migration_08_splits_existing_rows_by_finish() {
             ("card_both".to_string(), "foil".to_string(), 2, Some(9.0)),
         ]
     );
+}
+
+/// Migration 11 adds a currency to purchase history; rows recorded before it
+/// are assumed to be US dollars.
+#[test]
+fn test_migration_11_defaults_existing_purchases_to_usd() {
+    let mut conn = rusqlite::Connection::open(":memory:").unwrap();
+    super::MIGRATIONS.to_version(&mut conn, 10).unwrap();
+    conn.execute_batch(
+        "INSERT INTO purchase_history (collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at) VALUES
+            ('Default', 'card1', '', 2, 4.0, 'mtg', '2024-01-01T00:00:00Z');",
+    ).unwrap();
+
+    super::MIGRATIONS.to_latest(&mut conn).unwrap();
+
+    let currency: String = conn
+        .query_row("SELECT currency FROM purchase_history WHERE card_uuid = 'card1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(currency, "USD");
 }
 
 #[test]

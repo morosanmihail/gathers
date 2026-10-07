@@ -45,6 +45,18 @@ export function formatMoney(value: number, currency: string = DEFAULT_CURRENCY):
 const cheapest = (r: { normal?: number | null; foil?: number | null }) =>
 	Math.min(r.normal ?? Infinity, r.foil ?? Infinity);
 
+/** Display symbol for a currency code, e.g. "EUR" → "€" (the code itself
+ *  if the browser doesn't know it). */
+export function currencySymbol(currency: string = preferredCurrency()): string {
+	try {
+		return new Intl.NumberFormat('en', { style: 'currency', currency })
+			.formatToParts(0)
+			.find(p => p.type === 'currency')?.value ?? currency;
+	} catch {
+		return currency;
+	}
+}
+
 // Same choice the server makes for collection totals (see
 // `preferred_retailer`): "raw", else — among retailers listing in the
 // preferred currency, or all of them when none do — cardmarket, else the

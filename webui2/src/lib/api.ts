@@ -383,7 +383,7 @@ export async function searchCollectionCount(
 	});
 }
 
-type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' | 'provider' | 'finish'>;
+type CardToAdd = PartialBy<components['schemas']['CardToAdd'], 'purchasePrice' | 'purchaseCurrency' | 'provider' | 'finish'>;
 
 // A search result's `activeSystem` tab value is either a real system's
 // provider name as-is (e.g. "RiftboundSQLite"), or `plugin:{name}` — the
@@ -407,14 +407,14 @@ export async function addCardToCollection(
 	cardId: string,
 	finish = '',
 	quantity = 1,
-	purchasePrice?: number | null,
+	purchase?: { value: number; currency: string } | null,
 	provider?: string
 ): Promise<void> {
 	const body: CardToAdd = {
 		id: cardId,
 		finish,
 		quantity,
-		...(purchasePrice != null ? { purchasePrice } : {}),
+		...(purchase ? { purchasePrice: purchase.value, purchaseCurrency: purchase.currency } : {}),
 		...(provider ? { provider } : {})
 	};
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/add`, {
@@ -605,12 +605,13 @@ export async function updatePurchaseEntry(
 	collection: string,
 	entryId: number,
 	quantity: number,
-	price_per_unit: number | null
+	price_per_unit: number | null,
+	currency?: string
 ): Promise<void> {
 	await fetchJSON(`/api/collection/cards/${encodeURIComponent(collection)}/purchase_history_entry/${entryId}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ quantity, price_per_unit })
+		body: JSON.stringify({ quantity, price_per_unit, ...(currency ? { currency } : {}) })
 	});
 	invalidatePurchaseHistory(collection);
 }

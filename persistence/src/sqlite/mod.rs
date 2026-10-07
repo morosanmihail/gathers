@@ -261,11 +261,12 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         finish: &str,
         quantity: i32,
         price_per_unit: Option<f64>,
+        currency: &str,
         provider: &str,
         recorded_at: &str,
     ) -> eyre::Result<()> {
         let conn = self.connection.lock().await;
-        purchase_history::record_purchase(&conn, collection_id, card_uuid, finish, quantity, price_per_unit, provider, recorded_at)
+        purchase_history::record_purchase(&conn, collection_id, card_uuid, finish, quantity, price_per_unit, currency, provider, recorded_at)
     }
 
     async fn get_purchase_history(
@@ -288,7 +289,7 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     async fn get_collection_purchase_totals(
         &self,
         collection_id: &CollectionID,
-    ) -> eyre::Result<std::collections::HashMap<(CardID, String), PurchaseSummary>> {
+    ) -> eyre::Result<std::collections::HashMap<(CardID, String), Vec<PurchaseSummary>>> {
         let conn = self.connection.lock().await;
         purchase_history::get_collection_totals(&conn, collection_id)
     }
@@ -308,9 +309,10 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         entry_id: i64,
         quantity: i32,
         price_per_unit: Option<f64>,
+        currency: Option<&str>,
     ) -> eyre::Result<UpdateEntryResult> {
         let conn = self.connection.lock().await;
-        purchase_history::update_entry(&conn, collection_id, entry_id, quantity, price_per_unit)
+        purchase_history::update_entry(&conn, collection_id, entry_id, quantity, price_per_unit, currency)
     }
 
     async fn create_share_link(&mut self, collection_id: &CollectionID) -> eyre::Result<ShareLink> {
