@@ -17,6 +17,8 @@
 	import { goto } from '$app/navigation';
 	import { defaultFilters, groupByCard } from '$lib/types';
 	import type { CollectionCard, CardGroup, CardPrices, ValueBreakdown } from '$lib/types';
+	import { formatMoney, formatMoneyList } from '$lib/currency.svelte';
+	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 
 	const collectionId = $derived(decodeURIComponent($page.params.id ?? ''));
 
@@ -29,8 +31,16 @@
 	let loading = $state(true);
 	let refreshKey = $state(0);
 	let prices = $state<Record<string, CardPrices>>({});
-	let collectionValue = $state<number | null>(null);
 	let valueBreakdown = $state<ValueBreakdown | null>(null);
+	const currencyTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.total_value }))
+	);
+	const untrackedTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.untracked_value }))
+	);
+	const wantedTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map(c => ({ currency: c.currency, value: c.wanted_value }))
+	);
 	let valueHover = $state(false);
 
 	// Fields the /list endpoint accepts; everything else goes through /search
@@ -102,7 +112,7 @@
 						prices = { ...prices, ...Object.assign({}, ...results) };
 					});
 				}
-				valuePromise.then(v => { collectionValue = v?.total_value ?? null; valueBreakdown = v; });
+				valuePromise.then(v => { valueBreakdown = v; });
 			}
 		} finally {
 			loading = false;
@@ -122,7 +132,7 @@
 
 	function refreshValue() {
 		if (app.pricingEnabled) {
-			getCollectionValue(collectionId).then(v => { collectionValue = v?.total_value ?? null; valueBreakdown = v; });
+			getCollectionValue(collectionId).then(v => { valueBreakdown = v; });
 		}
 	}
 
@@ -248,7 +258,7 @@
 		{#if !loading}
 			<span class="page-subtitle">{total.toLocaleString()} entr{total !== 1 ? 'ies' : 'y'}</span>
 		{/if}
-		{#if collectionValue != null}
+		{#if valueBreakdown}
 			<span
 				class="page-subtitle"
 				role="status"
@@ -257,21 +267,24 @@
 				onmouseenter={() => valueHover = true}
 				onmouseleave={() => valueHover = false}
 			>
-				≈ ${collectionValue.toFixed(2)}
-				{#if valueHover && valueBreakdown}
+				≈ {formatMoneyList(currencyTotals) || formatMoney(0)}
+				<ConvertedTotal items={currencyTotals} />
+				{#if valueHover}
 					<div class="value-breakdown-tooltip">
-						{#if valueBreakdown.profit != null}
-							<div class="vb-row">
-								<span class="vb-label">Profit</span>
-								<span class="vb-val" style="color: {valueBreakdown.profit >= 0 ? 'var(--success)' : 'var(--danger)'}">
-									{valueBreakdown.profit >= 0 ? '+' : ''}${valueBreakdown.profit.toFixed(2)}
-								</span>
-							</div>
-						{/if}
-						{#if valueBreakdown.untracked_value != null && valueBreakdown.untracked_value > 0}
+						{#each valueBreakdown.currencies as cur (cur.currency)}
+							{#if cur.total_value > 0}
+								<div class="vb-row">
+									<span class="vb-label">Profit ({cur.currency})</span>
+									<span class="vb-val" style="color: {cur.profit >= 0 ? 'var(--success)' : 'var(--danger)'}">
+										{cur.profit >= 0 ? '+' : ''}{formatMoney(cur.profit, cur.currency)}
+									</span>
+								</div>
+							{/if}
+						{/each}
+						{#if untrackedTotals.some(m => m.value > 0)}
 							<div class="vb-row">
 								<span class="vb-label">No purchase data</span>
-								<span class="vb-val">≈ ${valueBreakdown.untracked_value.toFixed(2)}</span>
+								<span class="vb-val">≈ {formatMoneyList(untrackedTotals)}</span>
 							</div>
 						{/if}
 						{#if valueBreakdown.priced_count != null && valueBreakdown.total_count != null}
@@ -280,10 +293,10 @@
 								<span class="vb-val">{valueBreakdown.priced_count} / {valueBreakdown.total_count}</span>
 							</div>
 						{/if}
-						{#if valueBreakdown.wanted_value != null && valueBreakdown.wanted_value > 0}
+						{#if wantedTotals.some(m => m.value > 0)}
 							<div class="vb-row">
 								<span class="vb-label">Wanted Cards Total Price</span>
-								<span class="vb-val">${valueBreakdown.wanted_value.toFixed(2)}</span>
+								<span class="vb-val">{formatMoneyList(wantedTotals)}</span>
 							</div>
 						{/if}
 					</div>

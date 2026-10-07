@@ -3,18 +3,21 @@
 	import { goto } from '$app/navigation';
 	import { app } from '$lib/state.svelte';
 	import { getCollectionCount, getCollectionValue } from '$lib/api';
+	import { formatMoneyList, sumByCurrency, type Money } from '$lib/currency.svelte';
+	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 
 	interface CollectionStats {
 		id: string;
 		count: number;
-		value?: number;
+		values: Money[];
 	}
 
 	let stats = $state<CollectionStats[]>([]);
 	let loading = $state(true);
 
 	const totalCards = $derived(stats.reduce((s, c) => s + c.count, 0));
-	const totalValue = $derived(stats.reduce((s, c) => s + (c.value ?? 0), 0));
+	const totalValues = $derived(sumByCurrency(stats.flatMap(c => c.values)));
+	const hasValue = (values: Money[]) => values.some(m => m.value > 0);
 
 	onMount(async () => {
 		// System info may already be loaded by the layout; if not, wait for it
@@ -32,7 +35,8 @@
 					getCollectionCount(col.id),
 					app.pricingEnabled ? getCollectionValue(col.id) : Promise.resolve(null)
 				]);
-				return { id: col.id, count, value: val?.total_value as number | undefined };
+				const values = (val?.currencies ?? []).map(c => ({ currency: c.currency, value: c.total_value }));
+				return { id: col.id, count, values };
 			})
 		);
 		stats = results;
@@ -62,10 +66,10 @@
 				<div class="stat-label">Total Cards</div>
 				<div class="stat-value">{totalCards.toLocaleString()}</div>
 			</div>
-			{#if app.pricingEnabled && totalValue > 0}
+			{#if app.pricingEnabled && hasValue(totalValues)}
 				<div class="stat-card">
 					<div class="stat-label">Total Value</div>
-					<div class="stat-value">${totalValue.toFixed(2)}</div>
+					<div class="stat-value">{formatMoneyList(totalValues)} <ConvertedTotal items={totalValues} /></div>
 					<div class="stat-sub">Estimated market value</div>
 				</div>
 			{/if}
@@ -90,9 +94,9 @@
 								<div class="collection-card-stat-val">{col.count.toLocaleString()}</div>
 								<div class="collection-card-stat-lbl">Cards</div>
 							</div>
-							{#if app.pricingEnabled && col.value != null && col.value > 0}
+							{#if app.pricingEnabled && hasValue(col.values)}
 								<div class="collection-card-stat">
-									<div class="collection-card-stat-val">${col.value.toFixed(2)}</div>
+									<div class="collection-card-stat-val">{formatMoneyList(col.values)}</div>
 									<div class="collection-card-stat-lbl">Value</div>
 								</div>
 							{/if}

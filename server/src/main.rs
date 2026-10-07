@@ -129,6 +129,9 @@ pub struct SystemInfo {
     pub pricing_enabled: bool,
     /// Whether collection management is enabled.
     pub collections_enabled: bool,
+    /// ISO 4217 code of the currency card prices are taken in when a card is
+    /// listed in several (see `ServerConfig::preferred_currency`).
+    pub preferred_currency: String,
     /// Whether settings were saved that only take effect after a server
     /// restart. Stays set until the server restarts.
     pub restart_required: bool,
@@ -157,6 +160,7 @@ pub struct RetrievalState {
     pub downloading: HashMap<String, Arc<Mutex<DownloadProgress>>>,
     pub pricing_enabled: bool,
     pub collections_enabled: bool,
+    pub preferred_currency: String,
     /// Set when saved settings need a restart to apply; a restart clears it
     /// by starting from a fresh `RetrievalState`.
     pub restart_required: bool,
@@ -204,6 +208,7 @@ impl RetrievalState {
         config_path: std::path::PathBuf,
         pricing_enabled: bool,
         collections_enabled: bool,
+        preferred_currency: String,
     ) -> eyre::Result<RetrievalState> {
         let mut state = RetrievalState {
             mtg: None,
@@ -219,6 +224,7 @@ impl RetrievalState {
             downloading: HashMap::new(),
             pricing_enabled,
             collections_enabled,
+            preferred_currency,
             restart_required: false,
             plugins: HashMap::new(),
         };
@@ -330,7 +336,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, plugins, unique_modes, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
+        SystemInfo { system, systems, plugins, unique_modes, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, preferred_currency: self.preferred_currency.clone(), restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -486,6 +492,7 @@ pub enum Systems {
 
 fn default_pricing_enabled() -> bool { true }
 fn default_collections_enabled() -> bool { true }
+fn default_preferred_currency() -> String { "EUR".to_string() }
 fn default_plugin_enabled() -> bool { true }
 
 /// A third-party retrieval plugin — a separate HTTP service implementing
@@ -509,6 +516,11 @@ pub struct ServerConfig {
     pub pricing_enabled: bool,
     #[serde(default = "default_collections_enabled")]
     pub collections_enabled: bool,
+    /// ISO 4217 code (e.g. "EUR", "USD"). When a card is listed by retailers
+    /// in several currencies, prices in this one are used first — for shown
+    /// prices and collection totals alike.
+    #[serde(default = "default_preferred_currency")]
+    pub preferred_currency: String,
     /// Periodically re-download card and price databases for all active systems.
     #[serde(default = "auto_download::default_enabled")]
     pub auto_download_enabled: bool,
@@ -545,6 +557,14 @@ impl ServerConfig {
     fn validate(&self) -> Result<(), String> {
         if !(1..=65535).contains(&self.port) {
             return Err(format!("Port must be between 1 and 65535, got {}", self.port));
+        }
+        if self.preferred_currency.len() != 3
+            || !self.preferred_currency.chars().all(|c| c.is_ascii_uppercase())
+        {
+            return Err(format!(
+                "Preferred currency must be a 3-letter ISO 4217 code like EUR or USD, got '{}'",
+                self.preferred_currency
+            ));
         }
         if self.system.is_empty() {
             return Err("At least one system must be enabled".to_string());
@@ -586,12 +606,14 @@ impl ServerConfig {
     }
 
     /// Whether going from `self` to `new` changes anything that is only read
-    /// at startup. `pricing_enabled` and `collections_enabled` are applied to
-    /// the running server on save; everything else needs a restart.
+    /// at startup. `pricing_enabled`, `collections_enabled` and
+    /// `preferred_currency` are applied to the running server on save;
+    /// everything else needs a restart.
     fn restart_needed(&self, new: &ServerConfig) -> bool {
         let mut live_applied = self.clone();
         live_applied.pricing_enabled = new.pricing_enabled;
         live_applied.collections_enabled = new.collections_enabled;
+        live_applied.preferred_currency = new.preferred_currency.clone();
         toml::to_string(&live_applied).ok() != toml::to_string(new).ok()
     }
 }
@@ -745,6 +767,7 @@ async fn main() -> eyre::Result<()> {
             port,
             pricing_enabled: true,
             collections_enabled: true,
+            preferred_currency: default_preferred_currency(),
             auto_download_enabled: false,
             auto_download_interval_hours: 24,
             mtg_db_path: path_or_default("MTG_DB_PATH", "AllPrintings.db"),
@@ -862,6 +885,7 @@ async fn main() -> eyre::Result<()> {
         config_path.clone(),
         config.pricing_enabled,
         config.collections_enabled,
+        config.preferred_currency.clone(),
     )?;
 
     {
@@ -1230,6 +1254,7 @@ mod restart_needed_tests {
         let mut new = config();
         new.pricing_enabled = !new.pricing_enabled;
         new.collections_enabled = !new.collections_enabled;
+        new.preferred_currency = "USD".to_string();
         assert!(!config().restart_needed(&new));
     }
 

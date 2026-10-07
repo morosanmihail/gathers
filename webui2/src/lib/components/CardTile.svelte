@@ -123,7 +123,7 @@
 		<div style="padding: 4px 8px 6px; border-top: 1px solid var(--border);">
 			<FinishList
 				group={col}
-				{price}
+				{cardPrices}
 				onAdjust={(finish, delta, purchasePrice) => onAdjust(col, finish, delta, purchasePrice)}
 			/>
 		</div>

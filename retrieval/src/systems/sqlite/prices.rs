@@ -8,7 +8,7 @@ pub(super) fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardP
     info!(path, "Loading MTG prices");
     let conn = Connection::open(path)?;
     let mut stmt = conn.prepare(
-        "SELECT uuid, provider, finish, price FROM prices WHERE source = 'paper' AND priceType = 'retail'",
+        "SELECT uuid, provider, finish, price, currency FROM prices WHERE source = 'paper' AND priceType = 'retail'",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -16,12 +16,13 @@ pub(super) fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardP
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, f64>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
     })?;
 
     let mut paper_map: HashMap<String, HashMap<String, RetailerPrices>> = HashMap::new();
     for row in rows.flatten() {
-        let (uuid, retailer, finish, price) = row;
+        let (uuid, retailer, finish, price, currency) = row;
         let rp = paper_map
             .entry(uuid)
             .or_default()
@@ -29,6 +30,9 @@ pub(super) fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardP
             .or_insert(RetailerPrices {
                 normal: None,
                 foil: None,
+                currency: currency
+                    .filter(|c| !c.is_empty())
+                    .unwrap_or_else(|| ::models::DEFAULT_CURRENCY.to_string()),
             });
         match finish.as_str() {
             "normal" => rp.normal = Some(price),

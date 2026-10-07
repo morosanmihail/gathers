@@ -356,6 +356,27 @@ label.field-label {
 	box-shadow: 0 0 0 2px var(--accent-glow), var(--shadow);
 }
 
+/* Pending purchase-price prompt can be wider than the tile: let it spill
+   over the neighbouring tile instead of being clipped underneath it. */
+.card-tile:has(.qty-pending) {
+	overflow: visible;
+	z-index: 20;
+}
+.card-tile:has(.qty-pending) .card-tile-img,
+.card-tile:has(.qty-pending) .card-tile-img-placeholder {
+	/* overflow: visible no longer rounds the image's top corners. */
+	border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.card-tile .qty-pending {
+	position: relative;
+	width: max-content;
+	background: var(--surface);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+	padding: 2px 4px;
+	margin: -2px -4px;
+}
+
 .card-tile.want-only { opacity: 0.5; }
 .card-tile.want-only:hover { opacity: 0.75; }
 

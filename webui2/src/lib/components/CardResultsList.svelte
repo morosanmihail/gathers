@@ -3,7 +3,7 @@
 	import CardRow from './CardRow.svelte';
 	import Pagination from './Pagination.svelte';
 	import type { AnyCard, CollectionCard, CardGroup, CardPrices, ViewMode } from '$lib/types';
-	import { bestPrice } from '$lib/types';
+	import { priceLabel } from '$lib/currency.svelte';
 
 	interface ListHeader {
 		field: string;
@@ -41,12 +41,19 @@
 		prices = {}, onAdd, onAddFinish, onAddWanted, onAdjust, onWantAdjust, onclick, sortBy = '', sortOrder = 'Asc',
 		onSortClick, total, page, onPageChange, gridClass = 'card-grid', gridStyle = '', listClass = 'card-list'
 	}: Props = $props();
+
+	// Collection rows price each owned finish; search results the normal finish.
+	function cardPrice(card: AnyCard | CollectionCard | CardGroup): string | null {
+		const entries = collectionMode ? (card as CardGroup).entries : undefined;
+		const owned = entries?.filter(e => (e.quantity ?? 0) > 0).map(e => e.finish ?? '') ?? [];
+		return priceLabel(prices[card.id], owned);
+	}
 </script>
 
 {#if viewMode === 'grid'}
 	<div class={gridClass} style={gridStyle}>
 		{#each cards as card (keyFn(card))}
-			<CardTile {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFinish} {onAddWanted} {onAdjust} {onWantAdjust} {onclick} />
+			<CardTile {card} {collectionMode} {selectable} {collection} price={cardPrice(card)} cardPrices={prices[card.id]} {onAdd} {onAddFinish} {onAddWanted} {onAdjust} {onWantAdjust} {onclick} />
 		{/each}
 	</div>
 {:else}
@@ -74,7 +81,7 @@
 			{/each}
 		</div>
 		{#each cards as card (keyFn(card))}
-			<CardRow {card} {collectionMode} {selectable} {collection} price={bestPrice(prices[card.id])} cardPrices={prices[card.id]} {onAdd} {onAddFinish} {onAddWanted} {onAdjust} {onWantAdjust} {onclick} />
+			<CardRow {card} {collectionMode} {selectable} {collection} price={cardPrice(card)} cardPrices={prices[card.id]} {onAdd} {onAddFinish} {onAddWanted} {onAdjust} {onWantAdjust} {onclick} />
 		{/each}
 	</div>
 {/if}

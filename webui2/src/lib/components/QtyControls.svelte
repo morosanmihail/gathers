@@ -12,6 +12,9 @@
 
 	let { quantity, onAdjust, price = null, label, busy = false }: Props = $props();
 
+	// Currency symbol of the formatted market price ("€0.80" → "€").
+	const symbol = $derived(price?.replace(/[0-9.,\s]/g, '') || '$');
+
 	// Pending add: waiting for user to confirm purchase price
 	let pending = $state(false);
 	let priceStr = $state('');
@@ -40,12 +43,12 @@
 <div class="qty-controls" role="presentation" onclick={(e) => e.stopPropagation()}>
 	{#if pending}
 		<!-- Price confirmation row -->
-		<div class="qty-row" style="gap:4px; flex-wrap: nowrap;">
+		<div class="qty-row qty-pending" style="gap:4px; flex-wrap: nowrap;">
 			{#if label}
 				<span style="font-size:0.72rem; color:var(--text2); white-space:nowrap;">{label} price:</span>
 			{/if}
 			<div style="display:flex; align-items:center; gap:3px;">
-				<span style="color:var(--text2); font-size:0.82rem;">$</span>
+				<span style="color:var(--text2); font-size:0.82rem;">{symbol}</span>
 				<!-- svelte-ignore a11y_autofocus -->
 				<input
 					class="input"

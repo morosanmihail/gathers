@@ -33,22 +33,78 @@ pub mod collections_models;
 
 use crate::collections::collections_models::Collection;
 
-/// Pick cardmarket retailer if present, else first available. Returns (normal_price, foil_price).
-fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
-    let rp = prices
+/// Unit prices for a card from a single retailer, so normal/foil always share
+/// one currency.
+#[derive(Debug, Clone, PartialEq)]
+struct UnitPrices {
+    normal: f64,
+    foil: f64,
+    currency: String,
+}
+
+/// Retailer whose prices a card is valued at: "raw" (Pokemon), else — among
+/// retailers listing it in `preferred_currency`, or all of them when none do —
+/// cardmarket, else the one with the cheapest listing (ties broken by name, so
+/// the choice never depends on HashMap order). Mirrored by
+/// `preferredRetailer` in the webui so list prices match collection totals.
+fn preferred_retailer<'a>(
+    prices: &'a models::CardPrices,
+    preferred_currency: &str,
+) -> Option<&'a models::RetailerPrices> {
+    if let Some(raw) = prices.paper.get("raw") {
+        return Some(raw);
+    }
+    let cheapest = |rp: &models::RetailerPrices| {
+        rp.normal.into_iter().chain(rp.foil).fold(f64::INFINITY, f64::min)
+    };
+    let listed: Vec<(&String, &models::RetailerPrices)> = prices
         .paper
-        .get("raw")
-        .or_else(|| prices.paper.iter().find(|(k, _)| k.to_lowercase() == "cardmarket").map(|(_, v)| v))
-        .or_else(|| prices.paper.values().next());
-    let Some(rp) = rp else { return (0.0, 0.0) };
-    let normal = rp.normal.or(rp.foil).unwrap_or(0.0);
-    let foil = rp.foil.or(rp.normal).unwrap_or(0.0);
-    (normal, foil)
+        .iter()
+        .filter(|(_, rp)| rp.normal.is_some() || rp.foil.is_some())
+        .collect();
+    let in_preferred: Vec<_> = listed
+        .iter()
+        .copied()
+        .filter(|(_, rp)| rp.currency == preferred_currency)
+        .collect();
+    let candidates = if in_preferred.is_empty() { listed } else { in_preferred };
+    candidates
+        .iter()
+        .find(|(k, _)| k.to_lowercase() == "cardmarket")
+        .or_else(|| {
+            candidates
+                .iter()
+                .min_by(|(ka, a), (kb, b)| cheapest(a).total_cmp(&cheapest(b)).then_with(|| ka.cmp(kb)))
+        })
+        .map(|(_, v)| *v)
+}
+
+fn preferred_unit_prices(prices: &models::CardPrices, preferred_currency: &str) -> Option<UnitPrices> {
+    let rp = preferred_retailer(prices, preferred_currency)?;
+    Some(UnitPrices {
+        normal: rp.normal.or(rp.foil).unwrap_or(0.0),
+        foil: rp.foil.or(rp.normal).unwrap_or(0.0),
+        currency: rp.currency.clone(),
+    })
+}
+
+#[derive(Default)]
+struct CurrencyAccumulator {
+    total_value: f64,
+    profit: f64,
+    untracked_value: f64,
+    wanted_value: f64,
+    priced_count: usize,
 }
 
 /// Pure computation of a collection's value breakdown, given already-resolved
-/// unit prices (normal, foil) per card uuid. Kept free of I/O so it can be
-/// unit tested without a live retrieval system or database.
+/// unit prices per card uuid. Kept free of I/O so it can be unit tested
+/// without a live retrieval system or database.
+///
+/// Totals are summed per currency: each card is priced from exactly one
+/// retailer (see `preferred_unit_prices`), so it counts toward exactly one
+/// currency total. Recorded purchase prices carry no currency and are assumed
+/// to be in the card's price currency when computing profit.
 ///
 /// `cards` is a flat list of (uuid, finish) rows now (see
 /// `models::CollectionCard::finish`), so `total_count`/`priced_count` count
@@ -57,7 +113,7 @@ fn preferred_unit_prices(prices: &models::CardPrices) -> (f64, f64) {
 /// `(card_uuid, finish)`.
 fn compute_value_breakdown(
     cards: &[models::CollectionCard],
-    unit_prices: &HashMap<String, (f64, f64)>,
+    unit_prices: &HashMap<String, UnitPrices>,
     purchase_totals: &HashMap<(String, String), persistence::PurchaseSummary>,
 ) -> collections_models::CollectionValueBreakdown {
     // Wanted-only entries (nothing owned yet) aren't part of the collection's
@@ -69,22 +125,19 @@ fn compute_value_breakdown(
     // counted the same way so priced/total stays a self-consistent ratio.
     let total_count = cards.iter().filter(|c| c.quantity > 0).count();
 
-    let mut total_value: f64 = 0.0;
-    let mut profit: f64 = 0.0;
-    let mut untracked_value: f64 = 0.0;
-    let mut priced_count: usize = 0;
-    let mut wanted_value: f64 = 0.0;
+    let mut by_currency: HashMap<String, CurrencyAccumulator> = HashMap::new();
 
     for card in cards {
-        let Some(&(unit_normal, unit_foil)) = unit_prices.get(&card.uuid) else { continue };
+        let Some(unit) = unit_prices.get(&card.uuid) else { continue };
         // Pricing only distinguishes normal/foil (see `models::CardPrices`)
         // — any other finish is priced as "normal" for lack of anything
         // better, same as an unpriced card would fall back to 0.
-        let unit_price = if card.finish == "foil" { unit_foil } else { unit_normal };
+        let unit_price = if card.finish == "foil" { unit.foil } else { unit.normal };
 
         // want_quantity is only ever tracked on the "" (default) finish row.
-        if card.want_quantity > 0 {
-            wanted_value += unit_normal * card.want_quantity as f64;
+        if card.want_quantity > 0 && unit.normal > 0.0 {
+            by_currency.entry(unit.currency.clone()).or_default().wanted_value +=
+                unit.normal * card.want_quantity as f64;
         }
 
         if card.quantity <= 0 {
@@ -95,8 +148,9 @@ fn compute_value_breakdown(
         if current <= 0.0 {
             continue;
         }
-        total_value += current;
-        priced_count += 1;
+        let acc = by_currency.entry(unit.currency.clone()).or_default();
+        acc.total_value += current;
+        acc.priced_count += 1;
 
         if let Some(summary) = purchase_totals.get(&(card.uuid.clone(), card.finish.clone())) {
             let paid = summary.quantity.min(card.quantity);
@@ -107,24 +161,39 @@ fn compute_value_breakdown(
             };
 
             let current_of_paid = unit_price * paid as f64;
-            profit += current_of_paid - cost;
+            acc.profit += current_of_paid - cost;
 
             let unpaid = (card.quantity - paid).max(0);
-            untracked_value += unit_price * unpaid as f64;
+            acc.untracked_value += unit_price * unpaid as f64;
         } else {
-            untracked_value += current;
+            acc.untracked_value += current;
         }
     }
 
     // Non-finite totals (from absurd recorded prices) would serialize as null.
     let round2 = |v: f64| if v.is_finite() { (v * 100.0).round() / 100.0 } else { 0.0 };
+    let priced_count = by_currency.values().map(|a| a.priced_count).sum();
+    let mut currencies: Vec<collections_models::CurrencyValue> = by_currency
+        .into_iter()
+        .map(|(currency, acc)| collections_models::CurrencyValue {
+            currency,
+            total_value: round2(acc.total_value),
+            profit: round2(acc.profit),
+            untracked_value: round2(acc.untracked_value),
+            wanted_value: round2(acc.wanted_value),
+            priced_count: acc.priced_count,
+        })
+        .collect();
+    // Largest total first, so the "main" currency leads.
+    currencies.sort_by(|a, b| {
+        b.total_value
+            .total_cmp(&a.total_value)
+            .then_with(|| a.currency.cmp(&b.currency))
+    });
     collections_models::CollectionValueBreakdown {
-        total_value: round2(total_value),
-        profit: round2(profit),
-        untracked_value: round2(untracked_value),
+        currencies,
         priced_count,
         total_count,
-        wanted_value: round2(wanted_value),
     }
 }
 
@@ -1412,6 +1481,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<CollectionValueBreakdown>, ApiError> {
         let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
         let enabled_plugins = enabled_plugin_providers(&state).await;
+        let preferred_currency = state.0.lock().await.preferred_currency.clone();
 
         let storage_guard = state.1.lock().await;
 
@@ -1453,14 +1523,16 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             by_provider.entry(card.provider.clone()).or_default().push(card);
         }
 
-        let mut unit_prices: HashMap<String, (f64, f64)> = HashMap::new();
+        let mut unit_prices: HashMap<String, UnitPrices> = HashMap::new();
         for (provider, cards) in &by_provider {
             if let Some(retrieval) = retrieval_systems.get(provider) {
                 let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
                 if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
                     for card in cards {
-                        if let Some(card_prices) = prices_map.get(&card.uuid) {
-                            unit_prices.insert(card.uuid.clone(), preferred_unit_prices(card_prices));
+                        if let Some(unit) = prices_map
+                            .get(&card.uuid)
+                            .and_then(|p| preferred_unit_prices(p, &preferred_currency)) {
+                            unit_prices.insert(card.uuid.clone(), unit);
                         }
                     }
                 }
@@ -1762,17 +1834,30 @@ mod value_breakdown_tests {
         }
     }
 
+    fn usd(normal: f64, foil: f64) -> UnitPrices {
+        priced(normal, foil, "USD")
+    }
+
+    fn priced(normal: f64, foil: f64, currency: &str) -> UnitPrices {
+        UnitPrices { normal, foil, currency: currency.to_string() }
+    }
+
+    /// Totals for one currency; panics if it's missing.
+    fn cur<'a>(b: &'a collections_models::CollectionValueBreakdown, code: &str) -> &'a collections_models::CurrencyValue {
+        b.currencies.iter().find(|c| c.currency == code).expect("currency present")
+    }
+
     #[test]
     fn wanted_value_sums_price_times_want_quantity() {
         let cards = vec![card("a", "", 0, 3)];
-        let unit_prices = HashMap::from([("a".to_string(), (2.5, 4.0))]);
+        let unit_prices = HashMap::from([("a".to_string(), usd(2.5, 4.0))]);
         let purchase_totals = HashMap::new();
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
-        assert_eq!(breakdown.wanted_value, 7.5);
+        assert_eq!(cur(&breakdown, "USD").wanted_value, 7.5);
         // Wanted-only entries aren't owned, so they don't affect owned totals.
-        assert_eq!(breakdown.total_value, 0.0);
+        assert_eq!(cur(&breakdown, "USD").total_value, 0.0);
         assert_eq!(breakdown.total_count, 0);
         assert_eq!(breakdown.priced_count, 0);
     }
@@ -1781,13 +1866,13 @@ mod value_breakdown_tests {
     fn wanted_value_excluded_from_owned_totals_when_also_owned() {
         // Owned 2 normal, wants 5 more on top of what's owned.
         let cards = vec![card("a", "", 2, 5)];
-        let unit_prices = HashMap::from([("a".to_string(), (1.0, 1.0))]);
+        let unit_prices = HashMap::from([("a".to_string(), usd(1.0, 1.0))]);
         let purchase_totals = HashMap::new();
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
-        assert_eq!(breakdown.total_value, 2.0);
-        assert_eq!(breakdown.wanted_value, 5.0);
+        assert_eq!(cur(&breakdown, "USD").total_value, 2.0);
+        assert_eq!(cur(&breakdown, "USD").wanted_value, 5.0);
         assert_eq!(breakdown.total_count, 1);
         assert_eq!(breakdown.priced_count, 1);
     }
@@ -1795,12 +1880,12 @@ mod value_breakdown_tests {
     #[test]
     fn zero_want_quantity_contributes_nothing() {
         let cards = vec![card("a", "", 1, 0)];
-        let unit_prices = HashMap::from([("a".to_string(), (3.0, 3.0))]);
+        let unit_prices = HashMap::from([("a".to_string(), usd(3.0, 3.0))]);
         let purchase_totals = HashMap::new();
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
-        assert_eq!(breakdown.wanted_value, 0.0);
+        assert!(breakdown.currencies.iter().all(|c| c.wanted_value == 0.0));
     }
 
     #[test]
@@ -1811,32 +1896,95 @@ mod value_breakdown_tests {
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
-        assert_eq!(breakdown.wanted_value, 0.0);
+        assert!(breakdown.currencies.iter().all(|c| c.wanted_value == 0.0));
     }
 
     #[test]
     fn multiple_wanted_cards_sum_together() {
         let cards = vec![card("a", "", 0, 2), card("b", "", 1, 1)];
         let unit_prices = HashMap::from([
-            ("a".to_string(), (10.0, 10.0)),
-            ("b".to_string(), (5.0, 5.0)),
+            ("a".to_string(), usd(10.0, 10.0)),
+            ("b".to_string(), usd(5.0, 5.0)),
         ]);
         let purchase_totals = HashMap::new();
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
         // a: 2 * 10.0 = 20.0, b: 1 * 5.0 = 5.0
-        assert_eq!(breakdown.wanted_value, 25.0);
+        assert_eq!(cur(&breakdown, "USD").wanted_value, 25.0);
     }
 
     #[test]
     fn foil_finish_uses_foil_unit_price() {
         let cards = vec![card("a", "foil", 2, 0)];
-        let unit_prices = HashMap::from([("a".to_string(), (1.0, 9.0))]);
+        let unit_prices = HashMap::from([("a".to_string(), usd(1.0, 9.0))]);
         let purchase_totals = HashMap::new();
 
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
-        assert_eq!(breakdown.total_value, 18.0);
+        assert_eq!(cur(&breakdown, "USD").total_value, 18.0);
+    }
+
+    #[test]
+    fn totals_split_per_currency_without_double_counting() {
+        let cards = vec![card("a", "", 2, 0), card("b", "foil", 1, 0), card("c", "", 3, 1)];
+        let unit_prices = HashMap::from([
+            ("a".to_string(), priced(1.5, 4.0, "EUR")),
+            ("b".to_string(), usd(2.0, 7.0)),
+            ("c".to_string(), priced(1.0, 1.0, "EUR")),
+        ]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(breakdown.currencies.len(), 2);
+        let eur = cur(&breakdown, "EUR");
+        assert_eq!(eur.total_value, 6.0);
+        assert_eq!(eur.wanted_value, 1.0);
+        assert_eq!(eur.priced_count, 2);
+        let usd_totals = cur(&breakdown, "USD");
+        assert_eq!(usd_totals.total_value, 7.0);
+        assert_eq!(usd_totals.priced_count, 1);
+        assert_eq!(breakdown.priced_count, 3);
+        // Largest total first.
+        assert_eq!(breakdown.currencies[0].currency, "USD");
+    }
+
+    #[test]
+    fn preferred_unit_prices_without_cardmarket_uses_cheapest_retailer() {
+        let rp = |normal: f64| models::RetailerPrices { normal: None, foil: Some(normal), currency: "USD".to_string() };
+        let prices = models::CardPrices {
+            uuid: "a".to_string(),
+            paper: HashMap::from([
+                ("manapool".to_string(), rp(8.79)),
+                ("tcgplayer".to_string(), rp(7.76)),
+                ("cardkingdom".to_string(), rp(9.99)),
+            ]),
+        };
+
+        assert_eq!(preferred_unit_prices(&prices, "EUR"), Some(usd(7.76, 7.76)));
+    }
+
+    #[test]
+    fn preferred_unit_prices_prefers_cardmarket_currency() {
+        let prices = models::CardPrices {
+            uuid: "a".to_string(),
+            paper: HashMap::from([
+                (
+                    "tcgplayer".to_string(),
+                    models::RetailerPrices { normal: Some(1.0), foil: None, currency: "USD".to_string() },
+                ),
+                (
+                    "cardmarket".to_string(),
+                    models::RetailerPrices { normal: Some(0.8), foil: Some(2.0), currency: "EUR".to_string() },
+                ),
+            ]),
+        };
+
+        assert_eq!(preferred_unit_prices(&prices, "EUR"), Some(priced(0.8, 2.0, "EUR")));
+        // USD preferred: the USD retailer wins over cardmarket.
+        assert_eq!(preferred_unit_prices(&prices, "USD"), Some(usd(1.0, 1.0)));
+        // A currency nobody lists in falls back to cardmarket.
+        assert_eq!(preferred_unit_prices(&prices, "GBP"), Some(priced(0.8, 2.0, "EUR")));
     }
 }

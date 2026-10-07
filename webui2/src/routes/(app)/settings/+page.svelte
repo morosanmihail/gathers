@@ -4,6 +4,7 @@
 	import { app } from '$lib/state.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import type { EnvOverride, PluginConfig, Settings, System } from '$lib/types';
+	import { currencyPrefs, setConvertTotals, PREFERRED_CURRENCY_OPTIONS } from '$lib/currency.svelte';
 
 	let config = $state<Settings | null>(null);
 	let error = $state('');
@@ -457,6 +458,34 @@
 								<div>
 									<div style="font-weight: 600;">Enable pricing</div>
 									<div style="font-size: 0.8rem; color: var(--text2);">Show market prices and purchase history</div>
+								</div>
+							</label>
+							<div>
+								<label class="field-label" for="settings-preferred-currency">Preferred currency</label>
+								<select
+									id="settings-preferred-currency"
+									class="input"
+									style="max-width: 120px;"
+									value={config.preferred_currency ?? 'EUR'}
+									onchange={(e) => { if (config) { config = { ...config, preferred_currency: (e.target as HTMLSelectElement).value }; queueSave(); } }}
+								>
+									{#each PREFERRED_CURRENCY_OPTIONS as cur (cur)}
+										<option value={cur}>{cur}</option>
+									{/each}
+									{#if config.preferred_currency && !PREFERRED_CURRENCY_OPTIONS.includes(config.preferred_currency)}
+										<option value={config.preferred_currency}>{config.preferred_currency}</option>
+									{/if}
+								</select>
+								<div style="font-size: 0.8rem; color: var(--text2); margin-top: 4px;">Prices in this currency are used first for cards and collection totals; others are used only when a card has none.</div>
+							</div>
+							<!-- Per-browser preference (cookie), not part of server.toml. -->
+							<label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+								<input type="checkbox" checked={currencyPrefs.convertTotals}
+									onchange={(e) => setConvertTotals((e.target as HTMLInputElement).checked)}
+									style="width: 16px; height: 16px; accent-color: var(--accent);" />
+								<div>
+									<div style="font-weight: 600;">Show converted total</div>
+									<div style="font-size: 0.8rem; color: var(--text2);">When value totals span several currencies, also show their sum in the preferred currency using current ECB rates (fetched from frankfurter.dev). Saved in this browser only.</div>
 								</div>
 							</label>
 						</div>

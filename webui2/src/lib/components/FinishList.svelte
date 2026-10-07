@@ -1,16 +1,17 @@
 <script lang="ts">
-	import type { CardGroup } from '$lib/types';
+	import type { CardGroup, CardPrices } from '$lib/types';
+	import { formatFinishPrice } from '$lib/currency.svelte';
 	import { finishLabel, availableFinishesToAdd } from '$lib/types';
 	import QtyControls from './QtyControls.svelte';
 
 	interface Props {
 		group: CardGroup;
-		price?: string | null;
+		cardPrices?: CardPrices;
 		onAdjust: (finish: string, delta: number, purchasePrice?: number | null) => void;
 		busy?: boolean;
 	}
 
-	let { group, price = null, onAdjust, busy = false }: Props = $props();
+	let { group, cardPrices, onAdjust, busy = false }: Props = $props();
 
 	// Only show finish rows the card actually owns copies of. A group can
 	// also include a wishlist-only "" entry (quantity 0, want > 0) — the
@@ -32,7 +33,7 @@
 		<QtyControls
 			quantity={entry.quantity ?? 0}
 			label={finishLabel(entry.finish ?? '')}
-			{price}
+			price={formatFinishPrice(cardPrices, entry.finish ?? '')}
 			{busy}
 			onAdjust={(delta, purchasePrice) => onAdjust(entry.finish ?? '', delta, purchasePrice)}
 		/>
