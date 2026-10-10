@@ -21,8 +21,8 @@
 //!   - one retailer doesn't list one finish for a week (no entry that week)
 //!   - one week the MTG mirror isn't updated (no new entries that week — the
 //!     history is dated by the price data, not by when it was fetched)
-//!   - one week a Pokémon PSA 10 price isn't re-quoted (its last quote keeps
-//!     its own date instead of being copied forward)
+//!   - one week the Pokémon card has no reverse holo listing (no foil entry
+//!     that week)
 //!
 //! Finally every card's full history is compared exactly with what the
 //! simulation expects, the server is restarted and the history checked again.
@@ -41,8 +41,8 @@ const WEEKS: u32 = 6;
 /// Week whose MTG prices are never published: the mirror keeps serving the
 /// previous week's file.
 const STALE_MTG_WEEK: u32 = 5;
-/// Week a Pokémon PSA 10 price isn't re-quoted.
-const UNQUOTED_PSA10_WEEK: u32 = 4;
+/// Week the Pokémon card has no reverse holo listing.
+const NO_REVERSE_HOLO_WEEK: u32 = 4;
 /// Week cardmarket has no foil listing for `CARD_A`.
 const NO_CARDMARKET_FOIL_WEEK: u32 = 2;
 /// `CARD_D` is added to the collection right after this week's update.
@@ -64,6 +64,8 @@ const CARD_C: &str = "0005283f-d113-5937-ba52-a30570bfb334";
 const CARD_D: &str = "00010d56-fe38-5e35-8aed-518019aa36a5";
 // In data/pokemon.db.
 const CARD_P: &str = "Scarlet-&-Violet-Miraidon-ex-081";
+/// `CARD_P`'s TCGplayer product id (`idTCGP`), which its prices are keyed by.
+const CARD_P_PRODUCT: i64 = 475420;
 
 /// `(date, retailer, finish, price, currency)` — one price history entry.
 type Entry = (NaiveDate, String, String, f64, String);
@@ -95,7 +97,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
         .env("MTG_DB_PATH", db_path("AllPrintings.db"))
         .env("MTG_PRICES_PATH", db_path("AllPricesToday.db"))
         .env("POKEMON_DB_PATH", db_path("pokemon.db"))
-        .env("POKEMON_PRICES_PATH", db_path("pokemon_prices.sqlite"))
+        .env("POKEMON_PRICES_PATH", db_path("pokemon_prices_tcgcsv.sqlite"))
         .expect_system(MTG)
         .expect_system(POKEMON);
     let client = harness.start_server(&setup).await?;
@@ -121,7 +123,6 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
     ok("cards added; no history yet without price data");
 
     // ── Weeks ───────────────────────────────────────────────────────────────
-    let mut pokemon_rows = vec![];
     let start = std::time::Instant::now();
     for week in 1..=WEEKS {
         step(&format!("Week {week} ({})", date(week)));
@@ -129,7 +130,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
         if week != STALE_MTG_WEEK {
             publish_mtg_prices(harness, week)?;
         }
-        publish_pokemon_prices(harness, &mut pokemon_rows, week)?;
+        publish_pokemon_prices(harness, week)?;
 
         client.update_prices("mtg").await?;
         client.update_prices("pokemon").await?;
@@ -229,12 +230,12 @@ fn mtg_price(card: &str, listing: usize, week: u32) -> f64 {
     0.25 * (4.0 + base + listing as f64 * 2.0 + week as f64)
 }
 
-fn pokemon_raw(week: u32) -> f64 {
+fn pokemon_normal(week: u32) -> f64 {
     5.0 + 0.25 * week as f64
 }
 
-fn pokemon_psa10(week: u32) -> f64 {
-    if week == UNQUOTED_PSA10_WEEK { 0.0 } else { 50.0 + week as f64 }
+fn pokemon_reverse_holo(week: u32) -> Option<f64> {
+    (week != NO_REVERSE_HOLO_WEEK).then(|| 8.0 + 0.5 * week as f64)
 }
 
 /// What history should hold for an MTG card's prices from `week`, sorted
@@ -263,10 +264,10 @@ fn expected_histories() -> Vec<(&'static str, &'static str, Vec<Entry>)> {
 
     let mut pokemon = vec![];
     for week in 1..=WEEKS {
-        if pokemon_psa10(week) > 0.0 {
-            pokemon.push((date(week), "graded_psa10".to_string(), String::new(), pokemon_psa10(week), "USD".to_string()));
+        pokemon.push((date(week), "tcgplayer".to_string(), String::new(), pokemon_normal(week), "USD".to_string()));
+        if let Some(price) = pokemon_reverse_holo(week) {
+            pokemon.push((date(week), "tcgplayer".to_string(), "foil".to_string(), price, "USD".to_string()));
         }
-        pokemon.push((date(week), "raw".to_string(), String::new(), pokemon_raw(week), "USD".to_string()));
     }
 
     vec![
@@ -334,20 +335,26 @@ fn publish_mtg_prices(harness: &Harness, week: u32) -> eyre::Result<()> {
     harness.publish_to_mirror(&path, "AllPricesToday.sqlite")
 }
 
-/// Adds `week`'s row for the Pokémon card to `rows` and publishes them all
-/// — that database keeps its whole history, newest rows winning.
-fn publish_pokemon_prices(harness: &Harness, rows: &mut Vec<(String, f64, f64)>, week: u32) -> eyre::Result<()> {
-    rows.push((format!("{}T00:00:00.000Z", date(week)), pokemon_raw(week), pokemon_psa10(week)));
+/// Publishes a TCGCSV-style snapshot holding only `week`'s Pokémon prices.
+fn publish_pokemon_prices(harness: &Harness, week: u32) -> eyre::Result<()> {
     let path = harness.root().join(format!("pokemon-prices-{week}.sqlite"));
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(
-        "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);",
+        "CREATE TABLE prices (productId INTEGER NOT NULL, subTypeName TEXT NOT NULL, lowPrice REAL, midPrice REAL,
+             highPrice REAL, marketPrice REAL, directLowPrice REAL, PRIMARY KEY (productId, subTypeName)) WITHOUT ROWID;
+         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
     )?;
-    for (day, raw, psa10) in rows.iter() {
-        conn.execute("INSERT INTO prices VALUES (?1, ?2, '', ?3, ?4, 0.0)", rusqlite::params![day, CARD_P, raw, psa10])?;
+    conn.execute("INSERT INTO meta VALUES ('updated', ?1)", [format!("{}T20:00:00+00:00", date(week))])?;
+    let mut listings = vec![("Normal", pokemon_normal(week))];
+    listings.extend(pokemon_reverse_holo(week).map(|p| ("Reverse Holofoil", p)));
+    for (sub_type, price) in listings {
+        conn.execute(
+            "INSERT INTO prices (productId, subTypeName, midPrice, marketPrice) VALUES (?1, ?2, ?3, ?3)",
+            rusqlite::params![CARD_P_PRODUCT, sub_type, price],
+        )?;
     }
     drop(conn);
-    harness.publish_to_mirror(&path, "pokemon_prices.sqlite")
+    harness.publish_to_mirror(&path, "pokemon_prices_tcgcsv.sqlite")
 }
 
 // ── Assertions ──────────────────────────────────────────────────────────────

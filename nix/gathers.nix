@@ -91,7 +91,7 @@ in
     mtgPricesPath = mkDbPathOption "AllPricesToday.sqlite";
     riftboundDbPath = mkDbPathOption "riftbound.db";
     pokemonDbPath = mkDbPathOption "pokemon.db";
-    pokemonPricesPath = mkDbPathOption "pokemon_prices.sqlite";
+    pokemonPricesPath = mkDbPathOption "pokemon_prices_tcgcsv.sqlite";
     storageDbPath = mkDbPathOption "storage.db";
 
     frontend = {

@@ -358,7 +358,7 @@ pub async fn run_update_cycle(data_dir: &Path, interval: Duration) -> eyre::Resu
 
     refresh_if_stale(
         data_dir,
-        "pokemon_prices.sqlite",
+        crate::systems::pokemon::POKEMON_PRICES_FILE,
         interval,
         refresh_pokemon_prices(data_dir),
     )
@@ -383,13 +383,17 @@ pub async fn run_update_cycle(data_dir: &Path, interval: Duration) -> eyre::Resu
     Ok(())
 }
 
+/// Always built straight from TCGCSV, never via `try_mirrors` — a mirror
+/// that listed itself (or another mirror) in its own `mirrors.toml` would
+/// otherwise just republish what it already serves.
 async fn refresh_pokemon_prices(data_dir: &Path) -> eyre::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let raw = temp_dir.path().join("pokemon_prices.sqlite");
-    crate::systems::pokemon::download_pokemon_prices(raw.to_str().unwrap()).await?;
-    let bz2 = temp_dir.path().join("pokemon_prices.sqlite.bz2");
+    let stem = crate::systems::pokemon::POKEMON_PRICES_FILE;
+    let raw = temp_dir.path().join(stem);
+    crate::systems::pokemon::build_pokemon_prices(&raw).await?;
+    let bz2 = temp_dir.path().join(format!("{stem}.bz2"));
     compress_bz2(&raw, &bz2)?;
-    write_with_sha256(&bz2, data_dir, "pokemon_prices.sqlite")
+    write_with_sha256(&bz2, data_dir, stem)
 }
 
 /// Persists its working db at a fixed path across cycles instead of a

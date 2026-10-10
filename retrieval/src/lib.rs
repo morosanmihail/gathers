@@ -11,7 +11,7 @@ pub use systems::plugin::{
     PluginCard, PluginInfo, PluginRetrievalSystem, PluginSearchFilters, PluginSearchRequest,
     PluginUpdateResponse,
 };
-pub use systems::pokemon::{PokemonSQLiteRetrievalSystem, download_pokemon_prices};
+pub use systems::pokemon::{POKEMON_PRICES_FILE, PokemonSQLiteRetrievalSystem, download_pokemon_prices};
 pub use systems::riftsqlite::RiftboundSQLiteRetrievalSystem;
 pub use systems::scryfall::ScryfallRetrievalSystem;
 pub use systems::sqlite::{MagicSQLiteRetrievalSystem, download_mtg_db, download_prices};

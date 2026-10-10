@@ -500,95 +500,104 @@ async fn test_search_sort_by_release_date() {
 
 // ── Price tests ───────────────────────────────────────────────────────────
 
-fn make_prices_db(dir: &TempDir) -> String {
-    let path = dir.path().join("prices.sqlite");
-    let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(
-        "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);
-         INSERT INTO prices VALUES ('2024-01-01', 'card-alpha', '', 1.50, 10.0, 8.0);
-         INSERT INTO prices VALUES ('2024-01-10', 'card-alpha', '', 2.00, 12.0, 9.0);
-         INSERT INTO prices VALUES ('2024-01-01', 'card-beta',  '', 0.25, 0.0,  0.0);
-         INSERT INTO prices VALUES ('2024-01-01', 'card-zero',  '', 0.0,  0.0,  0.0);",
-    ).unwrap();
-    path.to_string_lossy().into_owned()
+/// Cards `card-alpha`/`card-twin` (sharing TCGplayer product 100), `card-beta`
+/// (200), `card-zero` (300, only quoted at zero), `card-unlisted` (400, not
+/// in the snapshot) and `card-noid` (no product id), plus a TCGCSV snapshot
+/// dated 2026-10-09.
+fn price_fixture(dir: &TempDir) -> (String, String) {
+    let cards = dir.path().join("pokemon.db");
+    Connection::open(&cards)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE cards (cardId TEXT UNIQUE, idTCGP INTEGER);
+             INSERT INTO cards VALUES ('card-alpha', 100), ('card-twin', 100), ('card-beta', 200),
+                 ('card-zero', 300), ('card-unlisted', 400), ('card-noid', NULL);",
+        )
+        .unwrap();
+    let prices = dir.path().join("prices.sqlite");
+    let row = |product_id, sub_type: &str, market| prices::PriceRow {
+        product_id,
+        sub_type_name: sub_type.to_string(),
+        low_price: None,
+        mid_price: None,
+        high_price: None,
+        market_price: market,
+        direct_low_price: None,
+    };
+    prices::write_prices_db(
+        &prices,
+        "2026-10-09T20:05:19+00:00",
+        [
+            row(100, "Normal", Some(2.0)),
+            row(100, "Reverse Holofoil", Some(3.5)),
+            row(200, "Holofoil", Some(0.25)),
+            row(300, "Normal", Some(0.0)),
+        ],
+    )
+    .unwrap();
+    (cards.to_string_lossy().into_owned(), prices.to_string_lossy().into_owned())
+}
+
+fn priced_system(dir: &TempDir) -> PokemonSQLiteRetrievalSystem {
+    let (cards, prices) = price_fixture(dir);
+    PokemonSQLiteRetrievalSystem::new(Some(cards), Some(prices)).unwrap()
 }
 
 #[tokio::test]
 async fn test_get_card_prices_found() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
-    let result = system.get_card_prices("card-alpha").await.unwrap();
-    assert!(result.is_some());
-    let prices = result.unwrap();
-    assert_eq!(prices.uuid, "card-alpha");
-    let raw = prices.paper.get("raw").unwrap();
-    assert_eq!(raw.normal, Some(2.00));
-    assert_eq!(raw.foil, None);
-    let psa10 = prices.paper.get("graded_psa10").unwrap();
-    assert_eq!(psa10.normal, Some(12.0));
-    let psa9 = prices.paper.get("graded_psa9").unwrap();
-    assert_eq!(psa9.normal, Some(9.0));
-}
-
-#[tokio::test]
-async fn test_get_card_prices_latest_row_used() {
-    let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
-
-    // card-alpha has two rows; latest (2024-01-10) must win
     let prices = system.get_card_prices("card-alpha").await.unwrap().unwrap();
-    assert_eq!(prices.paper.get("raw").unwrap().normal, Some(2.00));
-    assert_eq!(prices.paper["raw"].date, "2024-01-10".parse().ok());
+    assert_eq!(prices.uuid, "card-alpha");
+    assert_eq!(prices.paper.len(), 1);
+    let tcgp = &prices.paper["tcgplayer"];
+    assert_eq!(tcgp.normal, Some(2.0));
+    assert_eq!(tcgp.foil, Some(3.5));
+    assert_eq!(tcgp.currency, "USD");
+    assert_eq!(tcgp.date, "2026-10-09".parse().ok());
 }
 
 #[tokio::test]
-async fn test_prices_dated_per_column() {
+async fn test_holofoil_only_card_priced_as_normal() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    {
-        let conn = rusqlite::Connection::open(&prices_path).unwrap();
-        // Newest row only has a raw price: PSA quotes keep their older date.
-        conn.execute(
-            "INSERT INTO prices VALUES ('2024-02-01T12:00:00.000Z', 'card-alpha', '', 3.00, 0.0, 0.0)",
-            [],
-        )
-        .unwrap();
-    }
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
-    for prices in [
-        system.get_card_prices("card-alpha").await.unwrap().unwrap(),
-        system.get_bulk_card_prices(vec!["card-alpha".to_string()]).await.unwrap().remove("card-alpha").unwrap(),
-    ] {
-        assert_eq!(prices.paper["raw"].normal, Some(3.00));
-        assert_eq!(prices.paper["raw"].date, "2024-02-01".parse().ok());
-        assert_eq!(prices.paper["graded_psa10"].normal, Some(12.0));
-        assert_eq!(prices.paper["graded_psa10"].date, "2024-01-10".parse().ok());
-    }
+    let prices = system.get_card_prices("card-beta").await.unwrap().unwrap();
+    assert_eq!(prices.paper["tcgplayer"].normal, Some(0.25));
+    assert_eq!(prices.paper["tcgplayer"].foil, None);
+}
+
+#[tokio::test]
+async fn test_cards_sharing_a_product_share_its_prices() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+
+    let result = system
+        .get_bulk_card_prices(vec!["card-alpha".to_string(), "card-twin".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result["card-twin"].uuid, "card-twin");
+    assert_eq!(result["card-twin"].paper["tcgplayer"].normal, Some(2.0));
 }
 
 #[tokio::test]
 async fn test_get_card_prices_not_found() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
-    let result = system.get_card_prices("card-nonexistent").await.unwrap();
-    assert!(result.is_none());
+    for card in ["card-nonexistent", "card-unlisted", "card-noid"] {
+        assert!(system.get_card_prices(card).await.unwrap().is_none(), "{card}");
+    }
 }
 
 #[tokio::test]
 async fn test_get_card_prices_all_zero_returns_none() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
-    // card-zero has all prices = 0.0 → paper map is empty → None
-    let result = system.get_card_prices("card-zero").await.unwrap();
-    assert!(result.is_none());
+    assert!(system.get_card_prices("card-zero").await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -610,10 +619,39 @@ async fn test_get_card_prices_file_missing() {
 }
 
 #[tokio::test]
+async fn test_prices_file_appearing_later_is_picked_up() {
+    let dir = TempDir::new().unwrap();
+    let (cards, prices) = price_fixture(&dir);
+    let later = dir.path().join("later.sqlite");
+    let system =
+        PokemonSQLiteRetrievalSystem::new(Some(cards), Some(later.to_string_lossy().into_owned())).unwrap();
+    assert!(system.get_card_prices("card-alpha").await.unwrap().is_none());
+
+    std::fs::copy(prices, &later).unwrap();
+    assert!(system.get_card_prices("card-alpha").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn test_old_pokedata_prices_db_is_ignored() {
+    let dir = TempDir::new().unwrap();
+    let (cards, _) = price_fixture(&dir);
+    let old = dir.path().join("old.sqlite");
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);
+             INSERT INTO prices VALUES ('2025-08-01', 'card-alpha', '', 1.50, 10.0, 8.0);",
+        )
+        .unwrap();
+    let system =
+        PokemonSQLiteRetrievalSystem::new(Some(cards), Some(old.to_string_lossy().into_owned())).unwrap();
+    assert!(system.get_card_prices("card-alpha").await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn test_get_bulk_card_prices_all_found() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
     let result = system
         .get_bulk_card_prices(vec!["card-alpha".to_string(), "card-beta".to_string()])
@@ -627,8 +665,7 @@ async fn test_get_bulk_card_prices_all_found() {
 #[tokio::test]
 async fn test_get_bulk_card_prices_partial_found() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
     let result = system
         .get_bulk_card_prices(vec!["card-alpha".to_string(), "card-missing".to_string()])
@@ -641,8 +678,7 @@ async fn test_get_bulk_card_prices_partial_found() {
 #[tokio::test]
 async fn test_get_bulk_card_prices_empty_input() {
     let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+    let system = priced_system(&dir);
 
     let result = system.get_bulk_card_prices(vec![]).await.unwrap();
     assert!(result.is_empty());
@@ -663,19 +699,6 @@ async fn test_update_prices_no_path_returns_false() {
     let system = PokemonSQLiteRetrievalSystem::new(None, None).unwrap();
     let result = system.update_prices().await.unwrap();
     assert!(!result);
-}
-
-#[tokio::test]
-async fn test_prices_beta_raw_only() {
-    let dir = TempDir::new().unwrap();
-    let prices_path = make_prices_db(&dir);
-    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
-
-    let prices = system.get_card_prices("card-beta").await.unwrap().unwrap();
-    assert_eq!(prices.paper.len(), 1);
-    assert_eq!(prices.paper.get("raw").unwrap().normal, Some(0.25));
-    assert!(!prices.paper.contains_key("graded_psa10"));
-    assert!(!prices.paper.contains_key("graded_psa9"));
 }
 
 // ── unique modes ─────────────────────────────────────────────────────────────

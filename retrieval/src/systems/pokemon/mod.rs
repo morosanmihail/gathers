@@ -1,11 +1,12 @@
-// Data retrieved from https://github.com/poketrax/pokedata
+// Card data scraped from TCGPlayer and Serebii; prices from https://tcgcsv.com
 
 mod models;
 mod prices;
 mod scraper;
 mod unique;
 
-pub use prices::download_pokemon_prices;
+pub(crate) use prices::build_pokemon_prices;
+pub use prices::{POKEMON_PRICES_FILE, download_pokemon_prices};
 
 /// Runs the live Pokémon card scraper, upserting into the db at `path`
 /// (created if missing). The only authoritative source for this data —
@@ -58,31 +59,19 @@ pub struct PokemonSQLiteRetrievalSystem {
     prices_connection: Arc<Mutex<Option<Connection>>>,
 }
 
-fn open_prices_connection(path: &str) -> eyre::Result<Connection> {
-    let conn = Connection::open(path)?;
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_prices_cardid_date ON prices(cardId, date DESC);
-         CREATE INDEX IF NOT EXISTS idx_prices_covering ON prices(cardId, date DESC, rawPrice, gradedPriceTen, gradedPriceNine);"
-    )?;
-    Ok(conn)
-}
-
 impl PokemonSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/pokemon.db".to_string());
         let conn = Connection::open(path.clone())?;
-        let prices_conn = if let Some(ref p) = prices_db_path
-            && PathBuf::from(p).exists()
-        {
-            Arc::new(Mutex::new(Some(open_prices_connection(p)?)))
-        } else {
-            Arc::new(Mutex::new(None))
+        let prices_conn = match prices_db_path {
+            Some(ref p) => prices::open_prices_db(p)?,
+            None => None,
         };
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             _db_path: path,
             prices_db_path,
-            prices_connection: prices_conn,
+            prices_connection: Arc::new(Mutex::new(prices_conn)),
         })
     }
 }
@@ -318,78 +307,57 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
     }
 
     async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {
-        let prices_path = match &self.prices_db_path {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        };
-        if !PathBuf::from(&prices_path).exists() {
-            return Ok(None);
-        }
-        let mut conn_guard = self.prices_connection.lock().await;
-        if conn_guard.is_none() {
-            *conn_guard = Some(open_prices_connection(&prices_path)?);
-        }
-        let conn = conn_guard.as_ref().unwrap();
-        let result = conn.query_row(
-            &format!(
-                "SELECT {} WHERE EXISTS (SELECT 1 FROM prices WHERE cardId = ?1)",
-                prices::latest_quotes_sql("?1")
-            ),
-            rusqlite::params![uuid],
-            |row| prices::quotes_from_row(row, 0),
-        );
-        match result {
-            Ok(quotes) => {
-                let prices = prices::row_to_card_prices(uuid, quotes);
-                if prices.paper.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(prices))
-                }
-            }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        Ok(self
+            .get_bulk_card_prices(vec![uuid.to_string()])
+            .await?
+            .remove(uuid))
     }
 
     async fn get_bulk_card_prices(
         &self,
         uuids: Vec<String>,
     ) -> eyre::Result<HashMap<String, CardPrices>> {
-        if uuids.is_empty() {
+        if uuids.is_empty() || self.prices_db_path.is_none() {
             return Ok(HashMap::new());
         }
-        let prices_path = match &self.prices_db_path {
-            Some(p) => p.clone(),
-            None => return Ok(HashMap::new()),
+        // Prices are keyed by TCGplayer product id; several cards can share one.
+        let product_ids: Vec<(String, i64)> = {
+            let conn = self.connection.lock().await;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT cardId, idTCGP FROM cards WHERE idTCGP > 0 AND cardId IN ({})",
+                sql_placeholders(uuids.len())
+            ))?;
+            stmt.query_map(rusqlite::params_from_iter(uuids.iter()), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<Result<_, _>>()?
         };
-        if !PathBuf::from(&prices_path).exists() {
+        if product_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let mut conn_guard = self.prices_connection.lock().await;
-        if conn_guard.is_none() {
-            *conn_guard = Some(open_prices_connection(&prices_path)?);
-        }
-        let conn = conn_guard.as_ref().unwrap();
-        let query = format!(
-            "SELECT id_list.cardId, {} \
-             FROM (SELECT DISTINCT cardId FROM prices WHERE cardId IN ({})) id_list",
-            prices::latest_quotes_sql("id_list.cardId"),
-            sql_placeholders(uuids.len())
-        );
-        let mut stmt = conn.prepare(&query)?;
-        let iter = stmt.query_map(rusqlite::params_from_iter(uuids.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, prices::quotes_from_row(row, 1)?))
-        })?;
-        let mut result = HashMap::new();
-        for row in iter.flatten() {
-            let (card_id, quotes) = row;
-            let card_prices = prices::row_to_card_prices(&card_id, quotes);
-            if !card_prices.paper.is_empty() {
-                result.insert(card_id, card_prices);
+
+        let by_product = {
+            let mut conn_guard = self.prices_connection.lock().await;
+            if conn_guard.is_none() {
+                *conn_guard = prices::open_prices_db(self.prices_db_path.as_deref().unwrap())?;
             }
-        }
-        Ok(result)
+            let Some(conn) = conn_guard.as_ref() else {
+                return Ok(HashMap::new());
+            };
+            let mut ids: Vec<i64> = product_ids.iter().map(|(_, id)| *id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            prices::prices_for_products(conn, &ids)?
+        };
+
+        Ok(product_ids
+            .into_iter()
+            .filter_map(|(card_id, product_id)| {
+                let mut prices = by_product.get(&product_id)?.clone();
+                prices.uuid = card_id.clone();
+                Some((card_id, prices))
+            })
+            .collect())
     }
 
     async fn update_prices(&self) -> eyre::Result<bool> {

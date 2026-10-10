@@ -10,7 +10,7 @@ On startup, and then every `MIRROR_INTERVAL_HOURS` (default 24h), it refreshes f
 |---|---|---|
 | `AllPrintings.sqlite` | [mtgjson.com](https://mtgjson.com) | relays the upstream `.bz2` byte-for-byte, sha256-verified |
 | `AllPricesToday.sqlite` | [mtgjson.com](https://mtgjson.com) | relays the upstream `.bz2` byte-for-byte, sha256-verified |
-| `pokemon_prices.sqlite` | [poketrax/pokedata](https://github.com/poketrax/pokedata) | downloads raw sqlite, compresses itself |
+| `pokemon_prices_tcgcsv.sqlite` | [TCGCSV](https://tcgcsv.com) (TCGplayer prices) | builds a sqlite snapshot from the per-set price JSON, compresses result |
 | `riftbound.sqlite` | [Riftbound card gallery](https://riftbound.leagueoflegends.com/en-us/card-gallery/) | live scrape, compresses result |
 | `pokemon.sqlite` | TCGPlayer / Serebii scrapers | live scrape, compresses result |
 
@@ -83,4 +83,4 @@ Ordered, highest priority first. Every retrieval system tries each mirror's `{st
 
 ## Why self-host one
 
-Every GatheRs install hitting mtgjson.com, poketrax's GitHub, and Riftbound's live site on every `--download`/`/update` call adds up. A mirror means one polite daily pull per mirror operator instead of one per deployment. See the main [README](../README.md#db-mirror) for the full acknowledgements to the upstream projects this relies on.
+Every GatheRs install hitting mtgjson.com, TCGCSV, and Riftbound's live site on every `--download`/`/update` call adds up. A mirror means one polite daily pull per mirror operator instead of one per deployment. See the main [README](../README.md#db-mirror) for the full acknowledgements to the upstream projects this relies on.
