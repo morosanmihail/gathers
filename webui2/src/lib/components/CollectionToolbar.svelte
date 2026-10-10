@@ -179,7 +179,15 @@
 
 	<div class="toolbar-sep"></div>
 
-	<!-- Selection info -->
+	<!-- Selection -->
+	<button class="btn btn-ghost btn-sm" onclick={() => app.selectAll(groups.map(g => g.id))}>
+		Select all
+	</button>
+	{#if selectedList.length > 0}
+		<button class="btn btn-ghost btn-sm" onclick={() => app.clearSelected()}>Clear selection</button>
+	{/if}
+	<div class="toolbar-sep"></div>
+
 	{#if selectedList.length > 0}
 		<span class="selection-badge">{selectedList.length} selected</span>
 
@@ -209,12 +217,6 @@
 			</div>
 		{/if}
 
-		<button class="btn btn-ghost" onclick={() => app.clearSelected()}>Clear selection</button>
-		<div class="toolbar-sep"></div>
-	{:else}
-		<button class="btn btn-ghost btn-sm" onclick={() => app.selectAll(groups.map(g => g.id))}>
-			Select all
-		</button>
 		<div class="toolbar-sep"></div>
 	{/if}
 

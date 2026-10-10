@@ -1,4 +1,7 @@
-use crate::{PriceHistoryEntry, PricePoint};
+use std::collections::HashMap;
+
+use crate::{DailyPrice, PriceHistoryEntry, PricePoint};
+use models::CardID;
 use rusqlite::Connection;
 
 /// Upserts one row per point. Non-finite and non-positive prices are
@@ -66,4 +69,43 @@ pub(super) fn get(
         })?
         .collect::<Result<_, _>>()?;
     Ok(entries)
+}
+
+/// Cards looked up per query, keeping SQL parameter lists small.
+const CHUNK_SIZE: usize = 500;
+
+/// Each card's prices from its one retailer in `retailers` (keyed by card
+/// uuid), oldest first. Other retailers' rows are skipped as they're read,
+/// so they never pile up in memory.
+pub(super) fn get_from_retailers(
+    conn: &Connection,
+    provider: &str,
+    retailers: &HashMap<CardID, String>,
+) -> eyre::Result<HashMap<CardID, Vec<DailyPrice>>> {
+    let uuids: Vec<&CardID> = retailers.keys().collect();
+    let mut out: HashMap<CardID, Vec<DailyPrice>> = HashMap::new();
+    for chunk in uuids.chunks(CHUNK_SIZE) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT card_uuid, retailer, finish, price, recorded_on FROM price_history
+             WHERE provider = ? AND card_uuid IN ({placeholders})
+             ORDER BY recorded_on"
+        ))?;
+        let params = std::iter::once(&provider as &dyn rusqlite::ToSql)
+            .chain(chunk.iter().map(|u| *u as &dyn rusqlite::ToSql));
+        let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
+        while let Some(row) = rows.next()? {
+            let card_uuid: String = row.get(0)?;
+            let retailer: String = row.get(1)?;
+            if retailers.get(&card_uuid) != Some(&retailer) {
+                continue;
+            }
+            out.entry(card_uuid).or_default().push(DailyPrice {
+                finish: row.get(2)?,
+                price: row.get(3)?,
+                recorded_on: row.get(4)?,
+            });
+        }
+    }
+    Ok(out)
 }

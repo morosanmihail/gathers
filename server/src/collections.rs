@@ -19,7 +19,7 @@ use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err, find_plugin, plugin_provider,
     collections::collections_models::{
-        APICardSearchFilters, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
+        APICardSearchFilters, APISortField, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
         CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
         CollectionAllPurchaseHistoryResponse, CollectionListEntry, CollectionPurchaseHistoryEntry,
         CollectionRemoveQuery,
@@ -30,6 +30,7 @@ use crate::{
 };
 use models::CardTrait as _;
 pub mod collections_models;
+mod value;
 
 use crate::collections::collections_models::Collection;
 
@@ -50,8 +51,8 @@ struct UnitPrices {
 fn preferred_retailer<'a>(
     prices: &'a models::CardPrices,
     preferred_currency: &str,
-) -> Option<&'a models::RetailerPrices> {
-    if let Some(raw) = prices.paper.get("raw") {
+) -> Option<(&'a String, &'a models::RetailerPrices)> {
+    if let Some(raw) = prices.paper.get_key_value("raw") {
         return Some(raw);
     }
     let cheapest = |rp: &models::RetailerPrices| {
@@ -76,11 +77,11 @@ fn preferred_retailer<'a>(
                 .iter()
                 .min_by(|(ka, a), (kb, b)| cheapest(a).total_cmp(&cheapest(b)).then_with(|| ka.cmp(kb)))
         })
-        .map(|(_, v)| *v)
+        .copied()
 }
 
 fn preferred_unit_prices(prices: &models::CardPrices, preferred_currency: &str) -> Option<UnitPrices> {
-    let rp = preferred_retailer(prices, preferred_currency)?;
+    let (_, rp) = preferred_retailer(prices, preferred_currency)?;
     Some(UnitPrices {
         normal: rp.normal.or(rp.foil).unwrap_or(0.0),
         foil: rp.foil.or(rp.normal).unwrap_or(0.0),
@@ -199,6 +200,90 @@ fn compute_value_breakdown(
         priced_count,
         total_count,
     }
+}
+
+/// A collection's cards along with what's needed to value them.
+struct CollectionPricing {
+    /// Every row, wanted-only ones included.
+    cards: Vec<models::CollectionCard>,
+    /// Current unit prices, keyed by card uuid, for cards that have any.
+    unit_prices: HashMap<String, UnitPrices>,
+    /// Retailer each card in `unit_prices` is valued at (see
+    /// `preferred_retailer`), keyed by card uuid.
+    retailers: HashMap<String, String>,
+    purchase_totals: HashMap<(String, String), Vec<persistence::PurchaseSummary>>,
+}
+
+/// Loads a collection's cards, their current prices and its purchase totals.
+async fn load_collection_pricing(state: &GathersState, collection_id: &str) -> Result<CollectionPricing, ApiError> {
+    let enabled_plugins = enabled_plugin_providers(state).await;
+
+    let storage = state.1.lock().await.storage.clone();
+    let collection_id = collection_id.to_string();
+    let cards = storage
+        .get_cards_in_collection_paginated(
+            &collection_id,
+            CollectionCardsParams {
+                offset: 0,
+                limit: 100_000,
+                sort_by: None,
+                sort_order: None,
+                provider: None,
+                providers: vec![],
+                enabled_plugin_providers: Some(enabled_plugins),
+            },
+        )
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorPayload { error: format!("Failed to get cards. {e}") }),
+        ))?;
+
+    let purchase_totals = storage
+        .get_collection_purchase_totals(&collection_id)
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorPayload { error: format!("Failed to get purchase history. {e}") }),
+        ))?;
+
+    // Wanted-only entries (nothing owned yet) are kept here too, so their
+    // wishlist price is still fetched.
+    let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for card in &cards {
+        ids_by_provider.entry(card.provider.clone()).or_default().push(card.uuid.clone());
+    }
+    let (unit_prices, retailers) = lookup_unit_prices(state, ids_by_provider).await;
+
+    Ok(CollectionPricing { cards, unit_prices, retailers, purchase_totals })
+}
+
+/// Current unit prices of the cards in `ids_by_provider`, and the retailer
+/// each is valued at (see `preferred_retailer`), both keyed by card uuid.
+/// Cards without prices, or whose provider has none, are left out.
+async fn lookup_unit_prices(
+    state: &GathersState,
+    ids_by_provider: HashMap<String, Vec<String>>,
+) -> (HashMap<String, UnitPrices>, HashMap<String, String>) {
+    let retrieval_systems = clone_retrieval_systems_by_name(state).await;
+    let preferred_currency = state.0.lock().await.preferred_currency.clone();
+    let mut unit_prices = HashMap::new();
+    let mut retailers = HashMap::new();
+    for (provider, mut ids) in ids_by_provider {
+        let Some(retrieval) = retrieval_systems.get(&provider) else { continue };
+        ids.sort();
+        ids.dedup();
+        let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await else { continue };
+        for (uuid, prices) in &prices_map {
+            if let Some((retailer, _)) = preferred_retailer(prices, &preferred_currency)
+                && let Some(unit) = preferred_unit_prices(prices, &preferred_currency)
+            {
+                retailers.insert(uuid.clone(), retailer.clone());
+                unit_prices.insert(uuid.clone(), unit);
+            }
+        }
+    }
+    (unit_prices, retailers)
 }
 
 /// Returns all configured retrieval systems, cloned out of the state lock,
@@ -584,19 +669,41 @@ fn sort_collection_cards(
     card_data: &HashMap<String, AnyCollectible>,
     sort_by: &Option<crate::collections::collections_models::APISortField>,
     sort_order: &Option<crate::collections::collections_models::APISortOrder>,
+    unit_prices: &HashMap<String, UnitPrices>,
 ) {
     use crate::collections::collections_models::{APISortField, APISortOrder};
     let desc = matches!(sort_order, Some(APISortOrder::Desc));
+    // Same rule as `compute_value_breakdown`: "foil" uses the foil price,
+    // every other finish the normal one.
+    let price = |c: &models::CollectionCard| {
+        unit_prices.get(&c.uuid).map(|u| if c.finish == "foil" { u.foil } else { u.normal }).filter(|p| *p > 0.0)
+    };
 
     cards.sort_by(|a, b| {
         let card_a = card_data.get(&a.uuid);
         let card_b = card_data.get(&b.uuid);
         let ord = match sort_by.as_ref().unwrap_or(&APISortField::Name) {
+            APISortField::Price => {
+                let by_name = || card_a.map(collectible_name).unwrap_or("").cmp(card_b.map(collectible_name).unwrap_or(""));
+                // Unpriced last whichever the order, so decided before `desc`.
+                return match (price(a), price(b)) {
+                    (Some(pa), Some(pb)) => {
+                        let ord = pa.total_cmp(&pb);
+                        if desc { ord.reverse() } else { ord }
+                    }
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+                .then_with(by_name);
+            }
             APISortField::Name => {
                 let na = card_a.map(collectible_name).unwrap_or("");
                 let nb = card_b.map(collectible_name).unwrap_or("");
                 na.cmp(nb)
             }
+            APISortField::Quantity => a.quantity.cmp(&b.quantity),
+            APISortField::WantQuantity => a.want_quantity.cmp(&b.want_quantity),
             APISortField::SetCode => {
                 let sa = card_a.map(collectible_set).unwrap_or_default();
                 let sb = card_b.map(collectible_set).unwrap_or_default();
@@ -1407,7 +1514,12 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             })
             .collect();
 
-        sort_collection_cards(&mut matched, &card_data, &filters.sort_by, &filters.sort_order);
+        let unit_prices = if filters.sort_by == Some(APISortField::Price) {
+            lookup_unit_prices(&state, ids_by_provider).await.0
+        } else {
+            HashMap::new()
+        };
+        sort_collection_cards(&mut matched, &card_data, &filters.sort_by, &filters.sort_order, &unit_prices);
 
         let page: Vec<CollectionCard> = matched
             .into_iter()
@@ -1521,68 +1633,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         State(state): State<GathersState>,
         Path(collection_id): Path<String>,
     ) -> Result<Json<CollectionValueBreakdown>, ApiError> {
-        let retrieval_systems = clone_retrieval_systems_by_name(&state).await;
-        let enabled_plugins = enabled_plugin_providers(&state).await;
-        let preferred_currency = state.0.lock().await.preferred_currency.clone();
-
-        let storage_guard = state.1.lock().await;
-
-        let collection_cards = storage_guard
-            .storage
-            .get_cards_in_collection_paginated(
-                &collection_id,
-                CollectionCardsParams {
-                    offset: 0,
-                    limit: 100_000,
-                    sort_by: None,
-                    sort_order: None,
-                    provider: None,
-                    providers: vec![],
-                    enabled_plugin_providers: Some(enabled_plugins),
-                },
-            )
-            .await
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload { error: format!("Failed to get cards. {e}") }),
-            ))?;
-
-        let purchase_totals = storage_guard
-            .storage
-            .get_collection_purchase_totals(&collection_id)
-            .await
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorPayload { error: format!("Failed to get purchase history. {e}") }),
-            ))?;
-
-        drop(storage_guard);
-
-        // Group by provider for bulk price lookup. Wanted-only entries (nothing
-        // owned yet) are kept here too, so their wishlist price is still fetched.
-        let mut by_provider: HashMap<String, Vec<models::CollectionCard>> = HashMap::new();
-        for card in collection_cards {
-            by_provider.entry(card.provider.clone()).or_default().push(card);
-        }
-
-        let mut unit_prices: HashMap<String, UnitPrices> = HashMap::new();
-        for (provider, cards) in &by_provider {
-            if let Some(retrieval) = retrieval_systems.get(provider) {
-                let ids: Vec<String> = cards.iter().map(|c| c.uuid.clone()).collect();
-                if let Ok(prices_map) = retrieval.get_bulk_card_prices(ids).await {
-                    for card in cards {
-                        if let Some(unit) = prices_map
-                            .get(&card.uuid)
-                            .and_then(|p| preferred_unit_prices(p, &preferred_currency)) {
-                            unit_prices.insert(card.uuid.clone(), unit);
-                        }
-                    }
-                }
-            }
-        }
-
-        let all_cards: Vec<models::CollectionCard> = by_provider.into_values().flatten().collect();
-        Ok(Json(compute_value_breakdown(&all_cards, &unit_prices, &purchase_totals)))
+        let pricing = load_collection_pricing(&state, &collection_id).await?;
+        Ok(Json(compute_value_breakdown(&pricing.cards, &pricing.unit_prices, &pricing.purchase_totals)))
     }
 
     #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -1718,6 +1770,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
         .api_route("/cards/{id}/purchase_history_entry/{entry_id}", delete(delete_purchase_entry).patch(update_purchase_entry))
         .api_route("/cards/{id}/value_breakdown", get(collection_value_breakdown))
+        .api_route("/cards/{id}/value_history", get(value::value_history))
+        .api_route("/cards/{id}/value_cards", get(value::value_cards))
         .api_route("/price_history/{provider}/{card_uuid}", get(price_history))
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export))
@@ -2036,6 +2090,26 @@ mod value_breakdown_tests {
         let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
 
         assert_eq!(cur(&breakdown, "USD").profit, 6.0); // $10 - half of $8
+    }
+
+    #[test]
+    fn price_sort_uses_each_finish_and_puts_unpriced_last() {
+        use collections_models::{APISortField, APISortOrder};
+        let cards = [card("a", "", 1, 0), card("a", "foil", 1, 0), card("b", "", 1, 0), card("u", "", 1, 0), card("z", "", 1, 0)];
+        let unit_prices = HashMap::from([
+            ("a".to_string(), usd(2.0, 9.0)),
+            ("b".to_string(), usd(5.0, 5.0)),
+            // A zero price isn't a price.
+            ("z".to_string(), usd(0.0, 0.0)),
+        ]);
+        let sorted = |order: APISortOrder| {
+            let mut rows: Vec<&models::CollectionCard> = cards.iter().collect();
+            sort_collection_cards(&mut rows, &HashMap::new(), &Some(APISortField::Price), &Some(order), &unit_prices);
+            rows.iter().map(|c| format!("{}{}", c.uuid, c.finish)).collect::<Vec<_>>()
+        };
+
+        assert_eq!(sorted(APISortOrder::Asc), vec!["a", "b", "afoil", "u", "z"]);
+        assert_eq!(sorted(APISortOrder::Desc), vec!["afoil", "b", "a", "u", "z"]);
     }
 
     #[test]

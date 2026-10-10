@@ -148,3 +148,52 @@ pub struct SystemInfo {
     #[serde(default)]
     pub downloading: std::collections::HashMap<String, serde_json::Value>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueHistoryPoint {
+    pub day: chrono::NaiveDate,
+    pub value: f64,
+    pub priced_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyValueHistory {
+    pub currency: String,
+    pub entry_count: usize,
+    pub points: Vec<ValueHistoryPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionValueHistory {
+    pub enabled: bool,
+    pub total_count: usize,
+    pub currencies: Vec<CurrencyValueHistory>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DatedPrice {
+    pub day: chrono::NaiveDate,
+    pub price: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueCardEntry {
+    pub card_uuid: String,
+    pub provider: String,
+    pub finish: String,
+    pub name: Option<String>,
+    pub quantity: i32,
+    pub currency: String,
+    pub unit_price: f64,
+    pub total_value: f64,
+    pub first_price: Option<DatedPrice>,
+    pub past_price: Option<DatedPrice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionValueCards {
+    pub history_enabled: bool,
+    pub past_day: chrono::NaiveDate,
+    pub unpriced_count: usize,
+    pub entries: Vec<ValueCardEntry>,
+}

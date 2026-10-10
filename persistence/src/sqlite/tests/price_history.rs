@@ -123,6 +123,37 @@ async fn history_is_per_provider() {
 }
 
 #[tokio::test]
+async fn retailer_histories_read_one_retailer_per_card() {
+    let mut p = with_history();
+    p.record_prices(
+        "prov",
+        &[
+            point_on("c1", "tcg", "", 2.0, "USD", "2026-01-02"),
+            point_on("c1", "tcg", "foil", 5.0, "USD", "2026-01-01"),
+            point_on("c1", "cardmarket", "", 1.0, "EUR", "2026-01-01"),
+            point_on("c2", "cardmarket", "", 3.0, "EUR", "2026-01-01"),
+            point_on("c2", "tcg", "", 4.0, "USD", "2026-01-01"),
+            point_on("c3", "tcg", "", 6.0, "USD", "2026-01-01"),
+        ],
+    )
+    .await
+    .unwrap();
+    p.record_prices("other", &[point_on("c1", "tcg", "", 9.0, "USD", "2026-01-01")]).await.unwrap();
+
+    let retailers = std::collections::HashMap::from([
+        ("c1".to_string(), "tcg".to_string()),
+        ("c2".to_string(), "cardmarket".to_string()),
+        ("c4".to_string(), "tcg".to_string()),
+    ]);
+    let histories = p.get_retailer_price_histories("prov", &retailers).await.unwrap();
+
+    let daily = |finish: &str, price: f64, on: &str| crate::DailyPrice { finish: finish.to_string(), price, recorded_on: day(on) };
+    assert_eq!(histories.len(), 2, "c3 wasn't asked for, c4 has no history");
+    assert_eq!(histories["c1"], vec![daily("foil", 5.0, "2026-01-01"), daily("", 2.0, "2026-01-02")]);
+    assert_eq!(histories["c2"], vec![daily("", 3.0, "2026-01-01")]);
+}
+
+#[tokio::test]
 async fn tracked_uuids_cover_all_collections_and_wants() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
     let a = p.add_collection("A".to_string()).await.unwrap();

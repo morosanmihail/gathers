@@ -480,6 +480,24 @@ export async function getCollectionValue(collection: string): Promise<ValueBreak
 	);
 }
 
+export type CollectionValueHistory = components['schemas']['CollectionValueHistory'];
+export type CollectionValueCards = components['schemas']['CollectionValueCards'];
+export type ValueCardEntry = components['schemas']['ValueCardEntry'];
+
+/** What the cards now in `collection` were worth on each recorded day. */
+export async function getCollectionValueHistory(collection: string): Promise<CollectionValueHistory | null> {
+	return cachedStats(`stats:${collection}:value_history`, () =>
+		fetchJSON<CollectionValueHistory>(`/api/collection/cards/${encodeURIComponent(collection)}/value_history`).catch(() => null)
+	);
+}
+
+/** Every owned, priced entry of `collection`, with its price `days` ago. */
+export async function getCollectionValueCards(collection: string, days: number): Promise<CollectionValueCards | null> {
+	return cachedStats(`stats:${collection}:value_cards:${days}`, () =>
+		fetchJSON<CollectionValueCards>(`/api/collection/cards/${encodeURIComponent(collection)}/value_cards?days=${days}`).catch(() => null)
+	);
+}
+
 // MTG search
 export async function searchMtg(filters: SearchFilters, page: number): Promise<MtgCard[]> {
 	return fetchJSON(`/api/mtg/cards/search?limit=${PAGE_SIZE}&skip=${(page - 1) * PAGE_SIZE}`, {
