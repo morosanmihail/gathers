@@ -1,28 +1,33 @@
 use super::*;
 use crate::{PriceHistoryEntry, PricePoint, default_price_history_path};
+use chrono::NaiveDate;
+
+fn day(s: &str) -> NaiveDate {
+    s.parse().unwrap()
+}
 
 fn point(uuid: &str, retailer: &str, finish: &str, price: f64, currency: &str) -> PricePoint {
     point_on(uuid, retailer, finish, price, currency, "2026-01-01")
 }
 
-fn point_on(uuid: &str, retailer: &str, finish: &str, price: f64, currency: &str, day: &str) -> PricePoint {
+fn point_on(uuid: &str, retailer: &str, finish: &str, price: f64, currency: &str, on: &str) -> PricePoint {
     PricePoint {
         card_uuid: uuid.to_string(),
         retailer: retailer.to_string(),
         finish: finish.to_string(),
         price,
         currency: currency.to_string(),
-        recorded_on: day.to_string(),
+        recorded_on: day(on),
     }
 }
 
-fn entry(retailer: &str, finish: &str, price: f64, currency: &str, day: &str) -> PriceHistoryEntry {
+fn entry(retailer: &str, finish: &str, price: f64, currency: &str, on: &str) -> PriceHistoryEntry {
     PriceHistoryEntry {
         retailer: retailer.to_string(),
         finish: finish.to_string(),
         price,
         currency: currency.to_string(),
-        recorded_on: day.to_string(),
+        recorded_on: day(on),
     }
 }
 
@@ -86,8 +91,8 @@ async fn same_day_replaces_new_day_appends() {
     p.record_prices("prov", &[point_on("c1", "tcg", "", 4.0, "USD", "2026-01-02")]).await.unwrap();
 
     let history = p.get_price_history("prov", &"c1".to_string()).await.unwrap();
-    let points: Vec<(&str, f64)> = history.iter().map(|e| (e.recorded_on.as_str(), e.price)).collect();
-    assert_eq!(points, vec![("2026-01-01", 2.0), ("2026-01-02", 4.0)]);
+    let points: Vec<(NaiveDate, f64)> = history.iter().map(|e| (e.recorded_on, e.price)).collect();
+    assert_eq!(points, vec![(day("2026-01-01"), 2.0), (day("2026-01-02"), 4.0)]);
 }
 
 #[tokio::test]
@@ -158,4 +163,20 @@ async fn unopenable_price_db_leaves_it_disabled() {
     // A directory can't be opened as a database.
     assert!(p.enable_price_history(false, Some(dir.path().to_string_lossy().into_owned())).is_err());
     assert!(!p.price_history_enabled());
+}
+
+#[tokio::test]
+async fn database_only_accepts_real_days() {
+    let p = with_history();
+    let conn = p.price_connection.as_ref().unwrap().lock().await;
+    let insert = |on: &str| {
+        conn.execute(
+            "INSERT INTO price_history VALUES ('prov', 'c1', 'tcg', '', 1.0, 'USD', ?1)",
+            params![on],
+        )
+    };
+    assert!(insert("2026-01-01").is_ok());
+    for bad in ["2026-1-1", "2026-02-30", "2026-01-01T00:00:00Z", "yesterday"] {
+        assert!(insert(bad).is_err(), "{bad:?} was accepted");
+    }
 }

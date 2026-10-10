@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use ::models::{CardPrices, RetailerPrices};
+use ::models::{CardPrices, RetailerPrices, parse_price_date};
+use chrono::NaiveDate;
 use tracing::info;
 
 use crate::http::stream_to_file;
@@ -9,7 +10,7 @@ use crate::http::stream_to_file;
 /// listed on.
 pub(super) struct Quote {
     pub price: f64,
-    pub date: Option<String>,
+    pub date: Option<NaiveDate>,
 }
 
 /// SQL selecting, for the card id in `card_expr`, each price column's latest
@@ -34,7 +35,8 @@ pub(super) fn quotes_from_row(row: &rusqlite::Row, first: usize) -> rusqlite::Re
     let quote = |i: usize| -> rusqlite::Result<Quote> {
         Ok(Quote {
             price: row.get::<_, Option<f64>>(first + 2 * i)?.unwrap_or(0.0),
-            date: row.get::<_, Option<String>>(first + 2 * i + 1)?,
+            // Stored as RFC 3339 timestamps; an unreadable one counts as undated.
+            date: row.get::<_, Option<String>>(first + 2 * i + 1)?.as_deref().and_then(parse_price_date),
         })
     };
     Ok([quote(0)?, quote(1)?, quote(2)?])
@@ -50,7 +52,7 @@ pub(super) fn row_to_card_prices(uuid: &str, [raw, psa10, psa9]: [Quote; 3]) -> 
                     normal: Some(quote.price),
                     foil: None,
                     currency: "USD".to_string(),
-                    date: quote.date.map(|d| d.chars().take(10).collect()),
+                    date: quote.date,
                 },
             );
         }

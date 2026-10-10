@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use models::CardPrices;
 use persistence::{PersistenceSystem, PersistenceSystemTrait as _, PricePoint};
 use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait as _};
@@ -23,7 +24,7 @@ const CHUNK_SIZE: usize = 500;
 /// database that hasn't changed since yesterday re-records yesterday rather
 /// than claiming the same prices for today; `fallback_date` is used when the
 /// source has no date.
-pub fn price_points(prices: &CardPrices, fallback_date: &str) -> Vec<PricePoint> {
+pub fn price_points(prices: &CardPrices, fallback_date: NaiveDate) -> Vec<PricePoint> {
     prices
         .paper
         .iter()
@@ -31,7 +32,7 @@ pub fn price_points(prices: &CardPrices, fallback_date: &str) -> Vec<PricePoint>
             [("", retail.normal), ("foil", retail.foil)]
                 .into_iter()
                 .filter_map(move |(finish, price)| {
-                    let recorded_on = retail.date.clone().unwrap_or_else(|| fallback_date.to_string());
+                    let recorded_on = retail.date.unwrap_or(fallback_date);
                     Some(PricePoint {
                         card_uuid: prices.uuid.clone(),
                         retailer: retailer.clone(),
@@ -61,7 +62,7 @@ async fn recording_storage(
 /// Records the current prices of `uuids` from `system`.
 async fn record(system: &RetrievalSystem, storage: &mut PersistenceSystem, uuids: Vec<String>) {
     let provider = system.name();
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let today = chrono::Utc::now().date_naive();
     let mut written = 0;
     for chunk in uuids.chunks(CHUNK_SIZE) {
         let prices = match system.get_bulk_card_prices(chunk.to_vec()).await {
@@ -71,7 +72,7 @@ async fn record(system: &RetrievalSystem, storage: &mut PersistenceSystem, uuids
                 return;
             }
         };
-        let points: Vec<PricePoint> = prices.values().flat_map(|p| price_points(p, &today)).collect();
+        let points: Vec<PricePoint> = prices.values().flat_map(|p| price_points(p, today)).collect();
         if points.is_empty() {
             continue;
         }
@@ -182,22 +183,22 @@ mod tests {
                 RetailerPrices { normal: Some(1.0), foil: Some(2.0), currency: "USD".to_string(), date: None },
             ), (
                 "raw".to_string(),
-                RetailerPrices { normal: Some(3.0), foil: None, currency: "EUR".to_string(), date: Some("2026-03-01".to_string()) },
+                RetailerPrices { normal: Some(3.0), foil: None, currency: "EUR".to_string(), date: "2026-03-01".parse().ok() },
             )]),
         };
-        let mut points = price_points(&prices, "2026-03-04");
+        let mut points = price_points(&prices, "2026-03-04".parse().unwrap());
         points.sort_by(|a, b| (&a.retailer, &a.finish).cmp(&(&b.retailer, &b.finish)));
-        let summary: Vec<(&str, &str, f64, &str, &str)> = points
+        let summary: Vec<(&str, &str, f64, &str, String)> = points
             .iter()
-            .map(|p| (p.retailer.as_str(), p.finish.as_str(), p.price, p.currency.as_str(), p.recorded_on.as_str()))
+            .map(|p| (p.retailer.as_str(), p.finish.as_str(), p.price, p.currency.as_str(), p.recorded_on.to_string()))
             .collect();
         // Dated by the source when it says, otherwise by the fallback.
         assert_eq!(
             summary,
             vec![
-                ("raw", "", 3.0, "EUR", "2026-03-01"),
-                ("tcg", "", 1.0, "USD", "2026-03-04"),
-                ("tcg", "foil", 2.0, "USD", "2026-03-04"),
+                ("raw", "", 3.0, "EUR", "2026-03-01".to_string()),
+                ("tcg", "", 1.0, "USD", "2026-03-04".to_string()),
+                ("tcg", "foil", 2.0, "USD", "2026-03-04".to_string()),
             ]
         );
         assert!(points.iter().all(|p| p.card_uuid == "c1"));

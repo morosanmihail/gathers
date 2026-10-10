@@ -21,6 +21,8 @@
 
 use std::time::Duration;
 
+use chrono::NaiveDate;
+
 use e2e::models::PriceHistoryEntry;
 use e2e::GathersClient;
 use e2e::harness::{Harness, ServerSetup};
@@ -32,6 +34,10 @@ const CARD_B: &str = "0001e0d0-2dcd-5640-aadc-a84765cf5fc9";
 const MTG_PROVIDER: &str = "MagicSQLite";
 /// The day the test price database says its prices are from.
 const PRICES_DATE: &str = "2026-03-02";
+
+fn prices_date() -> NaiveDate {
+    PRICES_DATE.parse().unwrap()
+}
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
@@ -94,14 +100,14 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
 
     client.add_collection(col).await?;
     let as_of = as_of(&market);
-    eq(as_of.as_str(), PRICES_DATE, "prices are as of the price database's date")?;
+    eq(as_of, prices_date(), "prices are as of the price database's date")?;
 
     // ── 2. Adding a card records its current prices ─────────────────────────
     step("2. Add a card — its prices are recorded");
 
     let added = client.add_cards_with_provider(col, CARD_A, "", 1, None, Some(MTG_PROVIDER)).await?;
     eq(added[0].provider.as_str(), MTG_PROVIDER, "card stored under the MTG provider")?;
-    let recorded = wait_for_day(client, CARD_A, &as_of).await?;
+    let recorded = wait_for_day(client, CARD_A, as_of).await?;
     // Two retailers × two finishes; the buylist row is not a market price.
     eq(recorded.len(), 4, "one entry per retailer and finish")?;
     ok(&format!("{} price(s) recorded for {as_of}", recorded.len()));
@@ -124,9 +130,8 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
             Some(entry.currency.as_str()),
             &format!("{} currency", entry.retailer),
         )?;
-        if let Some(date) = retailer.get("date").and_then(|v| v.as_str()) {
-            eq(entry.recorded_on.as_str(), date, &format!("{} as-of date", entry.retailer))?;
-        }
+        let date = retailer.get("date").and_then(|v| v.as_str()).and_then(|d| d.parse::<NaiveDate>().ok());
+        eq(date, Some(entry.recorded_on), &format!("{} as-of date", entry.retailer))?;
     }
     ok("every entry matches a retailer's current price, currency and date");
 
@@ -136,7 +141,7 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     client.add_cards_with_provider(col, CARD_A, "foil", 1, None, Some(MTG_PROVIDER)).await?;
     // Recording is in the background; give it time to (not) add rows.
     tokio::time::sleep(Duration::from_secs(2)).await;
-    let again = entries_on(client, CARD_A, &as_of).await?;
+    let again = entries_on(client, CARD_A, as_of).await?;
     eq(again.len(), recorded.len(), "still one entry per retailer and finish for that day")?;
     ok("re-recording the same day replaces, not appends");
 
@@ -144,7 +149,7 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     step("5. Want a card — its prices are recorded");
 
     client.adjust_want_with_provider(col, CARD_B, 1, Some(MTG_PROVIDER)).await?;
-    let wanted = wait_for_day(client, CARD_B, PRICES_DATE).await?;
+    let wanted = wait_for_day(client, CARD_B, prices_date()).await?;
     let wanted: Vec<(&str, &str, f64, &str)> =
         wanted.iter().map(|e| (e.retailer.as_str(), e.finish.as_str(), e.price, e.currency.as_str())).collect();
     eq(wanted, vec![("tcgplayer", "", 4.5, "USD")], "wanted card's prices recorded")?;
@@ -155,7 +160,7 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
 
     client.remove_cards(col, CARD_A, "", 1).await?;
     client.remove_cards(col, CARD_A, "foil", 1).await?;
-    let kept = entries_on(client, CARD_A, &as_of).await?;
+    let kept = entries_on(client, CARD_A, as_of).await?;
     eq(kept.len(), recorded.len(), "history kept after removal")?;
     ok("history outlives the collection entry");
 
@@ -174,15 +179,15 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
 
 /// The day a card's market prices are as of: the newest retailer date, or
 /// today when the source has none.
-fn as_of(market: &std::collections::HashMap<String, serde_json::Value>) -> String {
+fn as_of(market: &std::collections::HashMap<String, serde_json::Value>) -> NaiveDate {
     market
         .values()
-        .filter_map(|r| r.get("date").and_then(|d| d.as_str()).map(str::to_string))
+        .filter_map(|r| r.get("date").and_then(|d| d.as_str()).and_then(|d| d.parse().ok()))
         .max()
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| chrono::Utc::now().date_naive())
 }
 
-async fn entries_on(client: &GathersClient, card: &str, day: &str) -> eyre::Result<Vec<PriceHistoryEntry>> {
+async fn entries_on(client: &GathersClient, card: &str, day: NaiveDate) -> eyre::Result<Vec<PriceHistoryEntry>> {
     Ok(client
         .price_history(MTG_PROVIDER, card)
         .await?
@@ -194,7 +199,7 @@ async fn entries_on(client: &GathersClient, card: &str, day: &str) -> eyre::Resu
 
 /// Recording happens in the background after the request returns; polls
 /// for up to ~15s until entries for `day` show up.
-async fn wait_for_day(client: &GathersClient, card: &str, day: &str) -> eyre::Result<Vec<PriceHistoryEntry>> {
+async fn wait_for_day(client: &GathersClient, card: &str, day: NaiveDate) -> eyre::Result<Vec<PriceHistoryEntry>> {
     for _ in 0..30 {
         let entries = entries_on(client, card, day).await?;
         if !entries.is_empty() {

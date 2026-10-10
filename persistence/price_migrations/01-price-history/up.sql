@@ -11,7 +11,9 @@ CREATE TABLE price_history (
     finish TEXT NOT NULL,
     price REAL NOT NULL,
     currency TEXT NOT NULL,
-    -- UTC date, YYYY-MM-DD.
-    recorded_on TEXT NOT NULL,
+    -- UTC day, YYYY-MM-DD (a `chrono::NaiveDate`). SQLite's date() only
+    -- returns its input unchanged for a valid day in exactly that form (it
+    -- gives NULL for other text, hence IS rather than =).
+    recorded_on TEXT NOT NULL CHECK (date(recorded_on) IS recorded_on),
     PRIMARY KEY (provider, card_uuid, retailer, finish, recorded_on)
 ) WITHOUT ROWID;

@@ -128,7 +128,7 @@ pub struct PriceHistoryEntry {
     pub finish: String,
     pub price: f64,
     pub currency: String,
-    pub recorded_on: String,
+    pub recorded_on: chrono::NaiveDate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -29,10 +29,8 @@ fn snapshot(cards: usize, day: usize) -> Vec<PricePoint> {
         .collect()
 }
 
-fn date(n: usize) -> String {
-    (chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + chrono::Days::new(n as u64))
-        .format("%Y-%m-%d")
-        .to_string()
+fn date(n: usize) -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + chrono::Days::new(n as u64)
 }
 
 fn with_history() -> SQLitePersistenceSystem {

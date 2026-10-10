@@ -332,8 +332,8 @@ pub struct PricePoint {
     pub price: f64,
     /// ISO 4217 code `price` is in.
     pub currency: String,
-    /// UTC date (`YYYY-MM-DD`) the price is as of.
-    pub recorded_on: String,
+    /// UTC day the price is as of.
+    pub recorded_on: chrono::NaiveDate,
 }
 
 /// One retailer's price for one finish of a card on a given day.
@@ -346,8 +346,8 @@ pub struct PriceHistoryEntry {
     pub price: f64,
     /// ISO 4217 code `price` is in.
     pub currency: String,
-    /// UTC date, `YYYY-MM-DD`.
-    pub recorded_on: String,
+    /// UTC day the price is as of.
+    pub recorded_on: chrono::NaiveDate,
 }
 
 /// A single shareable, read-only link granting public access to a collection.

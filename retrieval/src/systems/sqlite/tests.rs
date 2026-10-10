@@ -922,8 +922,8 @@ async fn test_get_card_prices_dated_by_newest_row() {
     let system = system_with_prices(Some(prices_path));
 
     let prices = system.get_card_prices("uuid-alpha").await.unwrap().unwrap();
-    assert_eq!(prices.paper["cardkingdom"].date.as_deref(), Some("2026-05-23"));
-    assert_eq!(prices.paper["tcgplayer"].date.as_deref(), Some("2026-05-22"));
+    assert_eq!(prices.paper["cardkingdom"].date, "2026-05-23".parse().ok());
+    assert_eq!(prices.paper["tcgplayer"].date, "2026-05-22".parse().ok());
 }
 
 #[tokio::test]

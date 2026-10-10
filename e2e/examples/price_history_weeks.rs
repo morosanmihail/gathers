@@ -32,6 +32,8 @@
 
 use std::time::Duration;
 
+use chrono::NaiveDate;
+
 use e2e::GathersClient;
 use e2e::harness::{Harness, ServerSetup, wait_until};
 
@@ -64,7 +66,7 @@ const CARD_D: &str = "00010d56-fe38-5e35-8aed-518019aa36a5";
 const CARD_P: &str = "Scarlet-&-Violet-Miraidon-ex-081";
 
 /// `(date, retailer, finish, price, currency)` — one price history entry.
-type Entry = (String, String, String, f64, String);
+type Entry = (NaiveDate, String, String, f64, String);
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
@@ -143,15 +145,15 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
             // previous week's prices under their own date) finish.
             tokio::time::sleep(Duration::from_millis(500)).await;
         } else {
-            wait_for_day(&client, MTG, CARD_A, &mtg_day).await?;
+            wait_for_day(&client, MTG, CARD_A, mtg_day).await?;
         }
-        wait_for_day(&client, POKEMON, CARD_P, &date(week)).await?;
+        wait_for_day(&client, POKEMON, CARD_P, date(week)).await?;
 
         // The server now serves this week's prices…
         let market = client.mtg_prices(CARD_A).await?;
         eq(
-            market.get("cardkingdom").and_then(|r| r.get("date")).and_then(|d| d.as_str()),
-            Some(mtg_day.as_str()),
+            market.get("cardkingdom").and_then(|r| r.get("date")).and_then(|d| d.as_str()).and_then(|d| d.parse().ok()),
+            Some(mtg_day),
             "MTG prices served are as of the latest published week",
         )?;
         // …and A's history for that day is exactly that week's prices.
@@ -167,7 +169,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
 
         if week == ADD_D_WEEK {
             client.add_cards_with_provider(col, CARD_D, "", 1, None, Some(MTG)).await?;
-            let d = wait_for_day(&client, MTG, CARD_D, &date(week)).await?;
+            let d = wait_for_day(&client, MTG, CARD_D, date(week)).await?;
             eq(d, expected_mtg(CARD_D, week), "card D's prices recorded when added")?;
             ok("card D added: its current prices recorded straight away");
         }
@@ -196,10 +198,8 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
 // ── Simulated market ────────────────────────────────────────────────────────
 
 /// Monday of simulated week `week` (1-based), seven days apart.
-fn date(week: u32) -> String {
-    (chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap() + chrono::Days::new(7 * (week as u64 - 1)))
-        .format("%Y-%m-%d")
-        .to_string()
+fn date(week: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 1, 5).unwrap() + chrono::Days::new(7 * (week as u64 - 1))
 }
 
 /// The week whose MTG price file the mirror serves during `week`.
@@ -282,7 +282,7 @@ async fn check_histories(client: &GathersClient, expected: &[(&str, &str, Vec<En
     for (provider, card, entries) in expected {
         let got = history(client, provider, card).await?;
         eq(&got, entries, &format!("{provider} {card} full history"))?;
-        let days = entries.iter().map(|e| e.0.as_str()).collect::<std::collections::BTreeSet<_>>();
+        let days = entries.iter().map(|e| e.0).collect::<std::collections::BTreeSet<_>>();
         ok(&format!("{card}: {} entries over {} day(s)", entries.len(), days.len()));
     }
     Ok(())
@@ -302,7 +302,7 @@ async fn history(client: &GathersClient, provider: &str, card: &str) -> eyre::Re
 
 /// Waits for `card` to have entries dated `day` (recording happens in the
 /// background), returning them.
-async fn wait_for_day(client: &GathersClient, provider: &str, card: &str, day: &str) -> eyre::Result<Vec<Entry>> {
+async fn wait_for_day(client: &GathersClient, provider: &str, card: &str, day: NaiveDate) -> eyre::Result<Vec<Entry>> {
     wait_until(&format!("{card} history for {day}"), || async {
         Ok(history(client, provider, card).await?.iter().any(|e| e.0 == day))
     })

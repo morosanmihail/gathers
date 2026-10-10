@@ -2291,7 +2291,10 @@ export interface components {
             finish: string;
             /** Format: double */
             price: number;
-            /** @description UTC date, `YYYY-MM-DD`. */
+            /**
+             * Format: date
+             * @description UTC day the price is as of.
+             */
             recorded_on: string;
             retailer: string;
         };
@@ -2354,8 +2357,9 @@ export interface components {
              */
             currency: string;
             /**
-             * @description UTC date (`YYYY-MM-DD`) these prices are as of, when the source
-             *     says — the newest of `normal`'s and `foil`'s.
+             * Format: date
+             * @description UTC day these prices are as of, when the source says — the newest of
+             *     `normal`'s and `foil`'s.
              */
             date?: string | null;
             /** Format: double */

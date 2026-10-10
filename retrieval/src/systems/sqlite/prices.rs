@@ -36,9 +36,8 @@ pub(super) fn load_prices_file(path: &str) -> eyre::Result<HashMap<String, CardP
                     .unwrap_or_else(|| ::models::DEFAULT_CURRENCY.to_string()),
                 date: None,
             });
-        // Dates are ISO 8601, so the newest is the lexicographically largest.
-        if let Some(date) = date.map(|d| d.chars().take(10).collect::<String>())
-            && rp.date.as_ref().is_none_or(|current| *current < date)
+        if let Some(date) = date.as_deref().and_then(::models::parse_price_date)
+            && rp.date.is_none_or(|current| current < date)
         {
             rp.date = Some(date);
         }
