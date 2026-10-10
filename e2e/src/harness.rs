@@ -41,7 +41,7 @@ const INHERITED_SERVER_VARS: &[&str] = &[
 const MIRROR_STEMS: &[&str] = &[
     "AllPrintings.sqlite",
     "AllPricesToday.sqlite",
-    "pokemon_prices.sqlite",
+    "pokemon_prices_tcgcsv.sqlite",
     "riftbound.sqlite",
     "pokemon.sqlite",
 ];

@@ -806,7 +806,7 @@ async fn main() -> eyre::Result<()> {
             mtg_prices_path: path_or_default("MTG_PRICES_PATH", "AllPricesToday.sqlite"),
             riftbound_db_path: path_or_default("RIFTBOUND_DB_PATH", "riftbound.db"),
             pokemon_db_path: path_or_default("POKEMON_DB_PATH", "pokemon.db"),
-            pokemon_prices_path: path_or_default("POKEMON_PRICES_PATH", "pokemon_prices.sqlite"),
+            pokemon_prices_path: path_or_default("POKEMON_PRICES_PATH", retrieval::POKEMON_PRICES_FILE),
             storage_db_path: path_or_default("STORAGE_DB_PATH", "storage.db"),
             price_history_db_path: None,
             plugins: Vec::new(),
@@ -893,7 +893,7 @@ async fn main() -> eyre::Result<()> {
                 std::path::Path::new(p)
                     .parent()
                     .unwrap_or(std::path::Path::new("."))
-                    .join("pokemon_prices.sqlite")
+                    .join(retrieval::POKEMON_PRICES_FILE)
                     .to_string_lossy()
                     .into_owned()
             })
