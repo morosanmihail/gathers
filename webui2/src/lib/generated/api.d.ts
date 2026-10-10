@@ -1523,6 +1523,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collection/cards/{id}/value_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    /**
+                     * @description Only days on or after this one (UTC, `YYYY-MM-DD`). Omitted means
+                     *     all recorded history.
+                     */
+                    since?: string | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description What the cards currently owned in a collection were worth on each day
+                 *     price history has, at the prices they're valued at today (see
+                 *     `CollectionValueBreakdown`): each card's history is read from the
+                 *     retailer it's valued at now, so the last point lines up with the
+                 *     collection's current total. Copies since sold or moved away are not
+                 *     included — this is the value over time of what's held now.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionValueHistory"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/cards/{id}/value_cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    /** @description How many days back `past_price` looks. Default 30. */
+                    days?: number | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description Every owned, priced entry of a collection with what it's worth, what it
+                 *     cost and how its price moved — most valuable first.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionValueCards"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/collection/price_history/{provider}/{card_uuid}": {
         parameters: {
             query?: never;
@@ -2038,7 +2127,7 @@ export interface components {
             setCode: string;
             text: string;
         };
-        APISortField: ("Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist") | "ReleaseDate";
+        APISortField: ("Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist") | "ReleaseDate" | "Price" | "Quantity" | "WantQuantity";
         /** @enum {string} */
         APISortOrder: "Asc" | "Desc";
         /**
@@ -2218,6 +2307,53 @@ export interface components {
             /** Format: uint */
             total_count: number;
         };
+        /**
+         * @description Every owned, priced entry of a collection with what it's worth, what it
+         *     cost and how its price moved — most valuable first.
+         */
+        CollectionValueCards: {
+            entries: components["schemas"]["ValueCardEntry"][];
+            /**
+             * @description Whether price history is kept; without it `first_price` and
+             *     `past_price` are always missing.
+             */
+            history_enabled: boolean;
+            /**
+             * Format: date
+             * @description The day `past_price` is as of (UTC).
+             */
+            past_day: string;
+            /**
+             * Format: uint
+             * @description Owned entries with no current price, so left out of `entries`.
+             */
+            unpriced_count: number;
+        };
+        /**
+         * @description What the cards currently owned in a collection were worth on each day
+         *     price history has, at the prices they're valued at today (see
+         *     `CollectionValueBreakdown`): each card's history is read from the
+         *     retailer it's valued at now, so the last point lines up with the
+         *     collection's current total. Copies since sold or moved away are not
+         *     included — this is the value over time of what's held now.
+         */
+        CollectionValueHistory: {
+            /**
+             * @description One series per currency, largest latest value first. Every entry
+             *     counts toward exactly one currency, that of its retailer.
+             */
+            currencies: components["schemas"]["CurrencyValueHistory"][];
+            /**
+             * @description Whether the server keeps price history at all. When it doesn't,
+             *     `currencies` is always empty.
+             */
+            enabled: boolean;
+            /**
+             * Format: uint
+             * @description Owned entries (one per card and finish) in the collection, priced or not.
+             */
+            total_count: number;
+        };
         CollectionsSearchQuery: {
             /**
              * Format: uint
@@ -2251,6 +2387,26 @@ export interface components {
              */
             wanted_value: number;
         };
+        CurrencyValueHistory: {
+            /** @description ISO 4217 code. */
+            currency: string;
+            /**
+             * Format: uint
+             * @description Owned entries valued in this currency today.
+             */
+            entry_count: number;
+            /** @description Oldest first, one per day any of those entries has a recorded price. */
+            points: components["schemas"]["ValueHistoryPoint"][];
+        };
+        DatedPrice: {
+            /**
+             * Format: date
+             * @description UTC day it was recorded.
+             */
+            day: string;
+            /** Format: double */
+            price: number;
+        };
         DownloadProgressInfo: {
             /** Format: uint64 */
             downloaded: number;
@@ -2281,6 +2437,12 @@ export interface components {
              * @default 0
              */
             skip: number;
+        };
+        MoneyAmount: {
+            /** @description ISO 4217 code. */
+            currency: string;
+            /** Format: double */
+            value: number;
         };
         /**
          * @description A card-shaped item returned by a plugin. Fields beyond `id`/`name` are
@@ -2609,6 +2771,86 @@ export interface components {
             price_per_unit?: number | null;
             /** Format: int32 */
             quantity: number;
+        };
+        ValueCardEntry: {
+            card_uuid: string;
+            /** @description What those `cost_quantity` copies cost, per currency they were bought in. */
+            cost: components["schemas"]["MoneyAmount"][];
+            /**
+             * Format: int32
+             * @description Owned copies that have a recorded purchase price.
+             */
+            cost_quantity: number;
+            /** @description ISO 4217 code of every price on this entry. */
+            currency: string;
+            finish: string;
+            /** @description Earliest recorded unit price. */
+            first_price?: components["schemas"]["DatedPrice"] | null;
+            /** @description Direct image URL (Riftbound, Pokémon, plugins). */
+            image?: string | null;
+            /** @description `None` when the card's details couldn't be looked up. */
+            name?: string | null;
+            /**
+             * @description Unit price as of `CollectionValueCards::past_day` (the latest
+             *     recording on or before it). Missing when history starts later.
+             */
+            past_price?: components["schemas"]["DatedPrice"] | null;
+            /**
+             * Format: double
+             * @description Current value of the `cost_quantity` copies minus `cost` — only when
+             *     everything was bought in `currency`; otherwise convert `cost` and
+             *     subtract it from `unit_price` × `cost_quantity`.
+             */
+            profit?: number | null;
+            provider: string;
+            /** Format: int32 */
+            quantity: number;
+            /** @description MTG cards' image comes from Scryfall. */
+            scryfall_id?: string | null;
+            set_code?: string | null;
+            /**
+             * Format: double
+             * @description `unit_price` × `quantity`.
+             */
+            total_value: number;
+            /** Format: double */
+            unit_price: number;
+        };
+        ValueCardsQuery: {
+            /**
+             * Format: uint32
+             * @description How many days back `past_price` looks. Default 30.
+             * @default null
+             */
+            days: number | null;
+        };
+        ValueHistoryPoint: {
+            /**
+             * Format: date
+             * @description UTC day.
+             */
+            day: string;
+            /**
+             * Format: uint
+             * @description Entries that contributed to `value`, out of `entry_count`.
+             */
+            priced_count: number;
+            /**
+             * Format: double
+             * @description Sum of quantity × unit price over the entries priced that day. A
+             *     price carries forward to days with no new recording; an entry whose
+             *     card has no price recorded yet contributes nothing.
+             */
+            value: number;
+        };
+        ValueHistoryQuery: {
+            /**
+             * Format: date
+             * @description Only days on or after this one (UTC, `YYYY-MM-DD`). Omitted means
+             *     all recorded history.
+             * @default null
+             */
+            since: string | null;
         };
     };
     responses: never;

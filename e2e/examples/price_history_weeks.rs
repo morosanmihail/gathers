@@ -207,11 +207,15 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
     let expected = expected_histories();
     check_histories(&client, &expected).await?;
 
+    step("Validate the collection's value over time");
+    check_value_history(&client, col).await?;
+
     // ── Restart ─────────────────────────────────────────────────────────────
     step("Restart server — history persists");
     harness.stop("server");
     let client = harness.start_server(&setup).await?;
     check_histories(&client, &expected).await?;
+    check_value_history(&client, col).await?;
 
     println!("\n=== All multi-week price history checks passed ===");
     Ok(())
@@ -326,6 +330,65 @@ async fn check_histories(client: &GathersClient, expected: &[(&str, &str, Vec<En
         let days = entries.iter().map(|e| e.0).collect::<std::collections::BTreeSet<_>>();
         ok(&format!("{card}: {} entries over {} day(s)", entries.len(), days.len()));
     }
+    Ok(())
+}
+
+/// The collection now holds A (normal + foil), D, P and R — B was removed,
+/// so it never counts. With the server's default preferred currency (EUR),
+/// A is valued at cardmarket (EUR); D, P and R only have USD retailers.
+/// Prices carry forward over weeks a listing is missing.
+async fn check_value_history(client: &GathersClient, col: &str) -> eyre::Result<()> {
+    let value = client.value_history(col).await?;
+    ensure(value.enabled, "value history enabled")?;
+    eq(value.total_count, 5, "owned entries")?;
+    let series = |currency: &str| -> eyre::Result<Vec<(NaiveDate, f64, usize)>> {
+        let c = value
+            .currencies
+            .iter()
+            .find(|c| c.currency == currency)
+            .ok_or_else(|| eyre::eyre!("no {currency} series"))?;
+        Ok(c.points.iter().map(|p| (p.day, p.value, p.priced_count)).collect())
+    };
+
+    let a_foil = |week: u32| mtg_price(CARD_A, 3, if week == NO_CARDMARKET_FOIL_WEEK { week - 1 } else { week });
+    let eur: Vec<_> = (1..=WEEKS)
+        .filter(|w| *w != STALE_MTG_WEEK)
+        .map(|w| (date(w), mtg_price(CARD_A, 2, w) + a_foil(w), 2))
+        .collect();
+    eq(series("EUR")?, eur, "EUR value series (card A at cardmarket)")?;
+
+    let usd: Vec<_> = (1..=WEEKS)
+        .map(|w| {
+            let r = riftbound_normal(w).or(riftbound_normal(w - 1)).unwrap();
+            let d = (w >= ADD_D_WEEK).then(|| mtg_price(CARD_D, 0, mtg_data_week(w)));
+            (date(w), pokemon_normal(w) + r + d.unwrap_or(0.0), 2 + d.iter().count())
+        })
+        .collect();
+    eq(series("USD")?, usd, "USD value series (D, P, R)")?;
+    ok("value series match: removed card excluded, gaps carried forward, D counted from when added");
+
+    // The day before the first week: before any history.
+    let days_back = (chrono::Utc::now().date_naive() - date(1)).num_days() as u32 + 1;
+    let cards = client.value_cards(col, days_back).await?;
+    eq(cards.entries.len(), 5, "priced entries")?;
+    eq(cards.unpriced_count, 0, "unpriced entries")?;
+    for currency in ["EUR", "USD"] {
+        let total: f64 = cards.entries.iter().filter(|e| e.currency == currency).map(|e| e.total_value).sum();
+        eq(Some(total), series(currency)?.last().map(|p| p.1), &format!("{currency} card values add up to the latest point"))?;
+    }
+    let a_foil_entry = cards
+        .entries
+        .iter()
+        .find(|e| e.card_uuid == CARD_A && e.finish == "foil")
+        .ok_or_else(|| eyre::eyre!("card A foil missing"))?;
+    eq(
+        a_foil_entry.first_price.as_ref().map(|p| (p.day, p.price)),
+        Some((date(1), a_foil(1))),
+        "card A foil's first recorded price",
+    )?;
+    ensure(a_foil_entry.past_price.is_none(), "no price recorded that far back")?;
+    ensure(cards.entries.iter().all(|e| e.name.is_some()), "every entry has its card's name")?;
+    ok("per-card values add up and carry their price history");
     Ok(())
 }
 

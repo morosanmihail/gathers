@@ -1240,7 +1240,9 @@ fn required_feature(path: &str) -> Option<&'static str> {
         .any(|prefix| path.starts_with(prefix))
         || path.contains("/purchase_history")
         || path.contains("/price_history")
-        || path.ends_with("/value_breakdown");
+        || path.ends_with("/value_breakdown")
+        || path.ends_with("/value_history")
+        || path.ends_with("/value_cards");
     pricing.then_some("pricing")
 }
 

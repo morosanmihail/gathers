@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
+use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, DailyPrice, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -402,5 +402,17 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
         };
         let conn = price_connection.lock().await;
         price_history::get(&conn, provider, card_uuid)
+    }
+
+    async fn get_retailer_price_histories(
+        &self,
+        provider: &str,
+        retailers: &std::collections::HashMap<CardID, String>,
+    ) -> eyre::Result<std::collections::HashMap<CardID, Vec<DailyPrice>>> {
+        let Some(price_connection) = &self.price_connection else {
+            return Ok(Default::default());
+        };
+        let conn = price_connection.lock().await;
+        price_history::get_from_retailers(&conn, provider, retailers)
     }
 }

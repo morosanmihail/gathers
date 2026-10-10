@@ -207,29 +207,46 @@
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
-	function handleSortClick(field: string) {
-		if (sortBy === field) {
-			sortOrder = sortOrder === 'Asc' ? 'Desc' : 'Asc';
-		} else {
-			sortBy = field;
-			sortOrder = 'Asc';
-		}
+	function setSort(field: string, order: 'Asc' | 'Desc') {
+		sortBy = field;
+		sortOrder = order;
 		currentPage = 1;
 		load(1);
 	}
 
-	const listHeaders = [
+	// Most expensive / most owned first is the useful start for those.
+	const defaultOrder = (field: string): 'Asc' | 'Desc' =>
+		['Price', 'Quantity', 'WantQuantity'].includes(field) ? 'Desc' : 'Asc';
+
+	function handleSortClick(field: string) {
+		if (sortBy === field) setSort(field, sortOrder === 'Asc' ? 'Desc' : 'Asc');
+		else setSort(field, defaultOrder(field));
+	}
+
+	// Grid view's sort control; list view sorts from its column headers.
+	const sortOptions = $derived([
+		{ field: '',             label: 'Date added' },
+		{ field: 'Name',         label: 'Name' },
+		{ field: 'SetCode',      label: 'Set' },
+		{ field: 'Rarity',       label: 'Rarity' },
+		...(app.pricingEnabled ? [{ field: 'Price', label: 'Price' }] : []),
+		{ field: 'Quantity',     label: 'Quantity' },
+		{ field: 'WantQuantity', label: 'Wanted' },
+		{ field: 'Artist',       label: 'Artist' },
+	]);
+
+	const listHeaders = $derived([
 		{ field: '',           label: '' },
 		{ field: 'Name',       label: 'Name' },
 		{ field: 'SetCode',    label: 'Set' },
 		{ field: 'Rarity',     label: 'Rarity' },
 		{ field: 'Artist',     label: 'Artist' },
-		{ field: '',           label: 'Price' },
+		{ field: app.pricingEnabled ? 'Price' : '', label: 'Price' },
 		// One spanning column now — a card can own any number of finishes,
 		// each rendered as its own row by FinishList inside this cell.
 		{ field: 'Quantity',   label: 'Qty (by finish)' },
 		{ field: 'WantQuantity', label: 'Wanted' },
-	];
+	]);
 </script>
 
 <svelte:head>
@@ -263,17 +280,43 @@
 		{#if !loading}
 			<span class="page-subtitle">{total.toLocaleString()} entr{total !== 1 ? 'ies' : 'y'}</span>
 		{/if}
+		{#if app.viewMode === 'grid'}
+			<div class="grid-sort">
+				<label class="page-subtitle" for="grid-sort-field">Sort by</label>
+				<select
+					id="grid-sort-field"
+					class="input"
+					value={sortBy}
+					onchange={(e) => { const f = (e.target as HTMLSelectElement).value; setSort(f, defaultOrder(f)); }}
+				>
+					{#each sortOptions as o (o.field)}
+						<option value={o.field}>{o.label}</option>
+					{/each}
+				</select>
+				<button
+					class="btn btn-sm"
+					onclick={() => setSort(sortBy, sortOrder === 'Asc' ? 'Desc' : 'Asc')}
+					title={sortOrder === 'Asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+					aria-label="Sort order: {sortOrder === 'Asc' ? 'ascending' : 'descending'}"
+				>{sortOrder === 'Asc' ? '↑' : '↓'}</button>
+			</div>
+		{/if}
 		{#if valueBreakdown}
 			<span
 				class="page-subtitle"
 				role="status"
 				aria-label="Collection value"
-				style="color: var(--accent-text); margin-left: auto; position: relative; cursor: default;"
+				style="margin-left: auto; position: relative;"
 				onmouseenter={() => valueHover = true}
 				onmouseleave={() => valueHover = false}
 			>
-				≈ {formatMoneyList(currencyTotals) || formatMoney(0)}
-				<ConvertedTotal items={currencyTotals} />
+				<a class="value-link" href="/collection/{encodeURIComponent(collectionId)}/value" title="Value details and history">
+					≈ {formatMoneyList(currencyTotals) || formatMoney(0)}
+					<ConvertedTotal items={currencyTotals} />
+					<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+						<path d="M1.5 11l3.5-4 3 2.5L12.5 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</a>
 				{#if valueHover}
 					<div class="value-breakdown-tooltip">
 						{#each valueBreakdown.currencies as cur (cur.currency)}
@@ -312,6 +355,9 @@
 								<span class="vb-val">{formatMoneyList(wantedTotals)}</span>
 							</div>
 						{/if}
+						<div class="vb-row" style="margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px;">
+							<span class="vb-label">Click for history & top cards</span>
+						</div>
 					</div>
 				{/if}
 			</span>
@@ -380,3 +426,30 @@
 		onWantChange={(delta) => detailCard && handleWantChange(detailCard, delta)}
 	/>
 {/if}
+
+<style>
+	.grid-sort {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		align-self: center;
+	}
+
+	.grid-sort label { white-space: nowrap; }
+
+	.grid-sort select {
+		height: 30px;
+		padding: 2px 28px 2px 10px;
+		font-size: 0.82rem;
+	}
+
+	.value-link {
+		color: var(--accent-text);
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.value-link:hover { text-decoration: underline; }
+</style>

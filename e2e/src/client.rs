@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 
 use crate::models::{
     AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, CollectionRemoveResponse, PublicCollectionPage,
+    CollectionAddResponse, CollectionCard, CollectionValueCards, CollectionValueHistory, CollectionRemoveResponse, PublicCollectionPage,
     PriceHistoryResponse, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo,
 };
 
@@ -277,6 +277,16 @@ impl GathersClient {
             urlenc(card_id),
         ))
         .await
+    }
+
+    /// What the cards now in `collection_id` were worth on each recorded day.
+    pub async fn value_history(&self, collection_id: &str) -> eyre::Result<CollectionValueHistory> {
+        self.get(&format!("/api/collection/cards/{}/value_history", urlenc(collection_id))).await
+    }
+
+    /// Every owned, priced entry's value, with its price `days` ago.
+    pub async fn value_cards(&self, collection_id: &str, days: u32) -> eyre::Result<CollectionValueCards> {
+        self.get(&format!("/api/collection/cards/{}/value_cards?days={days}", urlenc(collection_id))).await
     }
 
     // ── low-level helpers ─────────────────────────────────────────────────────

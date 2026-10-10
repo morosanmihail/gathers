@@ -17,6 +17,17 @@ pub enum APISortField {
     Artist,
     /// Pokemon-only: card release date.
     ReleaseDate,
+    /// Collections only: each entry's current unit price for its finish, at
+    /// the retailer it's valued at (see `CollectionValueBreakdown`). Prices
+    /// in different currencies are compared as plain numbers; entries with no
+    /// price come last in either order. Card searches sort by name instead.
+    Price,
+    /// Collections only: each entry's owned quantity. Card searches sort by
+    /// name instead.
+    Quantity,
+    /// Collections only: each entry's wanted quantity. Card searches sort by
+    /// name instead.
+    WantQuantity,
 }
 
 impl From<APISortField> for models::filters::SortField {
@@ -28,6 +39,7 @@ impl From<APISortField> for models::filters::SortField {
             APISortField::CollectorNumber => models::filters::SortField::CollectorNumber,
             APISortField::Artist => models::filters::SortField::Artist,
             APISortField::ReleaseDate => models::filters::SortField::ReleaseDate,
+            APISortField::Price | APISortField::Quantity | APISortField::WantQuantity => models::filters::SortField::Name,
         }
     }
 }
@@ -470,4 +482,120 @@ where
             Some(serde_json::from_str(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)?)
         }
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct MoneyAmount {
+    /// ISO 4217 code.
+    pub currency: String,
+    pub value: f64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ValueHistoryQuery {
+    /// Only days on or after this one (UTC, `YYYY-MM-DD`). Omitted means
+    /// all recorded history.
+    #[serde(default)]
+    pub since: Option<chrono::NaiveDate>,
+}
+
+/// What the cards currently owned in a collection were worth on each day
+/// price history has, at the prices they're valued at today (see
+/// `CollectionValueBreakdown`): each card's history is read from the
+/// retailer it's valued at now, so the last point lines up with the
+/// collection's current total. Copies since sold or moved away are not
+/// included — this is the value over time of what's held now.
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionValueHistory {
+    /// Whether the server keeps price history at all. When it doesn't,
+    /// `currencies` is always empty.
+    pub enabled: bool,
+    /// Owned entries (one per card and finish) in the collection, priced or not.
+    pub total_count: usize,
+    /// One series per currency, largest latest value first. Every entry
+    /// counts toward exactly one currency, that of its retailer.
+    pub currencies: Vec<CurrencyValueHistory>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CurrencyValueHistory {
+    /// ISO 4217 code.
+    pub currency: String,
+    /// Owned entries valued in this currency today.
+    pub entry_count: usize,
+    /// Oldest first, one per day any of those entries has a recorded price.
+    pub points: Vec<ValueHistoryPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct ValueHistoryPoint {
+    /// UTC day.
+    pub day: chrono::NaiveDate,
+    /// Sum of quantity × unit price over the entries priced that day. A
+    /// price carries forward to days with no new recording; an entry whose
+    /// card has no price recorded yet contributes nothing.
+    pub value: f64,
+    /// Entries that contributed to `value`, out of `entry_count`.
+    pub priced_count: usize,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ValueCardsQuery {
+    /// How many days back `past_price` looks. Default 30.
+    #[serde(default)]
+    pub days: Option<u32>,
+}
+
+/// Every owned, priced entry of a collection with what it's worth, what it
+/// cost and how its price moved — most valuable first.
+#[derive(Serialize, JsonSchema)]
+pub struct CollectionValueCards {
+    /// Whether price history is kept; without it `first_price` and
+    /// `past_price` are always missing.
+    pub history_enabled: bool,
+    /// The day `past_price` is as of (UTC).
+    pub past_day: chrono::NaiveDate,
+    /// Owned entries with no current price, so left out of `entries`.
+    pub unpriced_count: usize,
+    pub entries: Vec<ValueCardEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct ValueCardEntry {
+    pub card_uuid: String,
+    pub provider: String,
+    pub finish: String,
+    /// `None` when the card's details couldn't be looked up.
+    pub name: Option<String>,
+    pub set_code: Option<String>,
+    /// Direct image URL (Riftbound, Pokémon, plugins).
+    pub image: Option<String>,
+    /// MTG cards' image comes from Scryfall.
+    pub scryfall_id: Option<String>,
+    pub quantity: i32,
+    /// ISO 4217 code of every price on this entry.
+    pub currency: String,
+    pub unit_price: f64,
+    /// `unit_price` × `quantity`.
+    pub total_value: f64,
+    /// Owned copies that have a recorded purchase price.
+    pub cost_quantity: i32,
+    /// What those `cost_quantity` copies cost, per currency they were bought in.
+    pub cost: Vec<MoneyAmount>,
+    /// Current value of the `cost_quantity` copies minus `cost` — only when
+    /// everything was bought in `currency`; otherwise convert `cost` and
+    /// subtract it from `unit_price` × `cost_quantity`.
+    pub profit: Option<f64>,
+    /// Earliest recorded unit price.
+    pub first_price: Option<DatedPrice>,
+    /// Unit price as of `CollectionValueCards::past_day` (the latest
+    /// recording on or before it). Missing when history starts later.
+    pub past_price: Option<DatedPrice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct DatedPrice {
+    /// UTC day it was recorded.
+    pub day: chrono::NaiveDate,
+    pub price: f64,
 }

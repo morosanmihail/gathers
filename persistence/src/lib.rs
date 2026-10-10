@@ -318,6 +318,27 @@ pub trait PersistenceSystemTrait {
         provider: &str,
         card_uuid: &CardID,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<PriceHistoryEntry>>>;
+
+    /// Recorded prices of many cards at once, each from a single retailer:
+    /// `retailers` maps a card's uuid to the retailer to read. Cards with no
+    /// history are left out. Each card's prices are oldest first.
+    fn get_retailer_price_histories(
+        &self,
+        provider: &str,
+        retailers: &std::collections::HashMap<CardID, String>,
+    ) -> impl std::future::Future<Output = eyre::Result<std::collections::HashMap<CardID, Vec<DailyPrice>>>>;
+}
+
+/// One finish of a card's price on a given day, from a retailer the caller
+/// already knows (see `PersistenceSystemTrait::get_retailer_price_histories`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DailyPrice {
+    /// Same convention as `models::CollectionCard::finish`.
+    pub finish: String,
+    /// In the retailer's currency.
+    pub price: f64,
+    /// UTC day the price is as of.
+    pub recorded_on: chrono::NaiveDate,
 }
 
 /// One retailer's current price for one finish of a card, to be recorded
