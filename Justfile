@@ -6,15 +6,15 @@ default:
 test:
     cargo test --workspace
 
-# Run e2e tests (needs a live server — default http://localhost:5234, override with GATHERS_URL)
+# Run every e2e test. Each deploys its own throwaway server (plus mirror / dummy plugin where needed) on free ports in a temp dir — no live server needed, real config and data untouched
 e2e:
-    cargo run -p e2e --example collection_lifecycle
-    cargo run -p e2e --example share_view
-    cargo run -p e2e --example finishes
-
-# Provider-resolution e2e test, self-contained: spins up an isolated temp server + dummy-plugin pair, runs the test, tears both down
-e2e-plugins:
-    ./scripts/e2e-plugins.sh
+    cargo build -p server -p mirror -p dummy-plugin -p e2e --examples
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example collection_lifecycle
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example share_view
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example finishes
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example plugin_provider_resolution
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history_weeks
 
 # Run criterion benchmarks
 bench:

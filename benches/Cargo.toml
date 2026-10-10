@@ -13,7 +13,13 @@ name = "csv_import_benchmark"
 harness = false
 path = "src/csv_import_benchmark.rs"
 
+[[bench]]
+name = "price_history_benchmark"
+harness = false
+path = "src/price_history_benchmark.rs"
+
 [dependencies]
+chrono.workspace = true
 criterion.workspace = true
 models = { path = "../models" }
 persistence = { path = "../persistence" }

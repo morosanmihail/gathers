@@ -8,6 +8,7 @@ name = "retrieval"
 path = "src/lib.rs"
 
 [dependencies]
+chrono.workspace = true
 enum_dispatch.workspace = true
 eyre.workspace = true
 bzip2.workspace = true

@@ -8,7 +8,7 @@ pub mod prices;
 pub mod riftbound;
 
 pub use mtg::{CardColour, CardIdentifiers, MagicCard, Rarity};
-pub use prices::{CardPrices, DEFAULT_CURRENCY, RetailerPrices};
+pub use prices::{CardPrices, DEFAULT_CURRENCY, RetailerPrices, parse_price_date};
 
 use crate::pokemon::PokemonCard;
 use crate::riftbound::RiftboundCard;

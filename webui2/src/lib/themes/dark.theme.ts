@@ -24,6 +24,11 @@ const theme: ThemeDefinition = {
 		'--info':        '#5090d8',
 		'--shadow':      '0 4px 24px #00000088',
 		'--shadow-sm':   '0 2px 8px #00000066',
+		// Chart series, in order. Validated as a set against --bg2 (the modal
+		// surface charts sit on) for contrast and colour-blind separation.
+		'--chart-1':     '#b9883a',
+		'--chart-2':     '#5595de',
+		'--chart-3':     '#cf6c9d',
 	},
 };
 

@@ -24,7 +24,7 @@ use crate::{
         CollectionAllPurchaseHistoryResponse, CollectionListEntry, CollectionPurchaseHistoryEntry,
         CollectionRemoveQuery,
         CollectionRenameRequest, CollectionValueBreakdown, CollectionsSearchQuery,
-        PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
+        PriceHistoryResponse, PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
         ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
@@ -916,6 +916,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             provider.clone(),
         )
         .await?;
+        if storage.price_history_enabled() {
+            crate::price_history::spawn_record_cards(&state, provider.clone(), vec![input.id.clone()]);
+        }
 
         // Record purchase history only when a positive price is supplied.
         if purchase_price.is_some_and(|p| p > 0.0) {
@@ -983,10 +986,16 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         let storage = &mut state.1.lock().await.storage;
         validate_collection(storage, &collection_id).await?;
 
-        match storage
+        let result = storage
             .adjust_want_quantity(&collection_id, &input.id, input.delta, &provider)
-            .await
+            .await;
+        if let Ok(card) = &result
+            && input.delta > 0
+            && storage.price_history_enabled()
         {
+            crate::price_history::spawn_record_cards(&state, card.provider.clone(), vec![card.uuid.clone()]);
+        }
+        match result {
             Ok(card) => Ok(Json(CollectionCard {
                 id: card.uuid,
                 finish: card.finish,
@@ -1335,6 +1344,12 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .await
             .map_err(|e| crate::storage_error("Import failed", e))?;
 
+        // Imported cards get today's prices too. Re-recording cards that
+        // already had them today just overwrites them with the same values.
+        for system in retrievals {
+            crate::price_history::spawn_snapshot(state.0.clone(), state.1.clone(), system);
+        }
+
         Ok(Json(()))
     }
 
@@ -1484,6 +1499,21 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                     error: format!("Failed to get purchase history. {e}"),
                 }),
             )),
+        }
+    }
+
+    /// A card's recorded daily prices (see `ServerConfig::price_history_enabled`).
+    /// Not tied to a collection: prices are kept per card, for every card any
+    /// collection tracks. `provider` is the one stored on the collection card.
+    async fn price_history(
+        State(state): State<GathersState>,
+        Path((provider, card_uuid)): Path<(String, String)>,
+    ) -> Result<Json<PriceHistoryResponse>, ApiError> {
+        let storage = state.1.lock().await.storage.clone();
+        let enabled = storage.price_history_enabled();
+        match storage.get_price_history(&provider, &card_uuid).await {
+            Ok(entries) => Ok(Json(PriceHistoryResponse { enabled, entries })),
+            Err(e) => Err(crate::storage_error("Failed to get price history", e)),
         }
     }
 
@@ -1688,6 +1718,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/purchase_history", get(all_purchase_history))
         .api_route("/cards/{id}/purchase_history_entry/{entry_id}", delete(delete_purchase_entry).patch(update_purchase_entry))
         .api_route("/cards/{id}/value_breakdown", get(collection_value_breakdown))
+        .api_route("/price_history/{provider}/{card_uuid}", get(price_history))
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export))
 }
@@ -2009,7 +2040,7 @@ mod value_breakdown_tests {
 
     #[test]
     fn preferred_unit_prices_without_cardmarket_uses_cheapest_retailer() {
-        let rp = |normal: f64| models::RetailerPrices { normal: None, foil: Some(normal), currency: "USD".to_string() };
+        let rp = |normal: f64| models::RetailerPrices { normal: None, foil: Some(normal), currency: "USD".to_string(), date: None };
         let prices = models::CardPrices {
             uuid: "a".to_string(),
             paper: HashMap::from([
@@ -2029,11 +2060,11 @@ mod value_breakdown_tests {
             paper: HashMap::from([
                 (
                     "tcgplayer".to_string(),
-                    models::RetailerPrices { normal: Some(1.0), foil: None, currency: "USD".to_string() },
+                    models::RetailerPrices { normal: Some(1.0), foil: None, currency: "USD".to_string(), date: None },
                 ),
                 (
                     "cardmarket".to_string(),
-                    models::RetailerPrices { normal: Some(0.8), foil: Some(2.0), currency: "EUR".to_string() },
+                    models::RetailerPrices { normal: Some(0.8), foil: Some(2.0), currency: "EUR".to_string(), date: None },
                 ),
             ]),
         };

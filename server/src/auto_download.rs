@@ -8,7 +8,7 @@ use retrieval::RetrievalSystemTrait as _;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::RetrievalState;
+use crate::{RetrievalState, StorageState, price_history};
 
 pub fn default_enabled() -> bool {
     false
@@ -59,7 +59,8 @@ where
 
 /// Re-downloads card and price databases for every currently active system,
 /// reusing the same trigger paths as the manual `/update` HTTP endpoints.
-async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>) {
+/// After a price database is updated, records price history from it.
+async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<StorageState>>) {
     let mtg = retrieval.lock().await.mtg.clone();
     if let Some(mtg) = mtg {
         run_exclusive(retrieval, "Sql", async {
@@ -74,7 +75,10 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>) {
         .await;
         run_exclusive(retrieval, "Sql-prices", async {
             match mtg.update_prices().await {
-                Ok(_) => info!("MTG price DB auto-downloaded"),
+                Ok(_) => {
+                    info!("MTG price DB auto-downloaded");
+                    price_history::snapshot_tracked(retrieval, storage, &mtg, false).await;
+                }
                 Err(e) => error!(error = %e, "Auto-download of MTG price DB failed"),
             }
         })
@@ -109,7 +113,10 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>) {
         .await;
         run_exclusive(retrieval, "PokemonSql-prices", async {
             match pokemon.update_prices().await {
-                Ok(_) => info!("Pokemon price DB auto-downloaded"),
+                Ok(_) => {
+                    info!("Pokemon price DB auto-downloaded");
+                    price_history::snapshot_tracked(retrieval, storage, &pokemon, false).await;
+                }
                 Err(e) => error!(error = %e, "Auto-download of Pokemon price DB failed"),
             }
         })
@@ -119,7 +126,12 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>) {
 
 /// Spawns the periodic auto-download loop. Resumes from the persisted
 /// last-run timestamp instead of restarting the interval on every boot.
-pub fn spawn(retrieval: Arc<Mutex<RetrievalState>>, gathers_dir: PathBuf, interval_hours: u64) {
+pub fn spawn(
+    retrieval: Arc<Mutex<RetrievalState>>,
+    storage: Arc<Mutex<StorageState>>,
+    gathers_dir: PathBuf,
+    interval_hours: u64,
+) {
     let interval_hours = interval_hours.clamp(1, MAX_INTERVAL_HOURS);
     let interval = Duration::from_secs(interval_hours * 3600);
     info!(interval_hours, "Periodic DB auto-download enabled");
@@ -134,7 +146,7 @@ pub fn spawn(retrieval: Arc<Mutex<RetrievalState>>, gathers_dir: PathBuf, interv
         }
         loop {
             info!("Running scheduled DB auto-download");
-            run_all(&retrieval).await;
+            run_all(&retrieval, &storage).await;
             if let Err(e) = write_last_run(&gathers_dir) {
                 error!(error = %e, "Failed to record auto-download timestamp");
             }

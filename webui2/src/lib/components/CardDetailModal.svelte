@@ -3,7 +3,12 @@
 	import { cardImageUrl, rarityClass, finishLabel, catalogFinishes } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
+	import { getCardPrices } from '$lib/api';
+	import { finishPrice, formatMoney, preferredRetailerName } from '$lib/currency.svelte';
+	import { retailerLabel } from '$lib/format';
+	import type { CardPrices } from '$lib/types';
 	import MtgCardDetail from './MtgCardDetail.svelte';
+	import PriceHistoryChart from './PriceHistoryChart.svelte';
 	import RiftboundCardDetail from './RiftboundCardDetail.svelte';
 	import PokemonCardDetail from './PokemonCardDetail.svelte';
 
@@ -61,6 +66,42 @@
 	// lives in `setShortCode` instead.
 	const setDisplayCode = $derived(isPoke ? poke.setShortCode : card.setCode);
 
+	// The system holding this card, as collections store it (see the server's
+	// `NamedRetrievalSystem::name`). A collection entry says; a search result
+	// only tells us by shape.
+	const provider = $derived(
+		(card as CollectionCard).provider
+		|| (isMtg ? app.systems.find(s => s === 'MagicSQLite' || s === 'Scryfall') ?? ''
+			: isPoke ? 'PokemonSQLite'
+			: isRift ? 'RiftboundSQLite'
+			: '')
+	);
+
+	let currentPrices = $state<CardPrices | null>(null);
+	$effect(() => {
+		const key = `${provider}:${card.id}`;
+		currentPrices = null;
+		if (!app.pricingEnabled || !provider) return;
+		getCardPrices(provider, card.id).then(p => {
+			if (`${provider}:${card.id}` === key) currentPrices = p;
+		});
+	});
+
+	// Current price of each finish worth showing: the ones owned (collection
+	// view), else the ones it's printed in, else just the default.
+	const priceFinishes = $derived(
+		ownedFinishes.length ? ownedFinishes.map(e => e.finish ?? '')
+		: printedFinishes.length ? printedFinishes
+		: ['']
+	);
+	const currentPriceRows = $derived(
+		[...new Set(priceFinishes)].flatMap(f => {
+			const p = finishPrice(currentPrices ?? undefined, f);
+			return p ? [{ finish: f, text: formatMoney(p.value, p.currency) }] : [];
+		})
+	);
+	const priceSource = $derived(currentPrices ? preferredRetailerName(currentPrices) : undefined);
+
 	const rawImgUrl = $derived(cardImageUrl(card as Parameters<typeof cardImageUrl>[0]));
 	let imgUrl = $state('');
 	$effect(() => {
@@ -91,91 +132,111 @@
 			<button class="btn btn-ghost btn-icon" onclick={onclose} title="Close">✕</button>
 		</div>
 
-		<div class="modal-body card-detail-body">
-			<div class="card-detail-art">
-				{#if imgUrl}
-					{#if imgExpanded}
-						<button class="img-expand-backdrop" onclick={toggleImgExpanded} aria-label="Shrink image"></button>
+		<div class="modal-body">
+			<div class="card-detail-body">
+				<div class="card-detail-art">
+					{#if imgUrl}
+						{#if imgExpanded}
+							<button class="img-expand-backdrop" onclick={toggleImgExpanded} aria-label="Shrink image"></button>
+						{/if}
+						<button
+							class="card-detail-img-btn"
+							class:expanded={imgExpanded}
+							onclick={toggleImgExpanded}
+							title={imgExpanded ? 'Click to shrink' : 'Click to enlarge'}
+							aria-label={imgExpanded ? 'Shrink card image' : 'Enlarge card image'}
+						>
+							<img src={imgUrl} alt={card.name} />
+						</button>
+					{:else}
+						<div class="card-detail-art-placeholder">
+							<div style="font-size: 2.5rem;">🃏</div>
+							<div>No image available</div>
+						</div>
 					{/if}
-					<button
-						class="card-detail-img-btn"
-						class:expanded={imgExpanded}
-						onclick={toggleImgExpanded}
-						title={imgExpanded ? 'Click to shrink' : 'Click to enlarge'}
-						aria-label={imgExpanded ? 'Shrink card image' : 'Enlarge card image'}
-					>
-						<img src={imgUrl} alt={card.name} />
-					</button>
-				{:else}
-					<div class="card-detail-art-placeholder">
-						<div style="font-size: 2.5rem;">🃏</div>
-						<div>No image available</div>
-					</div>
-				{/if}
-			</div>
+				</div>
 
-			<div class="card-detail-info">
-				<!-- Common meta — only meaningful for a recognized system; a
-				     plugin card's fallback is just the name (see isKnownSystem). -->
-				{#if isKnownSystem}
-					<div class="card-detail-row">
-						<span class="card-detail-label">Set</span>
-						<span>{setName || '—'} {setDisplayCode ? `(${setDisplayCode.toUpperCase()})` : ''}</span>
-					</div>
-					<div class="card-detail-row">
-						<span class="card-detail-label">Collector #</span>
-						<span>{card.collectorNumber ?? '—'}</span>
-					</div>
-				{/if}
-				{#if card.rarity}
-					<div class="card-detail-row">
-						<span class="card-detail-label">Rarity</span>
-						<span class={rarityClass(card.rarity)}>{card.rarity}</span>
-					</div>
-				{/if}
-				{#each extraFields as [key, value] (key)}
-					<div class="card-detail-row">
-						<span class="card-detail-label">{key.replace(/[_-]+/g, ' ')}</span>
-						<span>{value}</span>
-					</div>
-				{/each}
-				{#if printedFinishes.length > 1}
-					<div class="card-detail-row">
-						<span class="card-detail-label">Finishes</span>
-						<span>{printedFinishes.map(finishLabel).join(', ')}</span>
-					</div>
-				{/if}
-				{#if (card as CardGroup).entries}
-					{#if ownedFinishes.length > 0}
+				<div class="card-detail-info">
+					<!-- Common meta — only meaningful for a recognized system; a
+					     plugin card's fallback is just the name (see isKnownSystem). -->
+					{#if isKnownSystem}
 						<div class="card-detail-row">
-							<span class="card-detail-label">Owned</span>
+							<span class="card-detail-label">Set</span>
+							<span>{setName || '—'} {setDisplayCode ? `(${setDisplayCode.toUpperCase()})` : ''}</span>
+						</div>
+						<div class="card-detail-row">
+							<span class="card-detail-label">Collector #</span>
+							<span>{card.collectorNumber ?? '—'}</span>
+						</div>
+					{/if}
+					{#if card.rarity}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Rarity</span>
+							<span class={rarityClass(card.rarity)}>{card.rarity}</span>
+						</div>
+					{/if}
+					{#each extraFields as [key, value] (key)}
+						<div class="card-detail-row">
+							<span class="card-detail-label">{key.replace(/[_-]+/g, ' ')}</span>
+							<span>{value}</span>
+						</div>
+					{/each}
+					{#if printedFinishes.length > 1}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Finishes</span>
+							<span>{printedFinishes.map(finishLabel).join(', ')}</span>
+						</div>
+					{/if}
+					{#if currentPriceRows.length > 0}
+						<div class="card-detail-row">
+							<span class="card-detail-label">Price</span>
 							<span>
-								{#each ownedFinishes as entry, i (entry.finish ?? '')}
-									{i > 0 ? ', ' : ''}{entry.quantity} {finishLabel(entry.finish ?? '')}
+								{#each currentPriceRows as row, i (row.finish)}
+									{i > 0 ? ' · ' : ''}{#if currentPriceRows.length > 1}<span class="price-finish">{finishLabel(row.finish)}</span>{' '}{/if}<strong>{row.text}</strong>
 								{/each}
+								{#if priceSource}<span class="price-source">at {retailerLabel(priceSource)}</span>{/if}
 							</span>
 						</div>
 					{/if}
-					{#if onWantChange}
-						<div class="card-detail-row">
-							<span class="card-detail-label">Want</span>
-							<span style="display:flex; align-items:center; gap:6px;">
-								<button class="qty-btn" disabled={wantQty <= 0} onclick={() => onWantChange?.(-1)}>−</button>
-								<span class="qty-val">{wantQty}</span>
-								<button class="qty-btn add" onclick={() => onWantChange?.(1)}>+</button>
-							</span>
-						</div>
+					{#if (card as CardGroup).entries}
+						{#if ownedFinishes.length > 0}
+							<div class="card-detail-row">
+								<span class="card-detail-label">Owned</span>
+								<span>
+									{#each ownedFinishes as entry, i (entry.finish ?? '')}
+										{i > 0 ? ', ' : ''}{entry.quantity} {finishLabel(entry.finish ?? '')}
+									{/each}
+								</span>
+							</div>
+						{/if}
+						{#if onWantChange}
+							<div class="card-detail-row">
+								<span class="card-detail-label">Want</span>
+								<span style="display:flex; align-items:center; gap:6px;">
+									<button class="qty-btn" disabled={wantQty <= 0} onclick={() => onWantChange?.(-1)}>−</button>
+									<span class="qty-val">{wantQty}</span>
+									<button class="qty-btn add" onclick={() => onWantChange?.(1)}>+</button>
+								</span>
+							</div>
+						{/if}
 					{/if}
-				{/if}
 
-				{#if isMtg}
-					<MtgCardDetail card={mtg} />
-				{:else if isRift}
-					<RiftboundCardDetail card={rift} />
-				{:else if isPoke}
-					<PokemonCardDetail card={poke} />
-				{/if}
+					{#if isMtg}
+						<MtgCardDetail card={mtg} />
+					{:else if isRift}
+						<RiftboundCardDetail card={rift} />
+					{:else if isPoke}
+						<PokemonCardDetail card={poke} />
+					{/if}
+				</div>
 			</div>
+
+			<PriceHistoryChart
+				{provider}
+				cardId={card.id}
+				initialFinish={ownedFinishes[0]?.finish ?? ''}
+				{currentPrices}
+			/>
 		</div>
 	</div>
 </div>
@@ -269,6 +330,16 @@
 		gap: 8px;
 		align-items: baseline;
 		font-size: 0.88rem;
+	}
+
+	.price-finish {
+		color: var(--text2);
+	}
+
+	.price-source {
+		margin-left: 6px;
+		color: var(--text3);
+		font-size: 0.78rem;
 	}
 
 	.card-detail-label {

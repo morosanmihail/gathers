@@ -541,6 +541,33 @@ async fn test_get_card_prices_latest_row_used() {
     // card-alpha has two rows; latest (2024-01-10) must win
     let prices = system.get_card_prices("card-alpha").await.unwrap().unwrap();
     assert_eq!(prices.paper.get("raw").unwrap().normal, Some(2.00));
+    assert_eq!(prices.paper["raw"].date, "2024-01-10".parse().ok());
+}
+
+#[tokio::test]
+async fn test_prices_dated_per_column() {
+    let dir = TempDir::new().unwrap();
+    let prices_path = make_prices_db(&dir);
+    {
+        let conn = rusqlite::Connection::open(&prices_path).unwrap();
+        // Newest row only has a raw price: PSA quotes keep their older date.
+        conn.execute(
+            "INSERT INTO prices VALUES ('2024-02-01T12:00:00.000Z', 'card-alpha', '', 3.00, 0.0, 0.0)",
+            [],
+        )
+        .unwrap();
+    }
+    let system = PokemonSQLiteRetrievalSystem::new(None, Some(prices_path)).unwrap();
+
+    for prices in [
+        system.get_card_prices("card-alpha").await.unwrap().unwrap(),
+        system.get_bulk_card_prices(vec!["card-alpha".to_string()]).await.unwrap().remove("card-alpha").unwrap(),
+    ] {
+        assert_eq!(prices.paper["raw"].normal, Some(3.00));
+        assert_eq!(prices.paper["raw"].date, "2024-02-01".parse().ok());
+        assert_eq!(prices.paper["graded_psa10"].normal, Some(12.0));
+        assert_eq!(prices.paper["graded_psa10"].date, "2024-01-10".parse().ok());
+    }
 }
 
 #[tokio::test]

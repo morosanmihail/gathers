@@ -19,10 +19,19 @@ name = "plugin_provider_resolution"
 [[example]]
 name = "finishes"
 
+[[example]]
+name = "price_history"
+
+[[example]]
+name = "price_history_weeks"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }
 reqwest = { workspace = true }
+retrieval = { path = "../retrieval" }
+rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }

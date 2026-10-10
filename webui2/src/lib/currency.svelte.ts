@@ -62,14 +62,20 @@ export function currencySymbol(currency: string = preferredCurrency()): string {
 // preferred currency, or all of them when none do — cardmarket, else the
 // cheapest (ties broken by name).
 function preferredRetailer(cardPrices: CardPrices) {
+	const name = preferredRetailerName(cardPrices);
+	return name ? cardPrices.paper[name] : undefined;
+}
+
+/** Key (in `CardPrices.paper`) of the retailer a card is valued at. */
+export function preferredRetailerName(cardPrices: CardPrices): string | undefined {
 	const paper = cardPrices.paper;
-	if (paper['raw']) return paper['raw'];
+	if (paper['raw']) return 'raw';
 	const listed = Object.entries(paper).filter(([, r]) => r.normal != null || r.foil != null);
 	const preferred = preferredCurrency();
 	const inPreferred = listed.filter(([, r]) => (r.currency ?? DEFAULT_CURRENCY) === preferred);
 	const candidates = inPreferred.length ? inPreferred : listed;
-	return candidates.find(([k]) => k.toLowerCase() === 'cardmarket')?.[1]
-		?? candidates.sort(([ka, a], [kb, b]) => cheapest(a) - cheapest(b) || (ka < kb ? -1 : ka > kb ? 1 : 0))[0]?.[1];
+	return candidates.find(([k]) => k.toLowerCase() === 'cardmarket')?.[0]
+		?? candidates.sort(([ka, a], [kb, b]) => cheapest(a) - cheapest(b) || (ka < kb ? -1 : ka > kb ? 1 : 0))[0]?.[0];
 }
 
 // Unit price of one finish at the preferred retailer — same rule the server

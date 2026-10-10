@@ -65,6 +65,7 @@ pub async fn record_purchase(
 mod cards;
 mod collections;
 mod move_cards;
+mod price_history;
 mod purchase;
 mod sorting;
 mod timeupdated;

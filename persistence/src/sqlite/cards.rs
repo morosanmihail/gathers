@@ -80,6 +80,15 @@ RETURNING uuid, finish, collection, quantity, want_quantity, timeadded, provider
     Ok(result)
 }
 
+/// Distinct uuids of every row under `provider`, across all collections.
+pub(super) fn tracked_uuids(conn: &Connection, provider: &str) -> eyre::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT DISTINCT uuid FROM cards WHERE provider = ?1 ORDER BY uuid")?;
+    let uuids = stmt
+        .query_map(rusqlite::params![provider], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(uuids)
+}
+
 /// The `(quantity, want_quantity, provider)` of one card+finish row, if the
 /// collection has it.
 pub(super) fn get_row(

@@ -240,6 +240,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "benches"
 version = "0.7.5"
 dependencies = [
+ "chrono",
  "criterion",
  "models",
  "persistence",
@@ -683,8 +684,11 @@ dependencies = [
  "chrono",
  "eyre",
  "reqwest",
+ "retrieval",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -1489,6 +1493,7 @@ dependencies = [
 name = "models"
 version = "0.7.5"
 dependencies = [
+ "chrono",
  "enum_dispatch",
  "schemars",
  "serde",
@@ -1608,6 +1613,7 @@ dependencies = [
  "rusqlite_migration",
  "schemars",
  "serde",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -1989,6 +1995,7 @@ name = "retrieval"
 version = "0.7.5"
 dependencies = [
  "bzip2",
+ "chrono",
  "enum_dispatch",
  "eyre",
  "futures-util",
@@ -2042,6 +2049,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1c93dd1c9683b438c392c492109cb702b8090b2bfc8fed6f6e4eb4523f17af3"
 dependencies = [
  "bitflags",
+ "chrono",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",

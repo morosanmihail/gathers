@@ -1,5 +1,6 @@
 mod cards;
 mod collections;
+mod price_history;
 mod purchase_history;
 mod share_links;
 #[cfg(test)]
@@ -14,35 +15,66 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
 
-use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, PersistenceError, PersistenceSystemTrait, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
+use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 static MIGRATIONS: LazyLock<Migrations<'static>> =
     LazyLock::new(|| Migrations::from_directory(&MIGRATIONS_DIR).expect("failed to load DB migrations from embedded directory"));
+static PRICE_MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/price_migrations");
+static PRICE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::from_directory(&PRICE_MIGRATIONS_DIR).expect("failed to load price DB migrations from embedded directory")
+});
 
 #[derive(Debug, Clone)]
 pub struct SQLitePersistenceSystem {
     connection: Arc<Mutex<Connection>>,
+    /// Separate database holding price history, when enabled.
+    price_connection: Option<Arc<Mutex<Connection>>>,
+}
+
+/// Opens (creating if needed) a SQLite database at `db_path`, or in memory,
+/// brought up to date with `migrations`.
+fn open_db(in_memory: bool, db_path: &str, migrations: &Migrations<'static>) -> eyre::Result<Connection> {
+    let mut conn = if in_memory {
+        Connection::open(":memory:")?
+    } else {
+        let path = std::path::Path::new(db_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        Connection::open(path)?
+    };
+    migrations.to_latest(&mut conn)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(conn)
+}
+
+/// Where the price history database goes by default: next to the storage
+/// database, `storage.db` -> `storage.prices.db`.
+pub fn default_price_history_path(storage_db_path: &str) -> String {
+    std::path::Path::new(storage_db_path)
+        .with_extension("prices.db")
+        .to_string_lossy()
+        .into_owned()
 }
 
 impl SQLitePersistenceSystem {
     pub fn new(in_memory: bool, db_path: Option<String>) -> eyre::Result<Self> {
-        let mut conn = if in_memory {
-            Connection::open(":memory:")?
-        } else {
-            let path = db_path.unwrap_or_else(|| "storage.db".to_string());
-            let path = std::path::Path::new(&path);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            Connection::open(path)?
-        };
-        MIGRATIONS.to_latest(&mut conn)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let path = db_path.unwrap_or_else(|| "storage.db".to_string());
         Ok(Self {
-            connection: Arc::new(Mutex::new(conn)),
+            connection: Arc::new(Mutex::new(open_db(in_memory, &path, &MIGRATIONS)?)),
+            price_connection: None,
         })
+    }
+
+    /// Starts keeping price history in its own database at `db_path`
+    /// (default `storage.prices.db`), or in memory. On error nothing
+    /// changes and price history stays off.
+    pub fn enable_price_history(&mut self, in_memory: bool, db_path: Option<String>) -> eyre::Result<()> {
+        let path = db_path.unwrap_or_else(|| default_price_history_path("storage.db"));
+        self.price_connection = Some(Arc::new(Mutex::new(open_db(in_memory, &path, &PRICE_MIGRATIONS)?)));
+        Ok(())
     }
 }
 
@@ -333,5 +365,42 @@ impl PersistenceSystemTrait for SQLitePersistenceSystem {
     async fn resolve_share_link(&self, token: &str) -> eyre::Result<Option<CollectionID>> {
         let conn = self.connection.lock().await;
         share_links::resolve(&conn, token)
+    }
+
+    fn price_history_enabled(&self) -> bool {
+        self.price_connection.is_some()
+    }
+
+    async fn tracked_card_uuids(&self, provider: &str) -> eyre::Result<Vec<CardID>> {
+        let conn = self.connection.lock().await;
+        cards::tracked_uuids(&conn, provider)
+    }
+
+    async fn has_price_history(&self, provider: &str) -> eyre::Result<bool> {
+        let Some(price_connection) = &self.price_connection else {
+            return Ok(false);
+        };
+        let conn = price_connection.lock().await;
+        price_history::has_any(&conn, provider)
+    }
+
+    async fn record_prices(
+        &mut self,
+        provider: &str,
+        prices: &[PricePoint],
+    ) -> eyre::Result<usize> {
+        let Some(price_connection) = &self.price_connection else {
+            return Ok(0);
+        };
+        let mut conn = price_connection.lock().await;
+        price_history::record(&mut conn, provider, prices)
+    }
+
+    async fn get_price_history(&self, provider: &str, card_uuid: &CardID) -> eyre::Result<Vec<PriceHistoryEntry>> {
+        let Some(price_connection) = &self.price_connection else {
+            return Ok(vec![]);
+        };
+        let conn = price_connection.lock().await;
+        price_history::get(&conn, provider, card_uuid)
     }
 }

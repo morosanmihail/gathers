@@ -32,6 +32,9 @@ services:
       # Add "pokemon-sql" for Pokémon TCG support.
       - GATHERS_SYSTEMS=riftbound-sql,scryfall
       - STORAGE_DB_PATH=/home/app/.local/share/gathers/DB/storage.db
+      # Uncomment to record daily prices of collection cards (kept in
+      # storage.prices.db next to storage.db).
+      # - GATHERS_PRICE_HISTORY=true
       - MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
       - RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
       - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db

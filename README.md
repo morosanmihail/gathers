@@ -87,6 +87,5 @@ Starts the server, the `dummy-plugin` example plugin, and the webui2 dev server 
 `just` recipes (see the `Justfile`):
 - `just` — list available recipes
 - `just test` — run all workspace unit/integration tests
-- `just e2e` — run the e2e tests against a live server (needs one already running, e.g. via `tilt up`; point elsewhere with `GATHERS_URL=http://host:port`)
-- `just e2e-plugins` — run the plugin-provider-resolution e2e test against its own isolated, ephemeral server + dummy-plugin pair, so it needs no live server and never touches your real config/data
+- `just e2e` — run every e2e test. Each one deploys its own throwaway server (plus a mirror or the dummy plugin where it needs one) on free ports in a temp directory, using the `data/` test databases, so no live server or network is needed and your real config and data are never touched. A single test can be run with `cargo run -p e2e --example <name>`
 - `just bench` — run the criterion benchmarks

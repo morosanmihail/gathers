@@ -9,7 +9,7 @@ use models::CollectionID;
 use models::filters::SortOrder;
 
 pub use crate::csv_models::{CsvField, CsvFieldMapping};
-pub use crate::sqlite::SQLitePersistenceSystem;
+pub use crate::sqlite::{SQLitePersistenceSystem, default_price_history_path};
 
 /// Errors caused by the request rather than by storage itself, so callers
 /// can tell "you asked for something invalid" apart from a database failure
@@ -283,6 +283,71 @@ pub trait PersistenceSystemTrait {
         &self,
         token: &str,
     ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionID>>>;
+
+    /// Whether price history is being kept (see
+    /// `SQLitePersistenceSystem::enable_price_history`). When it isn't, the
+    /// other price history methods do nothing and return nothing.
+    fn price_history_enabled(&self) -> bool;
+
+    /// Every distinct card, in any collection, stored under `provider` —
+    /// owned or only wanted.
+    fn tracked_card_uuids(
+        &self,
+        provider: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<CardID>>>;
+
+    /// Whether any prices have been recorded for `provider` yet.
+    fn has_price_history(
+        &self,
+        provider: &str,
+    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
+
+    /// Stores `prices`, each under its own `recorded_on` day, replacing
+    /// anything already recorded for the same card, retailer, finish and
+    /// day. Non-finite and non-positive prices are skipped. Returns how many
+    /// prices were written.
+    fn record_prices(
+        &mut self,
+        provider: &str,
+        prices: &[PricePoint],
+    ) -> impl std::future::Future<Output = eyre::Result<usize>>;
+
+    /// A card's recorded prices, oldest first.
+    fn get_price_history(
+        &self,
+        provider: &str,
+        card_uuid: &CardID,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<PriceHistoryEntry>>>;
+}
+
+/// One retailer's current price for one finish of a card, to be recorded
+/// in price history.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PricePoint {
+    pub card_uuid: CardID,
+    pub retailer: String,
+    /// Same convention as `models::CollectionCard::finish`: `""` is the
+    /// default finish, anything else is game-specific.
+    pub finish: String,
+    pub price: f64,
+    /// ISO 4217 code `price` is in.
+    pub currency: String,
+    /// UTC day the price is as of.
+    pub recorded_on: chrono::NaiveDate,
+}
+
+/// One retailer's price for one finish of a card on a given day.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct PriceHistoryEntry {
+    pub retailer: String,
+    /// Same convention as `models::CollectionCard::finish`: `""` is the
+    /// default finish, anything else is game-specific.
+    pub finish: String,
+    pub price: f64,
+    /// ISO 4217 code `price` is in.
+    pub currency: String,
+    /// UTC day the price is as of.
+    pub recorded_on: chrono::NaiveDate,
 }
 
 /// A single shareable, read-only link granting public access to a collection.

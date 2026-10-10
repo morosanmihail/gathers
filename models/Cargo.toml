@@ -8,6 +8,7 @@ name = "models"
 path = "src/lib.rs"
 
 [dependencies]
+chrono.workspace = true
 enum_dispatch.workspace = true
 schemars.workspace = true
 serde.workspace = true

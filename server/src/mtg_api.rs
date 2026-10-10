@@ -173,12 +173,15 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
             ret.start_download("Sql-prices")?;
             system
         };
-        let retrieval = state.0.clone();
+        let (retrieval, storage) = state.clone();
         tokio::spawn(async move {
             let result = mtg.update_prices().await;
             retrieval.lock().await.finish_download("Sql-prices");
             match result {
-                Ok(true) => info!("MTG prices updated"),
+                Ok(true) => {
+                    info!("MTG prices updated");
+                    crate::price_history::spawn_snapshot(retrieval, storage, mtg);
+                }
                 Ok(false) => info!("No MTG price database configured"),
                 Err(e) => error!(error = %e, "Failed to update MTG prices"),
             }

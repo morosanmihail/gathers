@@ -4,7 +4,7 @@ use aide::swagger::Swagger;
 use axum::http::StatusCode;
 use axum::{Extension, Json, error_handling::HandleErrorLayer, extract::State};
 use clap::{Parser, ValueEnum};
-use persistence::PersistenceSystem;
+use persistence::{PersistenceSystem, PersistenceSystemTrait as _};
 use retrieval::{DownloadProgress, NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait as _};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -29,6 +29,7 @@ mod collections;
 mod mtg_api;
 mod plugin_api;
 mod pokemon_api;
+mod price_history;
 mod riftbound_api;
 mod settings_api;
 
@@ -129,6 +130,10 @@ pub struct SystemInfo {
     pub pricing_enabled: bool,
     /// Whether collection management is enabled.
     pub collections_enabled: bool,
+    /// Whether daily prices of collection cards are being recorded (see
+    /// `ServerConfig::price_history_enabled`). False when enabled but its
+    /// database couldn't be opened.
+    pub price_history_enabled: bool,
     /// ISO 4217 code of the currency card prices are taken in when a card is
     /// listed in several (see `ServerConfig::preferred_currency`).
     pub preferred_currency: String,
@@ -161,6 +166,8 @@ pub struct RetrievalState {
     pub pricing_enabled: bool,
     pub collections_enabled: bool,
     pub preferred_currency: String,
+    /// Whether price history is actually being kept; set once storage is up.
+    pub price_history_enabled: bool,
     /// Set when saved settings need a restart to apply; a restart clears it
     /// by starting from a fresh `RetrievalState`.
     pub restart_required: bool,
@@ -225,6 +232,7 @@ impl RetrievalState {
             pricing_enabled,
             collections_enabled,
             preferred_currency,
+            price_history_enabled: false,
             restart_required: false,
             plugins: HashMap::new(),
         };
@@ -336,7 +344,7 @@ impl RetrievalState {
             });
         }
         let demo_mode = std::env::var("DEMO_MODE").is_ok();
-        SystemInfo { system, systems, plugins, unique_modes, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, preferred_currency: self.preferred_currency.clone(), restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
+        SystemInfo { system, systems, plugins, unique_modes, downloading, demo_mode, pricing_enabled: self.pricing_enabled, collections_enabled: self.collections_enabled, price_history_enabled: self.price_history_enabled, preferred_currency: self.preferred_currency.clone(), restart_required: self.restart_required, version: env!("GATHERS_VERSION").to_string() }
     }
 
     pub fn require_mtg(&self) -> Result<&RetrievalSystem, ApiError> {
@@ -460,11 +468,20 @@ impl RetrievalState {
 }
 
 impl StorageState {
-    pub fn new(storage_db_path: Option<String>) -> eyre::Result<StorageState> {
+    /// Opens the storage database and, when `price_history_db_path` is
+    /// given, the price history one next to it. Price history is optional:
+    /// if its database can't be opened, that's logged and storage carries
+    /// on without it.
+    pub fn new(storage_db_path: Option<String>, price_history_db_path: Option<String>) -> eyre::Result<StorageState> {
+        let mut sqlite = persistence::SQLitePersistenceSystem::new(false, storage_db_path.clone())?;
+        if let Some(path) = price_history_db_path {
+            match sqlite.enable_price_history(false, Some(path.clone())) {
+                Ok(()) => info!(path = %path, "Price history DB ready"),
+                Err(e) => warn!(path = %path, error = %e, "Failed to open price history DB — price history disabled"),
+            }
+        }
         Ok(StorageState {
-            storage: PersistenceSystem::SQLitePersistenceSystem(
-                persistence::SQLitePersistenceSystem::new(false, storage_db_path.clone())?,
-            ),
+            storage: PersistenceSystem::SQLitePersistenceSystem(sqlite),
             _storage_db_path: storage_db_path,
         })
     }
@@ -527,6 +544,12 @@ pub struct ServerConfig {
     /// How often to run the auto-download, in hours. Takes effect on server restart.
     #[serde(default = "auto_download::default_interval_hours")]
     pub auto_download_interval_hours: u64,
+    /// Record the daily prices of cards in collections, in a separate
+    /// database (`price_history_db_path`). Recorded whenever a price
+    /// database is updated, when cards are added, and on startup while
+    /// nothing has been recorded yet. Takes effect on server restart.
+    #[serde(default)]
+    pub price_history_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtg_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -539,6 +562,9 @@ pub struct ServerConfig {
     pokemon_prices_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     storage_db_path: Option<String>,
+    /// Defaults to `storage.prices.db` next to the storage database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price_history_db_path: Option<String>,
     #[serde(default)]
     pub plugins: Vec<PluginConfig>,
     /// Browser origins (e.g. `https://cards.example.com`) allowed to call
@@ -619,6 +645,7 @@ pub const PATH_ENV_VARS: &[(&str, &str)] = &[
     ("pokemon_db_path", "POKEMON_DB_PATH"),
     ("pokemon_prices_path", "POKEMON_PRICES_PATH"),
     ("storage_db_path", "STORAGE_DB_PATH"),
+    ("price_history_db_path", "PRICE_HISTORY_DB_PATH"),
 ];
 
 /// Systems from `GATHERS_SYSTEMS` (comma-separated, e.g. "scryfall,riftbound-sql"),
@@ -639,6 +666,17 @@ pub fn env_systems(warn: bool) -> Option<Vec<Systems>> {
         })
         .collect();
     (!parsed.is_empty()).then_some(parsed)
+}
+
+/// `GATHERS_PRICE_HISTORY` (`true`/`1`/`false`/`0`, any case), overriding
+/// `ServerConfig::price_history_enabled`. `None` when unset or unparseable.
+pub fn env_price_history() -> Option<bool> {
+    let val = std::env::var("GATHERS_PRICE_HISTORY").ok()?;
+    match val.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 /// Origins from `GATHERS_CORS_ORIGINS` (comma-separated), trailing slashes trimmed.
@@ -763,12 +801,14 @@ async fn main() -> eyre::Result<()> {
             preferred_currency: default_preferred_currency(),
             auto_download_enabled: false,
             auto_download_interval_hours: 24,
+            price_history_enabled: env_price_history().unwrap_or(false),
             mtg_db_path: path_or_default("MTG_DB_PATH", "AllPrintings.db"),
             mtg_prices_path: path_or_default("MTG_PRICES_PATH", "AllPricesToday.sqlite"),
             riftbound_db_path: path_or_default("RIFTBOUND_DB_PATH", "riftbound.db"),
             pokemon_db_path: path_or_default("POKEMON_DB_PATH", "pokemon.db"),
             pokemon_prices_path: path_or_default("POKEMON_PRICES_PATH", "pokemon_prices.sqlite"),
             storage_db_path: path_or_default("STORAGE_DB_PATH", "storage.db"),
+            price_history_db_path: None,
             plugins: Vec::new(),
             cors_allowed_origins: env_cors_origins(),
         };
@@ -818,6 +858,9 @@ async fn main() -> eyre::Result<()> {
     if let Some(systems) = env_systems(true) {
         config.system = systems;
     }
+    if let Some(enabled) = env_price_history() {
+        config.price_history_enabled = enabled;
+    }
 
     // Env vars override config for DB paths
     let mtg_db_path = std::env::var("MTG_DB_PATH").ok().or(config.mtg_db_path);
@@ -858,6 +901,14 @@ async fn main() -> eyre::Result<()> {
     let storage_db_path = std::env::var("STORAGE_DB_PATH")
         .ok()
         .or(config.storage_db_path);
+    let price_history_db_path = config.price_history_enabled.then(|| {
+        std::env::var("PRICE_HISTORY_DB_PATH")
+            .ok()
+            .or(config.price_history_db_path.clone())
+            .unwrap_or_else(|| {
+                persistence::default_price_history_path(storage_db_path.as_deref().unwrap_or("storage.db"))
+            })
+    });
 
     let port = config.port;
 
@@ -1012,12 +1063,16 @@ async fn main() -> eyre::Result<()> {
             }
         }
     }
-    if config.auto_download_enabled {
-        auto_download::spawn(retrieval.clone(), gathers_dir.clone(), config.auto_download_interval_hours);
+    let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path.clone(), price_history_db_path)?));
+    info!(path = storage_db_path.as_deref().unwrap_or("(default)"), "Storage DB ready");
+    if storage.lock().await.storage.price_history_enabled() {
+        retrieval.lock().await.price_history_enabled = true;
+        price_history::spawn_startup_snapshot(retrieval.clone(), storage.clone());
     }
 
-    let storage = Arc::new(Mutex::new(StorageState::new(storage_db_path.clone())?));
-    info!(path = storage_db_path.as_deref().unwrap_or("(default)"), "Storage DB ready");
+    if config.auto_download_enabled {
+        auto_download::spawn(retrieval.clone(), storage.clone(), gathers_dir.clone(), config.auto_download_interval_hours);
+    }
 
     let mut api = openapi_doc();
 
@@ -1161,6 +1216,7 @@ fn required_feature(path: &str) -> Option<&'static str> {
         .iter()
         .any(|prefix| path.starts_with(prefix))
         || path.contains("/purchase_history")
+        || path.contains("/price_history")
         || path.ends_with("/value_breakdown");
     pricing.then_some("pricing")
 }
@@ -1253,7 +1309,7 @@ mod restart_needed_tests {
 
     #[test]
     fn startup_only_settings_need_a_restart() {
-        let changes: [fn(&mut ServerConfig); 7] = [
+        let changes: [fn(&mut ServerConfig); 9] = [
             |c| c.port = 1234,
             |c| c.system.push(Systems::Sql),
             |c| c.auto_download_enabled = !c.auto_download_enabled,
@@ -1261,6 +1317,8 @@ mod restart_needed_tests {
             |c| c.mtg_db_path = Some("/elsewhere.db".into()),
             |c| c.plugins.push(PluginConfig { name: "books".into(), base_url: "http://localhost:5236".into(), enabled: true }),
             |c| c.cors_allowed_origins.push("https://cards.example.com".into()),
+            |c| c.price_history_enabled = !c.price_history_enabled,
+            |c| c.price_history_db_path = Some("/elsewhere.prices.db".into()),
         ];
         for change in changes {
             let mut new = config();

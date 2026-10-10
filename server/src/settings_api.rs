@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{
     ErrorPayload, GathersState, PATH_ENV_VARS, RESTART, ServerConfig, demo_err, demo_mode,
-    env_systems,
+    env_price_history, env_systems,
 };
 
 pub fn settings_routes() -> ApiRouter<GathersState> {
@@ -47,6 +47,11 @@ async fn get_env_overrides() -> Result<Json<Vec<EnvOverride>>, (StatusCode, Json
         && let Ok(value) = std::env::var("GATHERS_SYSTEMS")
     {
         overrides.push(EnvOverride { field: "system".into(), var: "GATHERS_SYSTEMS".into(), value });
+    }
+    if env_price_history().is_some()
+        && let Ok(value) = std::env::var("GATHERS_PRICE_HISTORY")
+    {
+        overrides.push(EnvOverride { field: "price_history_enabled".into(), var: "GATHERS_PRICE_HISTORY".into(), value });
     }
     for (field, var) in PATH_ENV_VARS {
         if let Ok(value) = std::env::var(var) {

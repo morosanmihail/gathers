@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 use crate::models::{
     AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
     CollectionAddResponse, CollectionCard, CollectionRemoveResponse, PublicCollectionPage,
-    PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse,
+    PriceHistoryResponse, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo,
 };
 
 /// HTTP client for the GatheRs server.
@@ -238,6 +238,43 @@ impl GathersClient {
         self.get(&format!(
             "/api/collection/cards/{}/purchase_history",
             urlenc(collection_id),
+        ))
+        .await
+    }
+
+    // ── system & prices ───────────────────────────────────────────────────────
+
+    pub async fn system_info(&self) -> eyre::Result<SystemInfo> {
+        self.get("/api/system").await
+    }
+
+    /// Current MTG prices for `card_id`, keyed by retailer (empty when the
+    /// server has no MTG price database).
+    pub async fn mtg_prices(
+        &self,
+        card_id: &str,
+    ) -> eyre::Result<std::collections::HashMap<String, serde_json::Value>> {
+        let mut prices: std::collections::HashMap<String, serde_json::Value> =
+            self.get(&format!("/api/mtg/prices?ids={}", urlenc(card_id))).await?;
+        Ok(prices
+            .remove(card_id)
+            .and_then(|p| p.get("paper").cloned())
+            .and_then(|p| serde_json::from_value(p).ok())
+            .unwrap_or_default())
+    }
+
+    /// Starts a background price database update for `game` (`mtg` or
+    /// `pokemon`); poll `system_info().downloading` for `{key}-prices`.
+    pub async fn update_prices(&self, game: &str) -> eyre::Result<String> {
+        self.post_empty(&format!("/api/{game}/prices/update")).await
+    }
+
+    /// A card's recorded daily prices under `provider`.
+    pub async fn price_history(&self, provider: &str, card_id: &str) -> eyre::Result<PriceHistoryResponse> {
+        self.get(&format!(
+            "/api/collection/price_history/{}/{}",
+            urlenc(provider),
+            urlenc(card_id),
         ))
         .await
     }

@@ -180,12 +180,15 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
             ret.start_download("PokemonSql-prices")?;
             system
         };
-        let retrieval = state.0.clone();
+        let (retrieval, storage) = state.clone();
         tokio::spawn(async move {
             let result = pokemon.update_prices().await;
             retrieval.lock().await.finish_download("PokemonSql-prices");
             match result {
-                Ok(true) => info!("Pokemon prices updated"),
+                Ok(true) => {
+                    info!("Pokemon prices updated");
+                    crate::price_history::spawn_snapshot(retrieval, storage, pokemon);
+                }
                 Ok(false) => info!("No Pokemon price database configured"),
                 Err(e) => error!(error = %e, "Failed to update Pokemon prices"),
             }
