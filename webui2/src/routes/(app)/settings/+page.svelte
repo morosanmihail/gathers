@@ -49,6 +49,7 @@
 		{ key: 'pokemon_db_path',     label: 'Pokémon Database path' },
 		{ key: 'pokemon_prices_path', label: 'Pokémon Prices path' },
 		{ key: 'storage_db_path',     label: 'Storage Database path' },
+		{ key: 'price_history_db_path', label: 'Price History Database path', placeholder: '(next to the storage database)' },
 	];
 
 	// Per-button update state
@@ -460,6 +461,23 @@
 									<div style="font-size: 0.8rem; color: var(--text2);">Show market prices and purchase history</div>
 								</div>
 							</label>
+							<div class="sub-setting">
+								<label style="display: flex; align-items: center; gap: 10px; cursor: {(config.pricing_enabled ?? true) ? 'pointer' : 'default'};">
+									<input type="checkbox" checked={config.price_history_enabled ?? false}
+										disabled={!(config.pricing_enabled ?? true)}
+										onchange={() => { if (config) { config = { ...config, price_history_enabled: !(config.price_history_enabled ?? false) }; queueSave(); } }}
+										style="width: 16px; height: 16px; accent-color: var(--accent);" />
+									<div style:opacity={(config.pricing_enabled ?? true) ? 1 : 0.5}>
+										<div style="font-weight: 600;">Record price history</div>
+										<div style="font-size: 0.8rem; color: var(--text2);">Keep daily prices of cards in your collections, shown as a chart in card details. Recorded when price databases update and when cards are added, in a separate database. Requires pricing and a server restart.</div>
+									</div>
+								</label>
+								{#if envOverrides.price_history_enabled}
+									<div class="env-override">
+										Overridden by <code>{envOverrides.price_history_enabled.var}={envOverrides.price_history_enabled.value}</code>. Changes here are saved to server.toml but won't apply while it is set.
+									</div>
+								{/if}
+							</div>
 							<div>
 								<label class="field-label" for="settings-preferred-currency">Preferred currency</label>
 								<select
@@ -497,7 +515,7 @@
 							File Paths
 						</div>
 						<div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
-							{#each PATH_FIELDS as { key, label }}
+							{#each PATH_FIELDS as { key, label, placeholder }}
 								<div>
 									<label class="field-label" for="settings-path-{key}">{label}</label>
 									<input
@@ -507,7 +525,7 @@
 										value={(config as Record<string, unknown>)[key] as string ?? ''}
 										oninput={(e) => setPath(key, (e.target as HTMLInputElement).value)}
 										onchange={flushSave}
-										placeholder="(default)"
+										placeholder={placeholder ?? '(default)'}
 									/>
 									{#if envOverrides[key]}
 										<div class="env-override">
@@ -583,6 +601,13 @@
 		margin: 0 0 16px;
 		font-size: 0.8rem;
 		color: var(--text2);
+	}
+
+	.sub-setting {
+		margin-left: 26px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
 	}
 
 	.restart-banner {

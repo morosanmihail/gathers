@@ -907,6 +907,26 @@ async fn test_get_card_prices_found() {
 }
 
 #[tokio::test]
+async fn test_get_card_prices_dated_by_newest_row() {
+    let dir = TempDir::new().unwrap();
+    let prices_path = write_dummy_prices(&dir);
+    {
+        let conn = rusqlite::Connection::open(&prices_path).unwrap();
+        // A newer foil quote dates the whole retailer; time parts are dropped.
+        conn.execute(
+            "UPDATE prices SET date = '2026-05-23T10:00:00Z' WHERE provider = 'cardkingdom' AND finish = 'foil'",
+            [],
+        )
+        .unwrap();
+    }
+    let system = system_with_prices(Some(prices_path));
+
+    let prices = system.get_card_prices("uuid-alpha").await.unwrap().unwrap();
+    assert_eq!(prices.paper["cardkingdom"].date.as_deref(), Some("2026-05-23"));
+    assert_eq!(prices.paper["tcgplayer"].date.as_deref(), Some("2026-05-22"));
+}
+
+#[tokio::test]
 async fn test_get_card_prices_not_found() {
     let dir = TempDir::new().unwrap();
     let prices_path = write_dummy_prices(&dir);

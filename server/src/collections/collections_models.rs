@@ -408,6 +408,15 @@ pub struct PurchaseHistoryResponse {
 }
 
 #[derive(Serialize, JsonSchema)]
+pub struct PriceHistoryResponse {
+    /// Whether the server keeps price history at all. When it doesn't,
+    /// `entries` is always empty.
+    pub enabled: bool,
+    /// Recorded prices, oldest first: one per retailer and finish per day.
+    pub entries: Vec<persistence::PriceHistoryEntry>,
+}
+
+#[derive(Serialize, JsonSchema)]
 pub struct CollectionValueBreakdown {
     /// Totals split by currency, largest total first. Every priced entry counts
     /// toward exactly one currency (that of its preferred retailer).

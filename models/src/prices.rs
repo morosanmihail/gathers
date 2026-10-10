@@ -17,6 +17,10 @@ pub struct RetailerPrices {
     /// ISO 4217 currency code of `normal`/`foil` (e.g. "USD", "EUR").
     #[serde(default = "default_currency")]
     pub currency: String,
+    /// UTC date (`YYYY-MM-DD`) these prices are as of, when the source
+    /// says — the newest of `normal`'s and `foil`'s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 pub const DEFAULT_CURRENCY: &str = "USD";

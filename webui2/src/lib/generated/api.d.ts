@@ -1451,6 +1451,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collection/price_history/{provider}/{card_uuid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PriceHistoryResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/share/{token}": {
         parameters: {
             query?: never;
@@ -2246,6 +2280,30 @@ export interface components {
              */
             skip: number;
         };
+        /** @description One retailer's price for one finish of a card on a given day. */
+        PriceHistoryEntry: {
+            /** @description ISO 4217 code `price` is in. */
+            currency: string;
+            /**
+             * @description Same convention as `models::CollectionCard::finish`: `""` is the
+             *     default finish, anything else is game-specific.
+             */
+            finish: string;
+            /** Format: double */
+            price: number;
+            /** @description UTC date, `YYYY-MM-DD`. */
+            recorded_on: string;
+            retailer: string;
+        };
+        PriceHistoryResponse: {
+            /**
+             * @description Whether the server keeps price history at all. When it doesn't,
+             *     `entries` is always empty.
+             */
+            enabled: boolean;
+            /** @description Recorded prices, oldest first: one per retailer and finish per day. */
+            entries: components["schemas"]["PriceHistoryEntry"][];
+        };
         /**
          * @description A page of full card data for a shareable, read-only collection view.
          *     Each entry in `cards` merges the collection entry (quantity, provider, ...)
@@ -2295,6 +2353,11 @@ export interface components {
              * @default USD
              */
             currency: string;
+            /**
+             * @description UTC date (`YYYY-MM-DD`) these prices are as of, when the source
+             *     says — the newest of `normal`'s and `foil`'s.
+             */
+            date?: string | null;
             /** Format: double */
             foil?: number | null;
             /** Format: double */
@@ -2373,6 +2436,16 @@ export interface components {
              * @default EUR
              */
             preferred_currency: string;
+            /** @description Defaults to `storage.prices.db` next to the storage database. */
+            price_history_db_path?: string | null;
+            /**
+             * @description Record the daily prices of cards in collections, in a separate
+             *     database (`price_history_db_path`). Recorded whenever a price
+             *     database is updated, when cards are added, and on startup while
+             *     nothing has been recorded yet. Takes effect on server restart.
+             * @default false
+             */
+            price_history_enabled: boolean;
             /** @default true */
             pricing_enabled: boolean;
             riftbound_db_path?: string | null;
@@ -2416,6 +2489,12 @@ export interface components {
              *     listed in several (see `ServerConfig::preferred_currency`).
              */
             preferred_currency: string;
+            /**
+             * @description Whether daily prices of collection cards are being recorded (see
+             *     `ServerConfig::price_history_enabled`). False when enabled but its
+             *     database couldn't be opened.
+             */
+            price_history_enabled: boolean;
             /** @description Whether pricing support is enabled (market prices, purchase history, etc.). */
             pricing_enabled: boolean;
             /**

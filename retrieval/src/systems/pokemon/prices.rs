@@ -5,37 +5,55 @@ use tracing::info;
 
 use crate::http::stream_to_file;
 
-pub(super) fn row_to_card_prices(uuid: &str, raw: f64, psa10: f64, psa9: f64) -> CardPrices {
+/// The latest usable value of one price column, and the date it was
+/// listed on.
+pub(super) struct Quote {
+    pub price: f64,
+    pub date: Option<String>,
+}
+
+/// SQL selecting, for the card id in `card_expr`, each price column's latest
+/// usable value followed by that value's date — six columns in `Quote`
+/// order: raw, PSA 10, PSA 9. Zero and the scraper's `20.0` placeholder are
+/// skipped.
+pub(super) fn latest_quotes_sql(card_expr: &str) -> String {
+    ["rawPrice", "gradedPriceTen", "gradedPriceNine"]
+        .iter()
+        .flat_map(|col| {
+            let filter = format!(
+                "FROM prices WHERE cardId = {card_expr} AND {col} > 0 AND {col} != 20.0 ORDER BY date DESC LIMIT 1"
+            );
+            [format!("(SELECT {col} {filter})"), format!("(SELECT date {filter})")]
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Reads the six columns of `latest_quotes_sql` starting at `first`.
+pub(super) fn quotes_from_row(row: &rusqlite::Row, first: usize) -> rusqlite::Result<[Quote; 3]> {
+    let quote = |i: usize| -> rusqlite::Result<Quote> {
+        Ok(Quote {
+            price: row.get::<_, Option<f64>>(first + 2 * i)?.unwrap_or(0.0),
+            date: row.get::<_, Option<String>>(first + 2 * i + 1)?,
+        })
+    };
+    Ok([quote(0)?, quote(1)?, quote(2)?])
+}
+
+pub(super) fn row_to_card_prices(uuid: &str, [raw, psa10, psa9]: [Quote; 3]) -> CardPrices {
     let mut paper = HashMap::new();
-    if raw > 0.0 {
-        paper.insert(
-            "raw".to_string(),
-            RetailerPrices {
-                normal: Some(raw),
-                foil: None,
-                currency: "USD".to_string(),
-            },
-        );
-    }
-    if psa10 > 0.0 {
-        paper.insert(
-            "graded_psa10".to_string(),
-            RetailerPrices {
-                normal: Some(psa10),
-                foil: None,
-                currency: "USD".to_string(),
-            },
-        );
-    }
-    if psa9 > 0.0 {
-        paper.insert(
-            "graded_psa9".to_string(),
-            RetailerPrices {
-                normal: Some(psa9),
-                foil: None,
-                currency: "USD".to_string(),
-            },
-        );
+    for (retailer, quote) in [("raw", raw), ("graded_psa10", psa10), ("graded_psa9", psa9)] {
+        if quote.price > 0.0 {
+            paper.insert(
+                retailer.to_string(),
+                RetailerPrices {
+                    normal: Some(quote.price),
+                    foil: None,
+                    currency: "USD".to_string(),
+                    date: quote.date.map(|d| d.chars().take(10).collect()),
+                },
+            );
+        }
     }
     CardPrices {
         uuid: uuid.to_string(),

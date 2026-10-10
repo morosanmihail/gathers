@@ -120,3 +120,31 @@ pub struct ShareLink {
 pub struct ShareLinkRevokeResponse {
     pub revoked: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistoryEntry {
+    pub retailer: String,
+    #[serde(default)]
+    pub finish: String,
+    pub price: f64,
+    pub currency: String,
+    pub recorded_on: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistoryResponse {
+    pub enabled: bool,
+    pub entries: Vec<PriceHistoryEntry>,
+}
+
+/// The subset of `/api/system` the e2e tests look at.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub systems: Vec<String>,
+    pub pricing_enabled: bool,
+    #[serde(default)]
+    pub price_history_enabled: bool,
+    /// Databases being downloaded, keyed like `Sql` or `PokemonSql-prices`.
+    #[serde(default)]
+    pub downloading: std::collections::HashMap<String, serde_json::Value>,
+}

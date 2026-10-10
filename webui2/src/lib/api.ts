@@ -582,6 +582,42 @@ export async function getPokemonPrices(ids: string[]): Promise<Record<string, Ca
 	return fetchPrices('/api/pokemon/prices', ids);
 }
 
+// Current market prices of one card from whichever system holds it, or null
+// when that system has none (Riftbound, plugins) or pricing is off.
+export async function getCardPrices(provider: string, id: string): Promise<CardPrices | null> {
+	const fetcher =
+		provider === 'MagicSQLite' || provider === 'Scryfall' ? getMtgPrices
+		: provider === 'PokemonSQLite' ? getPokemonPrices
+		: null;
+	if (!fetcher) return null;
+	return (await fetcher([id]))[id] ?? null;
+}
+
+// Price history — daily prices the server records for cards tracked in
+// collections, when `price_history_enabled`. Recorded at most daily, so a
+// session-long cache is plenty.
+export type PriceHistoryEntry = components['schemas']['PriceHistoryEntry'];
+const priceHistoryCache: Map<string, Promise<PriceHistoryEntry[]>> = new Map();
+
+/** A card's recorded prices, oldest first; empty when there are none, price
+ *  history is off, or the request fails. */
+export function getPriceHistory(provider: string, id: string): Promise<PriceHistoryEntry[]> {
+	const key = `${provider}:${id}`;
+	let entries = priceHistoryCache.get(key);
+	if (!entries) {
+		entries = fetchJSON<{ enabled: boolean; entries: PriceHistoryEntry[] }>(
+			`/api/collection/price_history/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`
+		)
+			.then(r => (r.enabled ? r.entries : []))
+			.catch(() => {
+				priceHistoryCache.delete(key);
+				return [];
+			});
+		priceHistoryCache.set(key, entries);
+	}
+	return entries;
+}
+
 // Purchase history
 export type PurchaseEntry = components['schemas']['CollectionPurchaseHistoryEntry'];
 type PurchaseHistoryEntry = components['schemas']['PurchaseHistoryEntry'];
