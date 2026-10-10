@@ -270,7 +270,7 @@ pub async fn cache_upstream_bz2(
 }
 
 /// Mirror-server side: for components the mirror compresses itself
-/// (Pokémon prices, Riftbound cards, Pokémon cards). Computes the sha256 of
+/// (TCGCSV prices, Riftbound cards, Pokémon cards). Computes the sha256 of
 /// the given bz2, publishes it into `data_dir/{stem}.bz2`, writes the
 /// sidecar.
 pub fn write_with_sha256(bz2_path: &Path, data_dir: &Path, stem: &str) -> eyre::Result<()> {
@@ -322,7 +322,7 @@ fn reseed_state_from_published(data_dir: &Path, stem: &str, state_db: &Path) -> 
     decompress_bz2(&published, state_db)
 }
 
-/// Refreshes all five mirrored components into `data_dir`. Each component
+/// Refreshes all six mirrored components into `data_dir`. Each component
 /// is independent — one failing (e.g. a scraper target changing layout)
 /// doesn't block the others. A component refreshed successfully within
 /// `interval` is skipped; a component that failed or never finished is
@@ -360,7 +360,19 @@ pub async fn run_update_cycle(data_dir: &Path, interval: Duration) -> eyre::Resu
         data_dir,
         crate::systems::pokemon::POKEMON_PRICES_FILE,
         interval,
-        refresh_pokemon_prices(data_dir),
+        refresh_tcgcsv_prices(data_dir, &crate::systems::pokemon::POKEMON, crate::systems::pokemon::POKEMON_PRICES_FILE),
+    )
+    .await;
+
+    refresh_if_stale(
+        data_dir,
+        crate::systems::riftsqlite::RIFTBOUND_PRICES_FILE,
+        interval,
+        refresh_tcgcsv_prices(
+            data_dir,
+            &crate::systems::riftsqlite::RIFTBOUND,
+            crate::systems::riftsqlite::RIFTBOUND_PRICES_FILE,
+        ),
     )
     .await;
 
@@ -383,14 +395,14 @@ pub async fn run_update_cycle(data_dir: &Path, interval: Duration) -> eyre::Resu
     Ok(())
 }
 
-/// Always built straight from TCGCSV, never via `try_mirrors` — a mirror
-/// that listed itself (or another mirror) in its own `mirrors.toml` would
-/// otherwise just republish what it already serves.
-async fn refresh_pokemon_prices(data_dir: &Path) -> eyre::Result<()> {
+/// A game's TCGCSV prices snapshot, published as `{stem}.bz2`. Always built
+/// straight from TCGCSV, never via `try_mirrors` — a mirror that listed
+/// itself (or another mirror) in its own `mirrors.toml` would otherwise just
+/// republish what it already serves.
+async fn refresh_tcgcsv_prices(data_dir: &Path, game: &crate::systems::tcgcsv::Game, stem: &str) -> eyre::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let stem = crate::systems::pokemon::POKEMON_PRICES_FILE;
     let raw = temp_dir.path().join(stem);
-    crate::systems::pokemon::build_pokemon_prices(&raw).await?;
+    crate::systems::tcgcsv::build_prices_db(game, &raw).await?;
     let bz2 = temp_dir.path().join(format!("{stem}.bz2"));
     compress_bz2(&raw, &bz2)?;
     write_with_sha256(&bz2, data_dir, stem)

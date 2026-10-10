@@ -11,7 +11,7 @@
 		getCollectionCards, getCollectionCount,
 		searchCollectionCards, searchCollectionCount,
 		addCardToCollection, deleteCardFromCollection, adjustWantQuantity,
-		getMtgPrices, getPokemonPrices, getCollectionValue, PAGE_SIZE
+		pricesFetcher, getCollectionValue, PAGE_SIZE
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
@@ -100,15 +100,17 @@
 
 			// Fetch prices + value in parallel (non-blocking, results are cached)
 			if (app.pricingEnabled) {
-				const mtgIds = cards
-					.filter(c => !c.provider || c.provider === 'MagicSQLite' || c.provider === 'Scryfall')
-					.map(c => c.id);
-				const pokemonIds = cards
-					.filter(c => c.provider === 'PokemonSQLite')
-					.map(c => c.id);
+				// Cards stored before providers were recorded are MTG.
+				const idsByProvider = new Map<string, string[]>();
+				for (const c of cards) {
+					const provider = c.provider || 'MagicSQLite';
+					idsByProvider.set(provider, [...(idsByProvider.get(provider) ?? []), c.id]);
+				}
 				const fetches: Promise<Record<string, CardPrices>>[] = [];
-				if (mtgIds.length) fetches.push(getMtgPrices(mtgIds));
-				if (pokemonIds.length) fetches.push(getPokemonPrices(pokemonIds));
+				for (const [provider, ids] of idsByProvider) {
+					const fetcher = pricesFetcher(provider);
+					if (fetcher) fetches.push(fetcher(ids));
+				}
 				const valuePromise = getCollectionValue(collectionId);
 				if (fetches.length) {
 					Promise.all(fetches).then(results => {

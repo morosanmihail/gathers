@@ -109,7 +109,7 @@ async fn main() -> eyre::Result<()> {
                     retrieval::download_mtg_db(path, None).await?;
                 }
                 Systems::RiftboundSql => {
-                    let tmp = retrieval::RiftboundSQLiteRetrievalSystem::new(Some(path.clone()))?;
+                    let tmp = retrieval::RiftboundSQLiteRetrievalSystem::new(Some(path.clone()), None)?;
                     RetrievalSystem::RiftboundSQLiteRetrievalSystem(tmp)
                         .update_backend()
                         .await?;
@@ -140,7 +140,7 @@ async fn main() -> eyre::Result<()> {
             retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path, args.price.clone())?,
         ),
         Systems::RiftboundSql => RetrievalSystem::RiftboundSQLiteRetrievalSystem(
-            retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path)?,
+            retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path, None)?,
         ),
         Systems::Pokemon => RetrievalSystem::PokemonSQLiteRetrievalSystem(
             retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path, None)?,

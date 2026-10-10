@@ -114,7 +114,7 @@ async fn test_get_random_card() {
 
     upsert_riftbound_cards(&db_path, &[full_card("c1", "OGN", "Card One")]).unwrap();
 
-    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path)).unwrap();
+    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path), None).unwrap();
     let result = system.get_random_card().await.unwrap();
     assert!(result.is_some());
     match result.unwrap() {
@@ -134,7 +134,7 @@ async fn test_get_random_card_varies() {
         .collect();
     upsert_riftbound_cards(&db_path, &cards).unwrap();
 
-    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path)).unwrap();
+    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path), None).unwrap();
     let mut names = std::collections::HashSet::new();
     for _ in 0..20 {
         let card = system.get_random_card().await.unwrap().unwrap();
@@ -154,7 +154,7 @@ async fn test_cards_with_missing_fields_still_load() {
     let db_path = db_path.to_str().unwrap().to_string();
     // Only an id, a set and a name: no text, artists, domains, image or rarity, as for a rune.
     upsert_riftbound_cards(&db_path, &[card("ogn-126-298", "OGN", "Body Rune")]).unwrap();
-    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path)).unwrap();
+    let system = RiftboundSQLiteRetrievalSystem::new(Some(db_path), None).unwrap();
 
     let found = system
         .search_cards(CardSearchFilters::new().with_name("Body Rune"), None, Some(10))
@@ -215,7 +215,7 @@ fn unique_fixture(dir: &TempDir) -> RiftboundSQLiteRetrievalSystem {
         ],
     )
     .unwrap();
-    RiftboundSQLiteRetrievalSystem::new(Some(db_path)).unwrap()
+    RiftboundSQLiteRetrievalSystem::new(Some(db_path), None).unwrap()
 }
 
 async fn ids(system: &RiftboundSQLiteRetrievalSystem, filters: CardSearchFilters, skip: usize, limit: usize) -> Vec<String> {
@@ -233,7 +233,7 @@ async fn ids(system: &RiftboundSQLiteRetrievalSystem, filters: CardSearchFilters
 
 #[tokio::test]
 async fn test_unique_modes_offered() {
-    let modes = RiftboundSQLiteRetrievalSystem::new(None).unwrap().unique_modes();
+    let modes = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap().unique_modes();
     let ids: Vec<_> = modes.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, ["prints", "cards"]);
 }
@@ -314,4 +314,80 @@ fn test_variant_rank() {
     ] {
         assert_eq!(unique::variant_rank(id), rank, "{id}");
     }
+}
+
+// ── Prices ───────────────────────────────────────────────────────────────────
+
+/// A TCGCSV snapshot dated 2026-10-09: `sfd-162-221` in both finishes,
+/// `ogn-269-298` foil only, and `ogn-191-298` matched to a product with no
+/// prices.
+fn priced_system(dir: &TempDir) -> RiftboundSQLiteRetrievalSystem {
+    use crate::systems::tcgcsv::{tests::row, write_prices_db};
+    let prices = dir.path().join("prices.sqlite");
+    write_prices_db(
+        &prices,
+        "2026-10-09T20:05:19+00:00",
+        [
+            row(1, "Normal", Some(0.25), None),
+            row(1, "Foil", Some(1.5), None),
+            row(2, "Foil", Some(40.0), None),
+        ],
+        [
+            ("sfd-162-221".to_string(), 1),
+            ("ogn-269-298".to_string(), 2),
+            ("ogn-191-298".to_string(), 3),
+        ],
+    )
+    .unwrap();
+    RiftboundSQLiteRetrievalSystem::new(None, Some(prices.to_string_lossy().into_owned())).unwrap()
+}
+
+#[tokio::test]
+async fn test_card_prices_in_both_finishes() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+
+    let prices = system.get_card_prices("sfd-162-221").await.unwrap().unwrap();
+    assert_eq!(prices.uuid, "sfd-162-221");
+    let tcgp = &prices.paper["tcgplayer"];
+    assert_eq!(tcgp.normal, Some(0.25));
+    assert_eq!(tcgp.foil, Some(1.5));
+    assert_eq!(tcgp.currency, "USD");
+    assert_eq!(tcgp.date, "2026-10-09".parse().ok());
+}
+
+#[tokio::test]
+async fn test_foil_only_card_has_no_normal_price() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+
+    let prices = system.get_card_prices("ogn-269-298").await.unwrap().unwrap();
+    assert_eq!(prices.paper["tcgplayer"].normal, None);
+    assert_eq!(prices.paper["tcgplayer"].foil, Some(40.0));
+}
+
+#[tokio::test]
+async fn test_bulk_prices_skip_unpriced_cards() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+
+    let ids = ["sfd-162-221", "ogn-269-298", "ogn-191-298", "sfd-108-221"].map(String::from).to_vec();
+    let mut got: Vec<_> = system.get_bulk_card_prices(ids).await.unwrap().into_keys().collect();
+    got.sort();
+    assert_eq!(got, vec!["ogn-269-298", "sfd-162-221"]);
+    assert!(system.get_bulk_card_prices(vec![]).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_no_prices_without_a_prices_db() {
+    let system = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap();
+    assert!(system.get_card_prices("sfd-162-221").await.unwrap().is_none());
+    assert!(!system.update_prices().await.unwrap());
+
+    let missing = RiftboundSQLiteRetrievalSystem::new(
+        None,
+        Some("/tmp/does_not_exist_riftbound_prices.sqlite".to_string()),
+    )
+    .unwrap();
+    assert!(missing.get_card_prices("sfd-162-221").await.unwrap().is_none());
 }

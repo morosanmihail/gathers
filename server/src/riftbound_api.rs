@@ -171,4 +171,5 @@ pub fn riftbound_routes() -> ApiRouter<GathersState> {
         .api_route("/cards", get(retrieve_riftbound_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", post(update))
+        .merge(crate::prices_api::price_routes::<crate::prices_api::Riftbound>())
 }

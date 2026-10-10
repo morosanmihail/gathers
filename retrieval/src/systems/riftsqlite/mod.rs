@@ -1,11 +1,15 @@
 mod models;
+mod prices;
 mod unique;
 mod update;
+
+pub(crate) use prices::RIFTBOUND;
+pub use prices::{RIFTBOUND_PRICES_FILE, download_riftbound_prices};
 
 use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::Arc};
 
 use ::models::{
-    Card, CardID, CollectorNumber, Set, SetCode,
+    Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
     filters::{CardSearchFilters, SortField, UNIQUE_PRINTS, UniqueMode},
 };
 use models::SqlCard;
@@ -13,6 +17,7 @@ use rusqlite::{Connection, params};
 use tokio::sync::Mutex;
 use tracing::info;
 
+use crate::systems::tcgcsv::{self, PricesDb};
 use crate::systems::sql_helpers::{
     sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
 };
@@ -31,14 +36,16 @@ impl NamedRetrievalSystem for RiftboundSQLiteRetrievalSystem {
 pub struct RiftboundSQLiteRetrievalSystem {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     db_path: String,
+    prices: PricesDb,
 }
 
 impl RiftboundSQLiteRetrievalSystem {
-    pub fn new(db_path: Option<String>) -> eyre::Result<Self> {
+    pub fn new(db_path: Option<String>, prices_db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/riftbound.db".to_string());
         Ok(Self {
             connection: Arc::new(Mutex::new(Connection::open(path.clone())?)),
             db_path: path,
+            prices: PricesDb::new(prices_db_path)?,
         })
     }
 }
@@ -338,6 +345,39 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             .flatten()
             .map(|(id, set, num): (String, String, String)| (set, num, id))
             .collect())
+    }
+
+    async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {
+        Ok(self
+            .get_bulk_card_prices(vec![uuid.to_string()])
+            .await?
+            .remove(uuid))
+    }
+
+    async fn get_bulk_card_prices(
+        &self,
+        uuids: Vec<String>,
+    ) -> eyre::Result<HashMap<String, CardPrices>> {
+        if uuids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        Ok(self
+            .prices
+            .with(|conn| {
+                let products = tcgcsv::products_for_cards(conn, &uuids)?;
+                tcgcsv::card_prices(conn, products, &prices::RIFTBOUND.printings)
+            })
+            .await?
+            .unwrap_or_default())
+    }
+
+    async fn update_prices(&self) -> eyre::Result<bool> {
+        let Some(prices_path) = self.prices.path() else {
+            return Ok(false);
+        };
+        prices::download_riftbound_prices(prices_path).await?;
+        self.prices.reset().await;
+        Ok(true)
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {

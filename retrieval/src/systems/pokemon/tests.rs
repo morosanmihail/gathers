@@ -2,6 +2,7 @@ use super::*;
 use ::models::pokemon::EnergyType;
 use rusqlite::Connection;
 use tempfile::TempDir;
+use crate::systems::tcgcsv::tests::row;
 
 async fn setup_test_db() -> PokemonSQLiteRetrievalSystem {
     PokemonSQLiteRetrievalSystem::new(None, None).unwrap()
@@ -515,24 +516,16 @@ fn price_fixture(dir: &TempDir) -> (String, String) {
         )
         .unwrap();
     let prices = dir.path().join("prices.sqlite");
-    let row = |product_id, sub_type: &str, market| prices::PriceRow {
-        product_id,
-        sub_type_name: sub_type.to_string(),
-        low_price: None,
-        mid_price: None,
-        high_price: None,
-        market_price: market,
-        direct_low_price: None,
-    };
-    prices::write_prices_db(
+    crate::systems::tcgcsv::write_prices_db(
         &prices,
         "2026-10-09T20:05:19+00:00",
         [
-            row(100, "Normal", Some(2.0)),
-            row(100, "Reverse Holofoil", Some(3.5)),
-            row(200, "Holofoil", Some(0.25)),
-            row(300, "Normal", Some(0.0)),
+            row(100, "Normal", Some(2.0), None),
+            row(100, "Reverse Holofoil", Some(3.5), None),
+            row(200, "Holofoil", Some(0.25), None),
+            row(300, "Normal", Some(0.0), None),
         ],
+        [],
     )
     .unwrap();
     (cards.to_string_lossy().into_owned(), prices.to_string_lossy().into_owned())

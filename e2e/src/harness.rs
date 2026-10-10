@@ -31,6 +31,7 @@ const INHERITED_SERVER_VARS: &[&str] = &[
     "MTG_DB_PATH",
     "MTG_PRICES_PATH",
     "RIFTBOUND_DB_PATH",
+    "RIFTBOUND_PRICES_PATH",
     "POKEMON_DB_PATH",
     "POKEMON_PRICES_PATH",
     "STORAGE_DB_PATH",
@@ -42,6 +43,7 @@ const MIRROR_STEMS: &[&str] = &[
     "AllPrintings.sqlite",
     "AllPricesToday.sqlite",
     "pokemon_prices_tcgcsv.sqlite",
+    "riftbound_prices_tcgcsv.sqlite",
     "riftbound.sqlite",
     "pokemon.sqlite",
 ];

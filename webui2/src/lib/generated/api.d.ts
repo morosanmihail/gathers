@@ -440,6 +440,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/riftbound/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    ids?: string[];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["CardPrices"];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/riftbound/prices/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": string;
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pokemon/cards/search": {
         parameters: {
             query?: never;
@@ -1995,10 +2067,6 @@ export interface components {
             /** @default [] */
             ids: string[];
         };
-        BulkPricesQuery2: {
-            /** @default [] */
-            ids: string[];
-        };
         CardIdentInner: {
             scryfallId: string;
         };
@@ -2453,6 +2521,7 @@ export interface components {
             /** @default true */
             pricing_enabled: boolean;
             riftbound_db_path?: string | null;
+            riftbound_prices_path?: string | null;
             storage_db_path?: string | null;
             system: components["schemas"]["Systems"][];
         };

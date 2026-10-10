@@ -582,13 +582,24 @@ export async function getPokemonPrices(ids: string[]): Promise<Record<string, Ca
 	return fetchPrices('/api/pokemon/prices', ids);
 }
 
-// Current market prices of one card from whichever system holds it, or null
-// when that system has none (Riftbound, plugins) or pricing is off.
-export async function getCardPrices(provider: string, id: string): Promise<CardPrices | null> {
-	const fetcher =
-		provider === 'MagicSQLite' || provider === 'Scryfall' ? getMtgPrices
+export async function getRiftboundPrices(ids: string[]): Promise<Record<string, CardPrices>> {
+	if (!ids.length) return {};
+	return fetchPrices('/api/riftbound/prices', ids);
+}
+
+// Price fetcher for a provider / active system, or null when it has no
+// prices (plugins).
+export function pricesFetcher(provider: string): ((ids: string[]) => Promise<Record<string, CardPrices>>) | null {
+	return provider === 'MagicSQLite' || provider === 'Scryfall' ? getMtgPrices
 		: provider === 'PokemonSQLite' ? getPokemonPrices
+		: provider === 'RiftboundSQLite' ? getRiftboundPrices
 		: null;
+}
+
+// Current market prices of one card from whichever system holds it, or null
+// when that system has none (plugins) or pricing is off.
+export async function getCardPrices(provider: string, id: string): Promise<CardPrices | null> {
+	const fetcher = pricesFetcher(provider);
 	if (!fetcher) return null;
 	return (await fetcher([id]))[id] ?? null;
 }

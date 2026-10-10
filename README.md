@@ -38,7 +38,7 @@ There's also a `mirror` binary/image. It snapshots all card DBs daily and serves
 
 Why: lessens load on the third parties who host this data for free. Big thanks to:
 - [mtgjson.com](https://mtgjson.com) — MTG card and price data
-- [TCGCSV](https://tcgcsv.com) — Pokémon price data (daily TCGplayer price snapshots)
+- [TCGCSV](https://tcgcsv.com) — Pokémon and Riftbound price data (daily TCGplayer price snapshots)
 - [Riftbound's official card gallery](https://riftbound.leagueoflegends.com/en-us/card-gallery/) — Riftbound card data
 
 Run it, then point a `gathers`/`server` deployment at it via `~/.local/share/gathers/mirrors.toml`:
@@ -60,7 +60,7 @@ mirrors = ["http://mirror.gathers.cards"]
 [MTGJson](https://mtgjson.com) database for all MTG card databases!
 
 Pokemon database scraper thanks to [pokedata](https://github.com/poketrax/pokedata).
-Pokemon prices thanks to [TCGCSV](https://tcgcsv.com).
+Pokemon and Riftbound prices thanks to [TCGCSV](https://tcgcsv.com).
 GatheRs version is a Rust rewrite.
 
 Riftbound database scraper thanks to [vikkumar2021](https://github.com/vikkumar2021/RiftboundCardDatabase). 

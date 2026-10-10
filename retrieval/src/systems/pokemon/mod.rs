@@ -5,7 +5,7 @@ mod prices;
 mod scraper;
 mod unique;
 
-pub(crate) use prices::build_pokemon_prices;
+pub(crate) use prices::POKEMON;
 pub use prices::{POKEMON_PRICES_FILE, download_pokemon_prices};
 
 /// Runs the live Pokémon card scraper, upserting into the db at `path`
@@ -40,6 +40,7 @@ use tokio::sync::Mutex;
 
 use tracing::info;
 
+use crate::systems::tcgcsv::{self, PricesDb};
 use crate::systems::sql_helpers::{
     sql_limit_offset, sql_pair_placeholders, sql_placeholders, sql_sort_dir,
 };
@@ -55,23 +56,17 @@ impl NamedRetrievalSystem for PokemonSQLiteRetrievalSystem {
 pub struct PokemonSQLiteRetrievalSystem {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     pub(super) _db_path: String,
-    prices_db_path: Option<String>,
-    prices_connection: Arc<Mutex<Option<Connection>>>,
+    prices: PricesDb,
 }
 
 impl PokemonSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_db_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/pokemon.db".to_string());
         let conn = Connection::open(path.clone())?;
-        let prices_conn = match prices_db_path {
-            Some(ref p) => prices::open_prices_db(p)?,
-            None => None,
-        };
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             _db_path: path,
-            prices_db_path,
-            prices_connection: Arc::new(Mutex::new(prices_conn)),
+            prices: PricesDb::new(prices_db_path)?,
         })
     }
 }
@@ -317,11 +312,11 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         &self,
         uuids: Vec<String>,
     ) -> eyre::Result<HashMap<String, CardPrices>> {
-        if uuids.is_empty() || self.prices_db_path.is_none() {
+        if uuids.is_empty() || self.prices.path().is_none() {
             return Ok(HashMap::new());
         }
         // Prices are keyed by TCGplayer product id; several cards can share one.
-        let product_ids: Vec<(String, i64)> = {
+        let products: Vec<(String, i64)> = {
             let conn = self.connection.lock().await;
             let mut stmt = conn.prepare(&format!(
                 "SELECT cardId, idTCGP FROM cards WHERE idTCGP > 0 AND cardId IN ({})",
@@ -332,41 +327,22 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             })?
             .collect::<Result<_, _>>()?
         };
-        if product_ids.is_empty() {
+        if products.is_empty() {
             return Ok(HashMap::new());
         }
-
-        let by_product = {
-            let mut conn_guard = self.prices_connection.lock().await;
-            if conn_guard.is_none() {
-                *conn_guard = prices::open_prices_db(self.prices_db_path.as_deref().unwrap())?;
-            }
-            let Some(conn) = conn_guard.as_ref() else {
-                return Ok(HashMap::new());
-            };
-            let mut ids: Vec<i64> = product_ids.iter().map(|(_, id)| *id).collect();
-            ids.sort_unstable();
-            ids.dedup();
-            prices::prices_for_products(conn, &ids)?
-        };
-
-        Ok(product_ids
-            .into_iter()
-            .filter_map(|(card_id, product_id)| {
-                let mut prices = by_product.get(&product_id)?.clone();
-                prices.uuid = card_id.clone();
-                Some((card_id, prices))
-            })
-            .collect())
+        Ok(self
+            .prices
+            .with(|conn| tcgcsv::card_prices(conn, products, &prices::POKEMON.printings))
+            .await?
+            .unwrap_or_default())
     }
 
     async fn update_prices(&self) -> eyre::Result<bool> {
-        let prices_path = match &self.prices_db_path {
-            Some(p) => p.clone(),
-            None => return Ok(false),
+        let Some(prices_path) = self.prices.path() else {
+            return Ok(false);
         };
-        prices::download_pokemon_prices(&prices_path).await?;
-        *self.prices_connection.lock().await = None;
+        prices::download_pokemon_prices(prices_path).await?;
+        self.prices.reset().await;
         Ok(true)
     }
 
