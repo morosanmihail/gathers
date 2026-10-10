@@ -27,20 +27,13 @@
 //! Finally every card's full history is compared exactly with what the
 //! simulation expects, the server is restarted and the history checked again.
 //!
-//! Run (builds `server` and `mirror` first):
+//! Run:
 //!   cargo run --example price_history_weeks
-//!
-//! Use prebuilt binaries instead:
-//!   GATHERS_BIN_DIR=target/release cargo run --example price_history_weeks
 
-use std::{
-    path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
 use e2e::GathersClient;
-use retrieval::mirror;
+use e2e::harness::{Harness, ServerSetup, wait_until};
 
 const WEEKS: u32 = 6;
 /// Week whose MTG prices are never published: the mirror keeps serving the
@@ -75,49 +68,38 @@ type Entry = (String, String, String, f64, String);
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
-    println!("=== GatheRs multi-week price history e2e ===");
-
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let bin_dir = match std::env::var("GATHERS_BIN_DIR") {
-        Ok(dir) => PathBuf::from(dir),
-        Err(_) => {
-            step("Building server and mirror");
-            let status = Command::new(env!("CARGO"))
-                .args(["build", "--bin", "server", "--bin", "mirror"])
-                .current_dir(&workspace)
-                .status()?;
-            eyre::ensure!(status.success(), "building server and mirror failed");
-            workspace.join("target/debug")
-        }
-    };
-
-    let tmp = tempfile::tempdir()?;
-    let mut env = TestEnv::new(tmp.path(), &workspace, &bin_dir)?;
-    let result = run(&mut env).await;
-    if result.is_err() {
-        env.dump_logs();
-        let kept = tmp.keep();
-        println!("\nTest files kept in {}", kept.display());
-    }
-    result
+    let mut harness = Harness::new("multi-week price history")?;
+    let result = run(&mut harness).await;
+    harness.conclude(result)
 }
 
-async fn run(env: &mut TestEnv) -> eyre::Result<()> {
+async fn run(harness: &mut Harness) -> eyre::Result<()> {
     // ── Deploy mirror + server ──────────────────────────────────────────────
     step("Deploy mirror and server");
 
-    env.publish_card_dbs()?;
-    env.start_mirror().await?;
-    ok(&format!("mirror serving test card DBs on :{}", env.mirror_port));
+    harness.publish_to_mirror(&harness.data_file("testPrintings.db"), "AllPrintings.sqlite")?;
+    harness.publish_to_mirror(&harness.data_file("pokemon.db"), "pokemon.sqlite")?;
+    let mirrors_toml = harness.start_mirror().await?;
+    ok("mirror serving the test card DBs");
 
-    let client = env.start_server().await?;
+    // Card databases start missing: the server fetches them from the mirror.
+    let db = harness.root().join("db");
+    let db_path = |file: &str| db.join(file).to_string_lossy().into_owned();
+    let setup = ServerSetup::new()?
+        .auto_update()
+        .env("GATHERS_MIRRORS_PATH", mirrors_toml.to_string_lossy())
+        .env("GATHERS_SYSTEMS", "sql,pokemon-sql")
+        .env("GATHERS_PRICE_HISTORY", "true")
+        .env("MTG_DB_PATH", db_path("AllPrintings.db"))
+        .env("MTG_PRICES_PATH", db_path("AllPricesToday.db"))
+        .env("POKEMON_DB_PATH", db_path("pokemon.db"))
+        .env("POKEMON_PRICES_PATH", db_path("pokemon_prices.sqlite"))
+        .expect_system(MTG)
+        .expect_system(POKEMON);
+    let client = harness.start_server(&setup).await?;
     let info = client.system_info().await?;
     ensure(info.price_history_enabled, "server reports price history enabled")?;
-    ensure(
-        info.systems.iter().any(|s| s == MTG) && info.systems.iter().any(|s| s == POKEMON),
-        "MTG and Pokemon systems bootstrapped from the mirror",
-    )?;
-    ensure(env.db_dir.join("storage.prices.db").exists(), "storage.prices.db created next to storage.db")?;
+    ensure(db.join("storage.prices.db").exists(), "storage.prices.db created next to storage.db")?;
     ok("server up, card DBs downloaded from mirror, price history DB created");
 
     // ── Collection ──────────────────────────────────────────────────────────
@@ -137,14 +119,15 @@ async fn run(env: &mut TestEnv) -> eyre::Result<()> {
     ok("cards added; no history yet without price data");
 
     // ── Weeks ───────────────────────────────────────────────────────────────
-    let start = Instant::now();
+    let mut pokemon_rows = vec![];
+    let start = std::time::Instant::now();
     for week in 1..=WEEKS {
         step(&format!("Week {week} ({})", date(week)));
 
         if week != STALE_MTG_WEEK {
-            env.publish_mtg_prices(week)?;
+            publish_mtg_prices(harness, week)?;
         }
-        env.publish_pokemon_prices(week)?;
+        publish_pokemon_prices(harness, &mut pokemon_rows, week)?;
 
         client.update_prices("mtg").await?;
         client.update_prices("pokemon").await?;
@@ -202,8 +185,8 @@ async fn run(env: &mut TestEnv) -> eyre::Result<()> {
 
     // ── Restart ─────────────────────────────────────────────────────────────
     step("Restart server — history persists");
-    env.stop_server();
-    let client = env.start_server().await?;
+    harness.stop("server");
+    let client = harness.start_server(&setup).await?;
     check_histories(&client, &expected).await?;
 
     println!("\n=== All multi-week price history checks passed ===");
@@ -327,201 +310,44 @@ async fn wait_for_day(client: &GathersClient, provider: &str, card: &str, day: &
     Ok(history(client, provider, card).await?.into_iter().filter(|e| e.0 == day).collect())
 }
 
-async fn wait_until<F, Fut>(what: &str, mut check: F) -> eyre::Result<()>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = eyre::Result<bool>>,
-{
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if check().await.unwrap_or(false) {
-            return Ok(());
+// ── Mirror contents ─────────────────────────────────────────────────────────
+
+/// Publishes an `AllPricesToday` database holding `week`'s prices.
+fn publish_mtg_prices(harness: &Harness, week: u32) -> eyre::Result<()> {
+    let path = harness.root().join(format!("mtg-prices-{week}.sqlite"));
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "CREATE TABLE prices (uuid TEXT, date TEXT, source TEXT, provider TEXT, priceType TEXT, finish TEXT, price REAL, currency TEXT);",
+    )?;
+    let mut insert = conn.prepare("INSERT INTO prices VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
+    for card in [CARD_A, CARD_B, CARD_C, CARD_D] {
+        for (i, (retailer, finish, currency)) in mtg_listings(card, week).into_iter().enumerate() {
+            let price = mtg_price(card, i, week);
+            insert.execute(rusqlite::params![card, date(week), "paper", retailer, "retail", finish, price, currency])?;
+            // Buylist and online prices aren't market prices; never recorded.
+            insert.execute(rusqlite::params![card, date(week), "paper", retailer, "buylist", finish, price / 2.0, currency])?;
+            insert.execute(rusqlite::params![card, date(week), "mtgo", retailer, "retail", finish, price / 4.0, currency])?;
         }
-        eyre::ensure!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(25)).await;
     }
+    drop(insert);
+    drop(conn);
+    harness.publish_to_mirror(&path, "AllPricesToday.sqlite")
 }
 
-// ── Deployed mirror + server ────────────────────────────────────────────────
-
-struct TestEnv {
-    root: PathBuf,
-    workspace: PathBuf,
-    bin_dir: PathBuf,
-    mirror_dir: PathBuf,
-    db_dir: PathBuf,
-    mirror_port: u16,
-    server_port: u16,
-    mirror: Option<Child>,
-    server: Option<Child>,
-    /// Every Pokémon price row published so far — that database keeps its
-    /// whole history, newest rows winning.
-    pokemon_rows: Vec<(String, f64, f64)>,
-}
-
-impl TestEnv {
-    fn new(root: &Path, workspace: &Path, bin_dir: &Path) -> eyre::Result<Self> {
-        let env = Self {
-            root: root.to_path_buf(),
-            workspace: workspace.to_path_buf(),
-            bin_dir: bin_dir.to_path_buf(),
-            mirror_dir: root.join("mirror"),
-            db_dir: root.join("db"),
-            mirror_port: free_port()?,
-            server_port: free_port()?,
-            mirror: None,
-            server: None,
-            pokemon_rows: vec![],
-        };
-        std::fs::create_dir_all(&env.mirror_dir)?;
-        std::fs::create_dir_all(&env.db_dir)?;
-        std::fs::create_dir_all(root.join("home"))?;
-        Ok(env)
+/// Adds `week`'s row for the Pokémon card to `rows` and publishes them all
+/// — that database keeps its whole history, newest rows winning.
+fn publish_pokemon_prices(harness: &Harness, rows: &mut Vec<(String, f64, f64)>, week: u32) -> eyre::Result<()> {
+    rows.push((format!("{}T00:00:00.000Z", date(week)), pokemon_raw(week), pokemon_psa10(week)));
+    let path = harness.root().join(format!("pokemon-prices-{week}.sqlite"));
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);",
+    )?;
+    for (day, raw, psa10) in rows.iter() {
+        conn.execute("INSERT INTO prices VALUES (?1, ?2, '', ?3, ?4, 0.0)", rusqlite::params![day, CARD_P, raw, psa10])?;
     }
-
-    /// Compresses `src` into the mirror as `{stem}.bz2` + `.sha256`, exactly
-    /// as the real mirror publishes.
-    fn publish(&self, src: &Path, stem: &str) -> eyre::Result<()> {
-        let staging = tempfile::tempdir_in(&self.root)?;
-        let bz2 = staging.path().join(format!("{stem}.bz2"));
-        mirror::compress_bz2(src, &bz2)?;
-        mirror::write_with_sha256(&bz2, &self.mirror_dir, stem)
-    }
-
-    fn publish_card_dbs(&self) -> eyre::Result<()> {
-        let data = self.workspace.join("data");
-        self.publish(&data.join("testPrintings.db"), "AllPrintings.sqlite")?;
-        self.publish(&data.join("pokemon.db"), "pokemon.sqlite")?;
-        // Fresh markers keep the mirror from refreshing anything upstream.
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
-        for stem in ["AllPrintings.sqlite", "AllPricesToday.sqlite", "pokemon_prices.sqlite", "riftbound.sqlite", "pokemon.sqlite"] {
-            std::fs::write(self.mirror_dir.join(format!("{stem}.last_update")), now.to_string())?;
-        }
-        Ok(())
-    }
-
-    /// Publishes an `AllPricesToday` database holding `week`'s prices.
-    fn publish_mtg_prices(&self, week: u32) -> eyre::Result<()> {
-        let path = self.root.join(format!("mtg-prices-{week}.sqlite"));
-        let conn = rusqlite::Connection::open(&path)?;
-        conn.execute_batch(
-            "CREATE TABLE prices (uuid TEXT, date TEXT, source TEXT, provider TEXT, priceType TEXT, finish TEXT, price REAL, currency TEXT);",
-        )?;
-        let mut insert = conn.prepare("INSERT INTO prices VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
-        for card in [CARD_A, CARD_B, CARD_C, CARD_D] {
-            for (i, (retailer, finish, currency)) in mtg_listings(card, week).into_iter().enumerate() {
-                let price = mtg_price(card, i, week);
-                insert.execute(rusqlite::params![card, date(week), "paper", retailer, "retail", finish, price, currency])?;
-                // Buylist and online prices aren't market prices; never recorded.
-                insert.execute(rusqlite::params![card, date(week), "paper", retailer, "buylist", finish, price / 2.0, currency])?;
-                insert.execute(rusqlite::params![card, date(week), "mtgo", retailer, "retail", finish, price / 4.0, currency])?;
-            }
-        }
-        drop(insert);
-        drop(conn);
-        self.publish(&path, "AllPricesToday.sqlite")
-    }
-
-    /// Adds `week`'s row for the Pokémon card and publishes everything so far.
-    fn publish_pokemon_prices(&mut self, week: u32) -> eyre::Result<()> {
-        self.pokemon_rows.push((format!("{}T00:00:00.000Z", date(week)), pokemon_raw(week), pokemon_psa10(week)));
-        let path = self.root.join(format!("pokemon-prices-{week}.sqlite"));
-        let conn = rusqlite::Connection::open(&path)?;
-        conn.execute_batch(
-            "CREATE TABLE prices (date TEXT, cardId TEXT, variant TEXT, rawPrice REAL, gradedPriceTen REAL, gradedPriceNine REAL);",
-        )?;
-        for (day, raw, psa10) in &self.pokemon_rows {
-            conn.execute(
-                "INSERT INTO prices VALUES (?1, ?2, '', ?3, ?4, 0.0)",
-                rusqlite::params![day, CARD_P, raw, psa10],
-            )?;
-        }
-        drop(conn);
-        self.publish(&path, "pokemon_prices.sqlite")
-    }
-
-    async fn start_mirror(&mut self) -> eyre::Result<()> {
-        let log = std::fs::File::create(self.root.join("mirror.log"))?;
-        self.mirror = Some(
-            Command::new(self.bin_dir.join("mirror"))
-                .env("MIRROR_DATA_DIR", &self.mirror_dir)
-                .env("MIRROR_PORT", self.mirror_port.to_string())
-                .env("MIRROR_INTERVAL_HOURS", "8760")
-                .env("HOME", self.root.join("home"))
-                .stdout(Stdio::from(log.try_clone()?))
-                .stderr(Stdio::from(log))
-                .spawn()?,
-        );
-        let url = format!("http://127.0.0.1:{}/AllPrintings.sqlite.bz2.sha256", self.mirror_port);
-        wait_until("mirror to serve files", || async {
-            Ok(reqwest::get(&url).await.is_ok_and(|r| r.status().is_success()))
-        })
-        .await
-    }
-
-    async fn start_server(&mut self) -> eyre::Result<GathersClient> {
-        let mirrors_toml = self.root.join("mirrors.toml");
-        std::fs::write(&mirrors_toml, format!("mirrors = [\"http://127.0.0.1:{}\"]\n", self.mirror_port))?;
-        let log = std::fs::OpenOptions::new().create(true).append(true).open(self.root.join("server.log"))?;
-        let db = |file: &str| self.db_dir.join(file);
-        let mut cmd = Command::new(self.bin_dir.join("server"));
-        cmd.args(["--port", &self.server_port.to_string()])
-            .env("HOME", self.root.join("home"))
-            .env("GATHERS_MIRRORS_PATH", &mirrors_toml)
-            .env("GATHERS_SYSTEMS", "sql,pokemon-sql")
-            .env("GATHERS_PRICE_HISTORY", "true")
-            .env("MTG_DB_PATH", db("AllPrintings.db"))
-            .env("MTG_PRICES_PATH", db("AllPricesToday.db"))
-            .env("POKEMON_DB_PATH", db("pokemon.db"))
-            .env("POKEMON_PRICES_PATH", db("pokemon_prices.sqlite"))
-            .env("STORAGE_DB_PATH", db("storage.db"))
-            .stdout(Stdio::from(log.try_clone()?))
-            .stderr(Stdio::from(log));
-        for var in ["PRICE_HISTORY_DB_PATH", "RIFTBOUND_DB_PATH", "GATHERS_NO_AUTO_UPDATE", "DEMO_MODE", "GATHERS_CORS_ORIGINS"] {
-            cmd.env_remove(var);
-        }
-        self.server = Some(cmd.spawn()?);
-
-        let client = GathersClient::new(format!("http://127.0.0.1:{}", self.server_port));
-        wait_until("server to bootstrap MTG and Pokemon from the mirror", || async {
-            let info = client.system_info().await?;
-            Ok(info.downloading.is_empty() && info.systems.iter().any(|s| s == MTG) && info.systems.iter().any(|s| s == POKEMON))
-        })
-        .await?;
-        Ok(client)
-    }
-
-    fn stop_server(&mut self) {
-        if let Some(mut child) = self.server.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-
-    fn dump_logs(&self) {
-        for name in ["server.log", "mirror.log"] {
-            let content = std::fs::read_to_string(self.root.join(name)).unwrap_or_default();
-            let lines: Vec<&str> = content.lines().collect();
-            println!("\n--- last lines of {name} ---");
-            for line in &lines[lines.len().saturating_sub(40)..] {
-                println!("{line}");
-            }
-        }
-    }
-}
-
-impl Drop for TestEnv {
-    fn drop(&mut self) {
-        self.stop_server();
-        if let Some(mut child) = self.mirror.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-fn free_port() -> eyre::Result<u16> {
-    Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+    drop(conn);
+    harness.publish_to_mirror(&path, "pokemon_prices.sqlite")
 }
 
 // ── Assertions ──────────────────────────────────────────────────────────────

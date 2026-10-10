@@ -3,8 +3,8 @@
 //! tracked in collections, kept in a separate `storage.prices.db`.
 //!
 //! Covers:
-//!   1. the server reports whether price history is on, and the endpoint
-//!      answers either way (empty when off)
+//!   1. with price history off the endpoint answers, empty; with it on the
+//!      server reports it
 //!   2. adding a card records its current prices, in the background, dated
 //!      by the day the price database says they're as of
 //!   3. recorded entries mirror the card's current market prices, using the
@@ -14,82 +14,87 @@
 //!   6. removing a card from the collection keeps its history
 //!   7. unknown cards/providers just have no history
 //!
-//! Steps 2–6 need the MTG `Sql` system with its price database downloaded;
-//! they're skipped (with a note) otherwise.
-//!
-//! Run against a live server (Tilt starts it with price history on):
+//! Deploys its own server (see `e2e::harness`) on a copy of
+//! `data/testPrintings.db`, with a small MTG price database this test
+//! writes, first with price history off and then on:
 //!   cargo run --example price_history
-//!
-//! Override the server URL:
-//!   GATHERS_URL=http://localhost:5234 cargo run --example price_history
 
 use std::time::Duration;
 
 use e2e::models::PriceHistoryEntry;
-use e2e::{CollectionGuard, GathersClient};
+use e2e::GathersClient;
+use e2e::harness::{Harness, ServerSetup};
 
 // War Priest of Thune — M13 #39
 const CARD_A: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1";
-// Mutilate — M13 #102
-const CARD_B: &str = "c83a7592-5879-5d52-b27c-e866597b389f";
+// Goblin King — 3ED #155
+const CARD_B: &str = "0001e0d0-2dcd-5640-aadc-a84765cf5fc9";
 const MTG_PROVIDER: &str = "MagicSQLite";
+/// The day the test price database says its prices are from.
+const PRICES_DATE: &str = "2026-03-02";
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
-    let url = std::env::var("GATHERS_URL").unwrap_or_else(|_| "http://localhost:5234".to_string());
-    let client = GathersClient::new(&url);
+    let mut harness = Harness::new("price history")?;
+    write_prices(&harness.root().join("db/AllPricesToday.db"))?;
 
-    println!("=== GatheRs price history e2e ===");
-    println!("Server: {url}");
-    println!();
+    let result = async {
+        // ── 1. Off: the endpoint answers, with nothing ─────────────────────────
+        step("1. Price history off, then on");
+        let off = ServerSetup::mtg(&harness)?.env("GATHERS_PRICE_HISTORY", "false");
+        let client = harness.start_server(&off).await?;
+        let info = client.system_info().await?;
+        ensure(!info.price_history_enabled, "server reports price history off")?;
+        let history = client.price_history(MTG_PROVIDER, CARD_A).await?;
+        ensure(!history.enabled && history.entries.is_empty(), "endpoint answers disabled, with no entries")?;
+        ok("off: endpoint answers with no entries");
+        harness.stop("server");
 
-    let tag = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    );
-    let col = format!("e2e-price-history-{tag}");
+        let on = ServerSetup::mtg(&harness)?.env("GATHERS_PRICE_HISTORY", "true");
+        let client = harness.start_server(&on).await?;
+        run(&client, "e2e-price-history").await
+    }
+    .await;
+    harness.conclude(result)
+}
 
-    let mut guard = CollectionGuard::new(&client);
-    guard.register(&col);
-
-    let result = run(&client, &col).await;
-
-    drop(guard);
-    result
+/// An `AllPricesToday` database pricing card A at two retailers in both
+/// finishes and card B at one, dated `PRICES_DATE`. Buylist rows aren't
+/// market prices and must never be recorded.
+fn write_prices(path: &std::path::Path) -> eyre::Result<()> {
+    let conn = rusqlite::Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE TABLE prices (uuid TEXT, date TEXT, source TEXT, provider TEXT, priceType TEXT, finish TEXT, price REAL, currency TEXT);",
+    )?;
+    let rows: &[(&str, &str, &str, &str, f64, &str)] = &[
+        (CARD_A, "cardkingdom", "retail", "normal", 0.5, "USD"),
+        (CARD_A, "cardkingdom", "retail", "foil", 2.25, "USD"),
+        (CARD_A, "cardmarket", "retail", "normal", 0.25, "EUR"),
+        (CARD_A, "cardmarket", "retail", "foil", 1.75, "EUR"),
+        (CARD_A, "cardkingdom", "buylist", "normal", 0.1, "USD"),
+        (CARD_B, "tcgplayer", "retail", "normal", 4.5, "USD"),
+    ];
+    for (uuid, retailer, kind, finish, price, currency) in rows {
+        conn.execute(
+            "INSERT INTO prices VALUES (?1, ?2, 'paper', ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![uuid, PRICES_DATE, retailer, kind, finish, price, currency],
+        )?;
+    }
+    Ok(())
 }
 
 async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
-    // ── 1. Reported status and the endpoint itself ──────────────────────────
-    step("1. Price history status");
-
     let info = client.system_info().await?;
-    ensure(info.pricing_enabled, "pricing must be enabled on the server")?;
-    let history = client.price_history(MTG_PROVIDER, CARD_A).await?;
-    eq(history.enabled, info.price_history_enabled, "endpoint and /api/system agree on enabled")?;
-    if !info.price_history_enabled {
-        ensure(history.entries.is_empty(), "no entries while disabled")?;
-        ok("disabled: endpoint answers with no entries");
-        skip("price history is off — start the server with GATHERS_PRICE_HISTORY=true to test recording");
-        return Ok(());
-    }
-    ok("price history enabled");
+    ensure(info.pricing_enabled && info.price_history_enabled, "server reports pricing and price history on")?;
+    ensure(client.price_history(MTG_PROVIDER, CARD_A).await?.enabled, "endpoint reports price history on")?;
+    ok("on: server and endpoint report price history enabled");
 
-    if !info.systems.iter().any(|s| s == MTG_PROVIDER) {
-        skip("MTG Sql system isn't active — can't test recording");
-        return Ok(());
-    }
     let market = client.mtg_prices(CARD_A).await?;
-    if market.is_empty() {
-        skip("no MTG prices available (price DB not downloaded?) — can't test recording");
-        return Ok(());
-    }
+    eq(market.len(), 2, "card A is priced at two retailers")?;
 
     client.add_collection(col).await?;
     let as_of = as_of(&market);
+    eq(as_of.as_str(), PRICES_DATE, "prices are as of the price database's date")?;
 
     // ── 2. Adding a card records its current prices ─────────────────────────
     step("2. Add a card — its prices are recorded");
@@ -97,7 +102,8 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     let added = client.add_cards_with_provider(col, CARD_A, "", 1, None, Some(MTG_PROVIDER)).await?;
     eq(added[0].provider.as_str(), MTG_PROVIDER, "card stored under the MTG provider")?;
     let recorded = wait_for_day(client, CARD_A, &as_of).await?;
-    ensure(!recorded.is_empty(), "current prices were recorded after adding the card")?;
+    // Two retailers × two finishes; the buylist row is not a market price.
+    eq(recorded.len(), 4, "one entry per retailer and finish")?;
     ok(&format!("{} price(s) recorded for {as_of}", recorded.len()));
 
     // ── 3. Entries mirror current market prices ─────────────────────────────
@@ -137,15 +143,12 @@ async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {
     // ── 5. Wishlist cards are tracked too ───────────────────────────────────
     step("5. Want a card — its prices are recorded");
 
-    if client.mtg_prices(CARD_B).await?.is_empty() {
-        skip("card B has no market prices");
-    } else {
-        client.adjust_want_with_provider(col, CARD_B, 1, Some(MTG_PROVIDER)).await?;
-        let day = as_of_for(client, CARD_B).await?;
-        let wanted = wait_for_day(client, CARD_B, &day).await?;
-        ensure(!wanted.is_empty(), "current prices recorded for a wanted card")?;
-        ok(&format!("{} price(s) recorded for the wanted card", wanted.len()));
-    }
+    client.adjust_want_with_provider(col, CARD_B, 1, Some(MTG_PROVIDER)).await?;
+    let wanted = wait_for_day(client, CARD_B, PRICES_DATE).await?;
+    let wanted: Vec<(&str, &str, f64, &str)> =
+        wanted.iter().map(|e| (e.retailer.as_str(), e.finish.as_str(), e.price, e.currency.as_str())).collect();
+    eq(wanted, vec![("tcgplayer", "", 4.5, "USD")], "wanted card's prices recorded")?;
+    ok("the wanted card's price is recorded");
 
     // ── 6. Removing a card keeps its history ────────────────────────────────
     step("6. Remove the card — history stays");
@@ -177,10 +180,6 @@ fn as_of(market: &std::collections::HashMap<String, serde_json::Value>) -> Strin
         .filter_map(|r| r.get("date").and_then(|d| d.as_str()).map(str::to_string))
         .max()
         .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string())
-}
-
-async fn as_of_for(client: &GathersClient, card: &str) -> eyre::Result<String> {
-    Ok(as_of(&client.mtg_prices(card).await?))
 }
 
 async fn entries_on(client: &GathersClient, card: &str, day: &str) -> eyre::Result<Vec<PriceHistoryEntry>> {
@@ -228,8 +227,4 @@ fn step(label: &str) {
 
 fn ok(msg: &str) {
     println!("  ✓ {msg}");
-}
-
-fn skip(msg: &str) {
-    println!("  ↷ skipped: {msg}");
 }

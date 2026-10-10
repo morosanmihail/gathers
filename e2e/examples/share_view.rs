@@ -8,46 +8,28 @@
 //!   name grants no access, and revoking the token immediately invalidates
 //!   it (/api/collection/share/{id}/{token}, DELETE).
 //!
-//! Run against a live server:
+//! Deploys its own server (see `e2e::harness`), on a copy of
+//! `data/testPrintings.db`:
 //!   cargo run --example share_view
-//!
-//! Override the server URL:
-//!   GATHERS_URL=http://localhost:5234 cargo run --example share_view
 
-use e2e::{CollectionGuard, GathersClient};
+use e2e::GathersClient;
+use e2e::harness::{Harness, ServerSetup};
 
 // War Priest of Thune — M13 #39
 const CARD_A: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1";
-// Mutilate — M13 #102
-const CARD_B: &str = "c83a7592-5879-5d52-b27c-e866597b389f";
+// Goblin King — 3ED #155
+const CARD_B: &str = "0001e0d0-2dcd-5640-aadc-a84765cf5fc9";
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
-    let url = std::env::var("GATHERS_URL").unwrap_or_else(|_| "http://localhost:5234".to_string());
-    let client = GathersClient::new(&url);
+    let mut harness = Harness::new("shareable collection view")?;
+    let setup = ServerSetup::mtg(&harness)?;
+    let client = harness.start_server(&setup).await?;
 
-    println!("=== GatheRs shareable collection view e2e ===");
-    println!("Server: {url}");
-    println!();
-
-    let tag = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    );
-    let col = format!("e2e-share-{tag}");
-
-    let mut guard = CollectionGuard::new(&client);
-    guard.register(&col);
+    let col = "e2e-share".to_string();
 
     let result = run(&client, &col).await;
-
-    drop(guard);
-
-    result
+    harness.conclude(result)
 }
 
 async fn run(client: &GathersClient, col: &str) -> eyre::Result<()> {

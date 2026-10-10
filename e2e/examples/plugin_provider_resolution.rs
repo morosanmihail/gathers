@@ -9,71 +9,47 @@
 //!   - two plugins that mint the same id no longer let the wrong one "win"
 //!     a card, as long as the caller names which one it means
 //!
-//! Requires a server configured with two plugins pointing at the *same*
-//! `dummy-plugin` instance under different names, so both report an
-//! identical catalog (including the id `book-1` / "Dune") — the simplest
-//! way to reproduce a real id collision across providers without needing
-//! two different plugin implementations:
-//!
-//! ```toml
-//! [[plugins]]
-//! name = "books-a"
-//! base_url = "http://localhost:5236"
-//! enabled = true
-//!
-//! [[plugins]]
-//! name = "books-b"
-//! base_url = "http://localhost:5236"
-//! enabled = true
-//! ```
-//!
-//! Run:
-//!   cargo run -p dummy-plugin &
-//!   cargo run --bin server   # with the [[plugins]] block above in server.toml
+//! Deploys its own server (see `e2e::harness`) configured with two plugins
+//! pointing at the *same* `dummy-plugin` instance under different names, so
+//! both report an identical catalog (including the id `book-1` / "Dune") —
+//! the simplest way to reproduce a real id collision across providers
+//! without needing two different plugin implementations:
 //!   cargo run --example plugin_provider_resolution
-//!
-//! Override the server URL:
-//!   GATHERS_URL=http://localhost:5234 cargo run --example plugin_provider_resolution
 
 use e2e::models::CollectionCard;
-use e2e::{CollectionGuard, GathersClient};
+use e2e::GathersClient;
+use e2e::harness::{Harness, ServerSetup};
 
 const BOOK_ID: &str = "book-1"; // Dune — identical under both registered plugin names
 const PLUGIN_A: &str = "books-a";
 const PLUGIN_B: &str = "books-b";
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
-    let url = std::env::var("GATHERS_URL").unwrap_or_else(|_| "http://localhost:5234".to_string());
-    let client = GathersClient::new(&url);
+    let mut harness = Harness::new("plugin provider resolution")?;
+    let plugin = harness.start_dummy_plugin().await?;
+    // No card systems, only the two plugins; pricing off as plugins have none.
+    let setup = ServerSetup::new()?.config(format!(
+        r#"system = []
+port = 0
+pricing_enabled = false
+collections_enabled = true
 
-    println!("=== GatheRs plugin provider resolution e2e ===");
-    println!("Server: {url}");
-    println!();
+[[plugins]]
+name = "{PLUGIN_A}"
+base_url = "{plugin}"
+enabled = true
 
-    let tag = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    );
-    let col_a = format!("e2e-prov-a-{tag}");
-    let col_b = format!("e2e-prov-b-{tag}");
-    let col_fallback = format!("e2e-prov-fallback-{tag}");
-    let col_bogus = format!("e2e-prov-bogus-{tag}");
-    let col_want = format!("e2e-prov-want-{tag}");
+[[plugins]]
+name = "{PLUGIN_B}"
+base_url = "{plugin}"
+enabled = true
+"#
+    ));
+    let client = harness.start_server(&setup).await?;
 
-    let mut guard = CollectionGuard::new(&client);
-    for c in [&col_a, &col_b, &col_fallback, &col_bogus, &col_want] {
-        guard.register(c);
-    }
-
-    let result = run(&client, &col_a, &col_b, &col_fallback, &col_bogus, &col_want).await;
-
-    drop(guard);
-    result
+    let result = run(&client, "e2e-prov-a", "e2e-prov-b", "e2e-prov-fallback", "e2e-prov-bogus", "e2e-prov-want").await;
+    harness.conclude(result)
 }
 
 async fn run(
