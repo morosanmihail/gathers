@@ -359,53 +359,8 @@ Chain Lightning      LEA   51  Common   Brian Snoddy
     <div class="container">
       <div class="section-header">
         <h2>REST API</h2>
-	<p>Spin up just the backend API. All functionality is exposed over HTTP. Documented via <a href="api.json" class="inline-link">OpenAPI / Swagger</a>.</p>
+	<p>Spin up just the backend API. All functionality is exposed over HTTP. Documented via <a href="https://demo.gathers.cards/api.json" class="inline-link">OpenAPI / Swagger</a>.</p>
       </div>
-      <div class="api-grid">
-        <div class="api-group" data-animate>
-          <h4 class="api-group-title api-mtg">MTG Routes</h4>
-          <ul class="api-list">
-            <li><span class="method post">POST</span> <code>/mtg/cards/search</code></li>
-            <li><span class="method get">GET</span> <code>/mtg/cards</code></li>
-            <li><span class="method get">GET</span> <code>/mtg/sets</code></li>
-            <li><span class="method get">GET</span> <code>/mtg/update</code></li>
-          </ul>
-        </div>
-        <div class="api-group" data-animate>
-          <h4 class="api-group-title api-rift">Riftbound Routes</h4>
-          <ul class="api-list">
-            <li><span class="method post">POST</span> <code>/riftbound/cards/search</code></li>
-            <li><span class="method get">GET</span> <code>/riftbound/cards</code></li>
-            <li><span class="method get">GET</span> <code>/riftbound/sets</code></li>
-            <li><span class="method get">GET</span> <code>/riftbound/update</code></li>
-          </ul>
-        </div>
-        <div class="api-group" data-animate>
-          <h4 class="api-group-title api-poke">Pokémon Routes</h4>
-          <ul class="api-list">
-            <li><span class="method post">POST</span> <code>/pokemon/cards/search</code></li>
-            <li><span class="method get">GET</span> <code>/pokemon/cards</code></li>
-            <li><span class="method get">GET</span> <code>/pokemon/sets</code></li>
-            <li><span class="method get">GET</span> <code>/pokemon/update</code></li>
-          </ul>
-        </div>
-        <div class="api-group" data-animate>
-          <h4 class="api-group-title api-coll">Collection Routes</h4>
-          <ul class="api-list">
-            <li><span class="method get">GET</span> <code>/collection/list</code></li>
-            <li><span class="method post">POST</span> <code>/collection/add</code></li>
-            <li><span class="method post">POST</span> <code>/collection/remove/{id}</code></li>
-            <li><span class="method post">POST</span> <code>/collection/move/{id}</code></li>
-            <li><span class="method get">GET</span> <code>/collection/cards/{id}/list</code></li>
-            <li><span class="method get">GET</span> <code>/collection/cards/{id}/count</code></li>
-            <li><span class="method post">POST</span> <code>/collection/cards/{id}/add</code></li>
-            <li><span class="method post">POST</span> <code>/collection/cards/{id}/delete</code></li>
-            <li><span class="method post">POST</span> <code>/collection/search</code></li>
-            <li><span class="method post">POST</span> <code>/collection/import</code></li>
-            <li><span class="method get">GET</span> <code>/collection/export/{id}</code></li>
-          </ul>
-        </div>
-              </div>
     </div>
   </section>
 
@@ -414,7 +369,7 @@ Chain Lightning      LEA   51  Common   Brian Snoddy
     <div class="container">
       <div class="section-header">
         <h2>Get Started</h2>
-        <p>Choose your preferred setup method.</p>
+        <p>New here? The <a href="https://codeberg.org/morosanmihail/gathers/wiki/Docker-Setup" class="inline-link" target="_blank" rel="noopener">Docker Setup guide</a> walks through a full install. Otherwise, choose your preferred setup method below.</p>
       </div>
 
       <div class="install-tabs">
@@ -438,26 +393,27 @@ cd gathers</code>
           <div class="install-step" data-animate>
             <div class="step-num">2</div>
             <div class="step-body">
-              <h4>Download the MTG database</h4>
-              <code class="code-block">cargo run --bin gathers -- --download</code>
-              <p class="step-note">This fetches <em>AllPrintings.db</em> from mtgjson.com and verifies the SHA-256 checksum.</p>
+              <h4>Start the API server</h4>
+              <code class="code-block">cargo run --bin server -- --system sql riftbound-sql pokemon-sql --port 5234</code>
+              <p class="step-note">Systems: <code>scryfall</code>, <code>sql</code> (offline MTG), <code>riftbound-sql</code>, <code>pokemon-sql</code>. Missing card databases for enabled systems are downloaded in the background on first start. The first run writes <code>~/.local/share/gathers/server.toml</code>; later runs reuse it, with CLI flags and env vars taking precedence. API docs at <code>/swagger</code> and <code>/api.json</code>.</p>
             </div>
           </div>
 
           <div class="install-step" data-animate>
             <div class="step-num">3</div>
             <div class="step-body">
-              <h4>Start the API server</h4>
-              <code class="code-block">cargo run --bin server -- --system sql riftbound-sql pokemon-sql --port 5234</code>
+              <h4>Start the web UI</h4>
+              <code class="code-block">cd webui2 &amp;&amp; npm install &amp;&amp; npm run dev</code>
+              <p class="step-note">Opens at <code>http://localhost:5173</code>. API requests proxy automatically to port 5234.</p>
             </div>
           </div>
 
           <div class="install-step" data-animate>
             <div class="step-num">4</div>
             <div class="step-body">
-              <h4>Start the web UI</h4>
-              <code class="code-block">cd webui2 &amp;&amp; npm install &amp;&amp; npm run dev</code>
-              <p class="step-note">Opens at <code>http://localhost:5173</code>. API requests proxy automatically to port 5234.</p>
+              <h4>Or: run everything with Tilt</h4>
+              <code class="code-block">tilt up</code>
+              <p class="step-note">For development. Starts the server, the example plugin and the web UI together, rebuilding on changes. Run <code>just</code> to list test and benchmark recipes.</p>
             </div>
           </div>
 
@@ -487,6 +443,7 @@ cd gathers</code>
       - source: gathers-mirrors
         target: /home/app/.local/share/gathers/mirrors.toml
     environment:
+      # These override the same settings in server.toml.
       # Comma-separated list of systems to enable.
       # Valid values: scryfall, sql, riftbound-sql, pokemon-sql
       # Add "sql" for offline MTG (downloads AllPrintings.db on first start).
@@ -496,6 +453,10 @@ cd gathers</code>
       - MTG_DB_PATH=/home/app/.local/share/gathers/DB/AllPrintings.db
       - RIFTBOUND_DB_PATH=/home/app/.local/share/gathers/DB/riftbound.db
       - POKEMON_DB_PATH=/home/app/.local/share/gathers/DB/pokemon.db
+      # Optional: extra browser origins allowed to call the API.
+      # - GATHERS_CORS_ORIGINS=https://cards.example.com
+      # Optional: skip downloading missing card databases on startup.
+      # - GATHERS_NO_AUTO_UPDATE=1
     restart: unless-stopped
 
   gathers-webui2:
@@ -527,7 +488,7 @@ volumes:
             <div class="step-body">
               <h4>Launch services</h4>
               <code class="code-block">docker-compose up -d</code>
-              <p class="step-note">The MTG database is downloaded automatically on first startup. Card data is persisted in the <code>gathers-data</code> volume.</p>
+              <p class="step-note">Card databases for every system in <code>GATHERS_SYSTEMS</code> are downloaded automatically on first startup (Pokémon builds its database with a scraper, so it takes longer). Card data, your collection and <code>server.toml</code> are persisted in the <code>gathers-data</code> volume.</p>
             </div>
           </div>
 
@@ -536,7 +497,24 @@ volumes:
             <div class="step-body">
               <h4>Open the web UI</h4>
               <code class="code-block">http://localhost:3000</code>
-              <p class="step-note">API available at <code>http://localhost:5234</code>. Stop with <code>docker-compose down</code>.</p>
+              <p class="step-note">API available at <code>http://localhost:5234</code>, with docs at <code>/swagger</code> and <code>/api.json</code>. Stop with <code>docker-compose down</code>.</p>
+            </div>
+          </div>
+
+          <div class="install-step" data-animate>
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <h4>Optional: host your own mirror</h4>
+              <code class="code-block">  gathers-mirror:
+    image: ghcr.io/morosanmihail/gathers-mirror:latest
+    ports:
+      - "5235:5235"
+    volumes:
+      - gathers-mirror-data:/home/app/.local/share/gathers/mirror:rw
+    environment:
+      - MIRROR_INTERVAL_HOURS=24
+    restart: unless-stopped</code>
+              <p class="step-note">Snapshots all card databases daily and serves them over HTTP. Add it under <code>services:</code>, add <code>gathers-mirror-data:</code> under <code>volumes:</code>, and set <code>mirrors = ["http://gathers-mirror:5235"]</code> in the <code>gathers-mirrors</code> config. Configured mirrors are tried first, falling back to the original sources.</p>
             </div>
           </div>
 
@@ -593,7 +571,7 @@ volumes:
         <a href="#cli">CLI</a>
         <a href="#collections">Collections</a>
         <a href="#api">API</a>
-        <a href="api.json">OpenAPI</a>
+        <a href="https://demo.gathers.cards/api.json">OpenAPI</a>
         <a href="https://codeberg.org/morosanmihail/gathers" target="_blank" rel="noopener">Codeberg</a>
         <a href="https://github.com/morosanmihail/gathers" target="_blank" rel="noopener">GitHub</a>
       </nav>
