@@ -4,11 +4,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use retrieval::RetrievalSystemTrait as _;
+use retrieval::{RetrievalSystem, RetrievalSystemTrait as _};
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::{RetrievalState, StorageState, price_history};
+use crate::{RetrievalState, StorageState, price_history, prices_api::{self, PricedSystem}};
 
 pub fn default_enabled() -> bool {
     false
@@ -57,6 +57,26 @@ where
     retrieval.lock().await.finish_download(key);
 }
 
+/// Updates `system`'s price database, then records price history from it.
+async fn update_prices<S: PricedSystem>(
+    retrieval: &Arc<Mutex<RetrievalState>>,
+    storage: &Arc<Mutex<StorageState>>,
+    system: &RetrievalSystem,
+) {
+    let label = S::LABEL;
+    run_exclusive(retrieval, S::DOWNLOAD_KEY, async {
+        match system.update_prices().await {
+            Ok(true) => {
+                info!("{label} price DB auto-downloaded");
+                price_history::snapshot_tracked(retrieval, storage, system, false).await;
+            }
+            Ok(false) => {}
+            Err(e) => error!(error = %e, "Auto-download of {label} price DB failed"),
+        }
+    })
+    .await;
+}
+
 /// Re-downloads card and price databases for every currently active system,
 /// reusing the same trigger paths as the manual `/update` HTTP endpoints.
 /// After a price database is updated, records price history from it.
@@ -73,16 +93,7 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
-        run_exclusive(retrieval, "Sql-prices", async {
-            match mtg.update_prices().await {
-                Ok(_) => {
-                    info!("MTG price DB auto-downloaded");
-                    price_history::snapshot_tracked(retrieval, storage, &mtg, false).await;
-                }
-                Err(e) => error!(error = %e, "Auto-download of MTG price DB failed"),
-            }
-        })
-        .await;
+        update_prices::<prices_api::Mtg>(retrieval, storage, &mtg).await;
     }
 
     let riftbound = retrieval.lock().await.riftbound.clone();
@@ -97,6 +108,7 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
+        update_prices::<prices_api::Riftbound>(retrieval, storage, &riftbound).await;
     }
 
     let pokemon = retrieval.lock().await.pokemon.clone();
@@ -111,16 +123,7 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
-        run_exclusive(retrieval, "PokemonSql-prices", async {
-            match pokemon.update_prices().await {
-                Ok(_) => {
-                    info!("Pokemon price DB auto-downloaded");
-                    price_history::snapshot_tracked(retrieval, storage, &pokemon, false).await;
-                }
-                Err(e) => error!(error = %e, "Auto-download of Pokemon price DB failed"),
-            }
-        })
-        .await;
+        update_prices::<prices_api::Pokemon>(retrieval, storage, &pokemon).await;
     }
 }
 

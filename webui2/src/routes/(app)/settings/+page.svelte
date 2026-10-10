@@ -34,7 +34,8 @@
 			{ label: 'Update Prices', endpoint: '/api/mtg/prices/update' },
 		],
 		RiftboundSql: [
-			{ label: 'Update DB', endpoint: '/api/riftbound/update' },
+			{ label: 'Update DB',     endpoint: '/api/riftbound/update' },
+			{ label: 'Update Prices', endpoint: '/api/riftbound/prices/update' },
 		],
 		PokemonSql: [
 			{ label: 'Update DB',     endpoint: '/api/pokemon/update' },
@@ -46,6 +47,7 @@
 		{ key: 'mtg_db_path',         label: 'MTG Database path' },
 		{ key: 'mtg_prices_path',     label: 'MTG Prices path' },
 		{ key: 'riftbound_db_path',   label: 'Riftbound Database path' },
+		{ key: 'riftbound_prices_path', label: 'Riftbound Prices path' },
 		{ key: 'pokemon_db_path',     label: 'Pokémon Database path' },
 		{ key: 'pokemon_prices_path', label: 'Pokémon Prices path' },
 		{ key: 'storage_db_path',     label: 'Storage Database path' },

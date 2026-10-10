@@ -13,8 +13,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::{error, info};
 
-use models::CardPrices;
-
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err,
     collections::collections_models::APICardSearchFilters,
@@ -170,64 +168,11 @@ pub fn pokemon_routes() -> ApiRouter<GathersState> {
         Ok(Json("Update started in background".to_string()))
     }
 
-    // Backgrounded for the same reason as `update` above — a slow prices
-    // download shouldn't be cancelled by the global 10s request timeout.
-    async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
-        if demo_mode() { return Err(demo_err()); }
-        let pokemon = {
-            let mut ret = state.0.lock().await;
-            let system = ret.require_pokemon()?.clone();
-            ret.start_download("PokemonSql-prices")?;
-            system
-        };
-        let (retrieval, storage) = state.clone();
-        tokio::spawn(async move {
-            let result = pokemon.update_prices().await;
-            retrieval.lock().await.finish_download("PokemonSql-prices");
-            match result {
-                Ok(true) => {
-                    info!("Pokemon prices updated");
-                    crate::price_history::spawn_snapshot(retrieval, storage, pokemon);
-                }
-                Ok(false) => info!("No Pokemon price database configured"),
-                Err(e) => error!(error = %e, "Failed to update Pokemon prices"),
-            }
-        });
-        Ok(Json("Price update started".to_string()))
-    }
-
-    #[derive(Deserialize, JsonSchema)]
-    struct BulkPricesQuery {
-        #[serde(default)]
-        ids: Vec<String>,
-    }
-
-    async fn bulk_prices(
-        State(state): State<GathersState>,
-        Query(query): Query<BulkPricesQuery>,
-    ) -> Result<Json<HashMap<String, CardPrices>>, ApiError> {
-        // Cloned out so the shared state isn't locked for the whole query.
-        let pokemon = state.0.lock().await.require_pokemon()?.clone();
-        pokemon
-            .get_bulk_card_prices(query.ids)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorPayload {
-                        error: format!("Failed to retrieve prices. {e}"),
-                    }),
-                )
-            })
-            .map(Json)
-    }
-
     ApiRouter::new()
         .api_route("/cards/search", post(search_pokemon_cards))
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_pokemon_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", post(update))
-        .api_route("/prices", get(bulk_prices))
-        .api_route("/prices/update", post(update_prices))
+        .merge(crate::prices_api::price_routes::<crate::prices_api::Pokemon>())
 }

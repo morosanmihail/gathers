@@ -12,7 +12,7 @@ pub use systems::plugin::{
     PluginUpdateResponse,
 };
 pub use systems::pokemon::{POKEMON_PRICES_FILE, PokemonSQLiteRetrievalSystem, download_pokemon_prices};
-pub use systems::riftsqlite::RiftboundSQLiteRetrievalSystem;
+pub use systems::riftsqlite::{RIFTBOUND_PRICES_FILE, RiftboundSQLiteRetrievalSystem, download_riftbound_prices};
 pub use systems::scryfall::ScryfallRetrievalSystem;
 pub use systems::sqlite::{MagicSQLiteRetrievalSystem, download_mtg_db, download_prices};
 

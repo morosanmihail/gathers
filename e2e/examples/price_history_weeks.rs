@@ -4,16 +4,18 @@
 //!
 //! Setup:
 //!   - publishes the repo's small test card databases (`data/testPrintings.db`,
-//!     `data/pokemon.db`) into a temp dir and serves it with the real `mirror`
+//!     `data/pokemon.db`, `data/riftbound.db`) into a temp dir and serves it
+//!     with the real `mirror`
 //!     binary (its own upstream refresh is suppressed with fresh
 //!     `.last_update` markers)
 //!   - starts the real `server` in a temp HOME with price history on, MTG
-//!     (`sql`) and Pokémon (`pokemon-sql`) enabled and `GATHERS_MIRRORS_PATH`
+//!     (`sql`), Pokémon (`pokemon-sql`) and Riftbound (`riftbound-sql`)
+//!     enabled and `GATHERS_MIRRORS_PATH`
 //!     pointing at that mirror, so it bootstraps its card databases from it
 //!
 //! Then, for each simulated week (a few milliseconds each), the test rewrites
-//! the MTG and Pokémon price databases on the mirror as dated a week later,
-//! triggers both `/prices/update` endpoints and waits for the server to
+//! the MTG, Pokémon and Riftbound price databases on the mirror as dated a
+//! week later, triggers each `/prices/update` endpoint and waits for the server to
 //! download them and record history. Along the way:
 //!   - a card is added to the collection mid-run (history starts that week)
 //!   - a card is removed (history stops, but what was recorded stays)
@@ -22,6 +24,8 @@
 //!   - one week the MTG mirror isn't updated (no new entries that week — the
 //!     history is dated by the price data, not by when it was fetched)
 //!   - one week the Pokémon card has no reverse holo listing (no foil entry
+//!     that week)
+//!   - one week the Riftbound card is only listed in foil (no normal entry
 //!     that week)
 //!
 //! Finally every card's full history is compared exactly with what the
@@ -43,6 +47,8 @@ const WEEKS: u32 = 6;
 const STALE_MTG_WEEK: u32 = 5;
 /// Week the Pokémon card has no reverse holo listing.
 const NO_REVERSE_HOLO_WEEK: u32 = 4;
+/// Week the Riftbound card is only listed in foil.
+const FOIL_ONLY_RIFTBOUND_WEEK: u32 = 3;
 /// Week cardmarket has no foil listing for `CARD_A`.
 const NO_CARDMARKET_FOIL_WEEK: u32 = 2;
 /// `CARD_D` is added to the collection right after this week's update.
@@ -52,6 +58,7 @@ const REMOVE_B_WEEK: u32 = 4;
 
 const MTG: &str = "MagicSQLite";
 const POKEMON: &str = "PokemonSQLite";
+const RIFTBOUND: &str = "RiftboundSQLite";
 
 // All in data/testPrintings.db.
 /// War Priest of Thune: two retailers, both finishes.
@@ -66,6 +73,8 @@ const CARD_D: &str = "00010d56-fe38-5e35-8aed-518019aa36a5";
 const CARD_P: &str = "Scarlet-&-Violet-Miraidon-ex-081";
 /// `CARD_P`'s TCGplayer product id (`idTCGP`), which its prices are keyed by.
 const CARD_P_PRODUCT: i64 = 475420;
+// In data/riftbound.db.
+const CARD_R: &str = "sfd-162-221";
 
 /// `(date, retailer, finish, price, currency)` — one price history entry.
 type Entry = (NaiveDate, String, String, f64, String);
@@ -83,6 +92,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
 
     harness.publish_to_mirror(&harness.data_file("testPrintings.db"), "AllPrintings.sqlite")?;
     harness.publish_to_mirror(&harness.data_file("pokemon.db"), "pokemon.sqlite")?;
+    harness.publish_to_mirror(&harness.data_file("riftbound.db"), "riftbound.sqlite")?;
     let mirrors_toml = harness.start_mirror().await?;
     ok("mirror serving the test card DBs");
 
@@ -92,14 +102,17 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
     let setup = ServerSetup::new()?
         .auto_update()
         .env("GATHERS_MIRRORS_PATH", mirrors_toml.to_string_lossy())
-        .env("GATHERS_SYSTEMS", "sql,pokemon-sql")
+        .env("GATHERS_SYSTEMS", "sql,pokemon-sql,riftbound-sql")
         .env("GATHERS_PRICE_HISTORY", "true")
         .env("MTG_DB_PATH", db_path("AllPrintings.db"))
         .env("MTG_PRICES_PATH", db_path("AllPricesToday.db"))
         .env("POKEMON_DB_PATH", db_path("pokemon.db"))
         .env("POKEMON_PRICES_PATH", db_path("pokemon_prices_tcgcsv.sqlite"))
+        .env("RIFTBOUND_DB_PATH", db_path("riftbound.db"))
+        .env("RIFTBOUND_PRICES_PATH", db_path("riftbound_prices_tcgcsv.sqlite"))
         .expect_system(MTG)
-        .expect_system(POKEMON);
+        .expect_system(POKEMON)
+        .expect_system(RIFTBOUND);
     let client = harness.start_server(&setup).await?;
     let info = client.system_info().await?;
     ensure(info.price_history_enabled, "server reports price history enabled")?;
@@ -107,7 +120,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
     ok("server up, card DBs downloaded from mirror, price history DB created");
 
     // ── Collection ──────────────────────────────────────────────────────────
-    step("Create collection with cards A, B and Pokemon P");
+    step("Create collection with cards A, B, Pokemon P and Riftbound R");
 
     let col = "Weeks";
     client.add_collection(col).await?;
@@ -115,9 +128,10 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
     client.add_cards_with_provider(col, CARD_A, "foil", 1, None, Some(MTG)).await?;
     client.add_cards_with_provider(col, CARD_B, "", 2, None, Some(MTG)).await?;
     client.add_cards_with_provider(col, CARD_P, "", 1, None, Some(POKEMON)).await?;
+    client.add_cards_with_provider(col, CARD_R, "", 1, None, Some(RIFTBOUND)).await?;
     // No price DB has been published yet: adding cards records nothing.
     tokio::time::sleep(Duration::from_millis(300)).await;
-    for (provider, card) in [(MTG, CARD_A), (MTG, CARD_B), (POKEMON, CARD_P)] {
+    for (provider, card) in [(MTG, CARD_A), (MTG, CARD_B), (POKEMON, CARD_P), (RIFTBOUND, CARD_R)] {
         ensure(history(&client, provider, card).await?.is_empty(), "no history before any prices exist")?;
     }
     ok("cards added; no history yet without price data");
@@ -131,12 +145,16 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
             publish_mtg_prices(harness, week)?;
         }
         publish_pokemon_prices(harness, week)?;
+        publish_riftbound_prices(harness, week)?;
 
         client.update_prices("mtg").await?;
         client.update_prices("pokemon").await?;
+        client.update_prices("riftbound").await?;
         wait_until("price downloads to finish", || async {
             let info = client.system_info().await?;
-            Ok(!info.downloading.contains_key("Sql-prices") && !info.downloading.contains_key("PokemonSql-prices"))
+            Ok(["Sql-prices", "PokemonSql-prices", "RiftboundSql-prices"]
+                .iter()
+                .all(|key| !info.downloading.contains_key(*key)))
         })
         .await?;
 
@@ -149,6 +167,8 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
             wait_for_day(&client, MTG, CARD_A, mtg_day).await?;
         }
         wait_for_day(&client, POKEMON, CARD_P, date(week)).await?;
+        let r = wait_for_day(&client, RIFTBOUND, CARD_R, date(week)).await?;
+        eq(r, expected_riftbound(week), "Riftbound card's entries for the week")?;
 
         // The server now serves this week's prices…
         let market = client.mtg_prices(CARD_A).await?;
@@ -167,6 +187,7 @@ async fn run(harness: &mut Harness) -> eyre::Result<()> {
             ok("MTG prices recorded");
         }
         ok("Pokemon prices recorded");
+        ok("Riftbound prices recorded");
 
         if week == ADD_D_WEEK {
             client.add_cards_with_provider(col, CARD_D, "", 1, None, Some(MTG)).await?;
@@ -235,7 +256,25 @@ fn pokemon_normal(week: u32) -> f64 {
 }
 
 fn pokemon_reverse_holo(week: u32) -> Option<f64> {
-    (week != NO_REVERSE_HOLO_WEEK).then(|| 8.0 + 0.5 * week as f64)
+    (week != NO_REVERSE_HOLO_WEEK).then_some(8.0 + 0.5 * week as f64)
+}
+
+fn riftbound_normal(week: u32) -> Option<f64> {
+    (week != FOIL_ONLY_RIFTBOUND_WEEK).then_some(0.25 * week as f64)
+}
+
+fn riftbound_foil(week: u32) -> f64 {
+    2.0 + 0.75 * week as f64
+}
+
+/// What history should hold for the Riftbound card's prices from `week`.
+fn expected_riftbound(week: u32) -> Vec<Entry> {
+    let entry = |finish: &str, price| (date(week), "tcgplayer".to_string(), finish.to_string(), price, "USD".to_string());
+    riftbound_normal(week)
+        .map(|p| entry("", p))
+        .into_iter()
+        .chain([entry("foil", riftbound_foil(week))])
+        .collect()
 }
 
 /// What history should hold for an MTG card's prices from `week`, sorted
@@ -276,6 +315,7 @@ fn expected_histories() -> Vec<(&'static str, &'static str, Vec<Entry>)> {
         (MTG, CARD_C, vec![]),
         (MTG, CARD_D, mtg_history(CARD_D, &d_weeks)),
         (POKEMON, CARD_P, pokemon),
+        (RIFTBOUND, CARD_R, (1..=WEEKS).flat_map(expected_riftbound).collect()),
     ]
 }
 
@@ -355,6 +395,33 @@ fn publish_pokemon_prices(harness: &Harness, week: u32) -> eyre::Result<()> {
     }
     drop(conn);
     harness.publish_to_mirror(&path, "pokemon_prices_tcgcsv.sqlite")
+}
+
+/// Publishes a TCGCSV-style snapshot holding only `week`'s Riftbound prices.
+/// Riftbound's cards db has no TCGplayer product ids, so the snapshot maps
+/// card ids to products itself.
+fn publish_riftbound_prices(harness: &Harness, week: u32) -> eyre::Result<()> {
+    const PRODUCT: i64 = 600001;
+    let path = harness.root().join(format!("riftbound-prices-{week}.sqlite"));
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "CREATE TABLE prices (productId INTEGER NOT NULL, subTypeName TEXT NOT NULL, lowPrice REAL, midPrice REAL,
+             highPrice REAL, marketPrice REAL, directLowPrice REAL, PRIMARY KEY (productId, subTypeName)) WITHOUT ROWID;
+         CREATE TABLE card_products (cardId TEXT PRIMARY KEY, productId INTEGER NOT NULL) WITHOUT ROWID;
+         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    )?;
+    conn.execute("INSERT INTO meta VALUES ('updated', ?1)", [format!("{}T20:00:00+00:00", date(week))])?;
+    conn.execute("INSERT INTO card_products VALUES (?1, ?2)", rusqlite::params![CARD_R, PRODUCT])?;
+    let mut listings = vec![("Foil", riftbound_foil(week))];
+    listings.extend(riftbound_normal(week).map(|p| ("Normal", p)));
+    for (sub_type, price) in listings {
+        conn.execute(
+            "INSERT INTO prices (productId, subTypeName, marketPrice) VALUES (?1, ?2, ?3)",
+            rusqlite::params![PRODUCT, sub_type, price],
+        )?;
+    }
+    drop(conn);
+    harness.publish_to_mirror(&path, "riftbound_prices_tcgcsv.sqlite")
 }
 
 // ── Assertions ──────────────────────────────────────────────────────────────

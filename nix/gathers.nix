@@ -90,6 +90,7 @@ in
     mtgDbPath = mkDbPathOption "AllPrintings.db";
     mtgPricesPath = mkDbPathOption "AllPricesToday.sqlite";
     riftboundDbPath = mkDbPathOption "riftbound.db";
+    riftboundPricesPath = mkDbPathOption "riftbound_prices_tcgcsv.sqlite";
     pokemonDbPath = mkDbPathOption "pokemon.db";
     pokemonPricesPath = mkDbPathOption "pokemon_prices_tcgcsv.sqlite";
     storageDbPath = mkDbPathOption "storage.db";
@@ -172,6 +173,7 @@ in
         MTG_DB_PATH = cfg.mtgDbPath;
         MTG_PRICES_PATH = cfg.mtgPricesPath;
         RIFTBOUND_DB_PATH = cfg.riftboundDbPath;
+        RIFTBOUND_PRICES_PATH = cfg.riftboundPricesPath;
         POKEMON_DB_PATH = cfg.pokemonDbPath;
         POKEMON_PRICES_PATH = cfg.pokemonPricesPath;
         STORAGE_DB_PATH = cfg.storageDbPath;
@@ -224,7 +226,7 @@ in
         Type = "oneshot";
         ExecStart = pkgs.writeShellScript "gathers-refresh" ''
           set -x
-          for path in mtg/update mtg/prices/update riftbound/update pokemon/update; do
+          for path in mtg/update mtg/prices/update riftbound/update riftbound/prices/update pokemon/update pokemon/prices/update; do
             ${lib.getExe pkgs.curl} -fsS "http://localhost:${toString cfg.port}/api/$path" || true
           done
         '';

@@ -147,8 +147,8 @@ pub fn spawn_snapshot(retrieval: Arc<Mutex<RetrievalState>>, storage: Arc<Mutex<
 }
 
 /// Records, in the background, the current prices of cards just added to a
-/// collection under `provider`. Providers with no prices (plugins,
-/// Riftbound) are skipped.
+/// collection under `provider`. Providers with no prices (plugins) are
+/// skipped.
 pub fn spawn_record_cards(state: &GathersState, provider: String, uuids: Vec<String>) {
     let (retrieval, storage) = state.clone();
     tokio::spawn(async move {

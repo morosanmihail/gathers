@@ -7,7 +7,7 @@ use aide::axum::{
 use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum_extra::extract::Query;
-use models::{Card, CardPrices, Set};
+use models::{Card, Set};
 use retrieval::RetrievalSystemTrait as _;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -163,63 +163,11 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         Ok(Json("Update started in background".to_string()))
     }
 
-    // Backgrounded for the same reason as `update` above — a slow prices
-    // download shouldn't be cancelled by the global 10s request timeout.
-    async fn update_prices(State(state): State<GathersState>) -> Result<Json<String>, ApiError> {
-        if demo_mode() { return Err(demo_err()); }
-        let mtg = {
-            let mut ret = state.0.lock().await;
-            let system = ret.require_mtg()?.clone();
-            ret.start_download("Sql-prices")?;
-            system
-        };
-        let (retrieval, storage) = state.clone();
-        tokio::spawn(async move {
-            let result = mtg.update_prices().await;
-            retrieval.lock().await.finish_download("Sql-prices");
-            match result {
-                Ok(true) => {
-                    info!("MTG prices updated");
-                    crate::price_history::spawn_snapshot(retrieval, storage, mtg);
-                }
-                Ok(false) => info!("No MTG price database configured"),
-                Err(e) => error!(error = %e, "Failed to update MTG prices"),
-            }
-        });
-        Ok(Json("Price update started".to_string()))
-    }
-
-    #[derive(Deserialize, JsonSchema)]
-    struct BulkPricesQuery {
-        #[serde(default)]
-        ids: Vec<String>,
-    }
-
-    async fn bulk_prices(
-        State(state): State<GathersState>,
-        Query(query): Query<BulkPricesQuery>,
-    ) -> Result<Json<HashMap<String, CardPrices>>, ApiError> {
-        // Cloned out so the shared state isn't locked for the whole query.
-        let mtg = state.0.lock().await.require_mtg()?.clone();
-        mtg.get_bulk_card_prices(query.ids)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorPayload {
-                        error: format!("Failed to retrieve prices. {e}"),
-                    }),
-                )
-            })
-            .map(Json)
-    }
-
     ApiRouter::new()
         .api_route("/cards/search", post(search_mtg_cards))
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_cards))
         .api_route("/sets", get(get_sets))
         .api_route("/update", post(update))
-        .api_route("/prices", get(bulk_prices))
-        .api_route("/prices/update", post(update_prices))
+        .merge(crate::prices_api::price_routes::<crate::prices_api::Mtg>())
 }

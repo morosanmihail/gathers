@@ -30,6 +30,7 @@ mod mtg_api;
 mod plugin_api;
 mod pokemon_api;
 mod price_history;
+mod prices_api;
 mod riftbound_api;
 mod settings_api;
 
@@ -157,6 +158,7 @@ pub struct RetrievalState {
     mtg_db_path: Option<String>,
     mtg_prices_path: Option<String>,
     riftbound_db_path: Option<String>,
+    riftbound_prices_path: Option<String>,
     pokemon_db_path: Option<String>,
     pokemon_prices_path: Option<String>,
     /// Path to the server config file, for settings API.
@@ -210,6 +212,7 @@ impl RetrievalState {
         mtg_db_path: Option<String>,
         mtg_prices_path: Option<String>,
         riftbound_db_path: Option<String>,
+        riftbound_prices_path: Option<String>,
         pokemon_db_path: Option<String>,
         pokemon_prices_path: Option<String>,
         config_path: std::path::PathBuf,
@@ -225,6 +228,7 @@ impl RetrievalState {
             mtg_db_path: mtg_db_path.clone(),
             mtg_prices_path: mtg_prices_path.clone(),
             riftbound_db_path: riftbound_db_path.clone(),
+            riftbound_prices_path: riftbound_prices_path.clone(),
             pokemon_db_path: pokemon_db_path.clone(),
             pokemon_prices_path: pokemon_prices_path.clone(),
             config_path,
@@ -252,8 +256,8 @@ impl RetrievalState {
                     }
             let prices_path = match system {
                 Systems::Scryfall | Systems::Sql => mtg_prices_path.clone(),
+                Systems::RiftboundSql => riftbound_prices_path.clone(),
                 Systems::PokemonSql => pokemon_prices_path.clone(),
-                _ => None,
             };
             let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
             match system {
@@ -282,7 +286,7 @@ impl RetrievalState {
                 retrieval::MagicSQLiteRetrievalSystem::new(retrieval_db_path.clone(), prices_db_path)?,
             ),
             Systems::RiftboundSql => RetrievalSystem::RiftboundSQLiteRetrievalSystem(
-                retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path.clone())?,
+                retrieval::RiftboundSQLiteRetrievalSystem::new(retrieval_db_path.clone(), prices_db_path)?,
             ),
             Systems::PokemonSql => RetrievalSystem::PokemonSQLiteRetrievalSystem(
                 retrieval::PokemonSQLiteRetrievalSystem::new(retrieval_db_path.clone(), prices_db_path)?,
@@ -428,8 +432,8 @@ impl RetrievalState {
         };
         let prices_path = match system {
             Systems::Scryfall | Systems::Sql => self.mtg_prices_path.clone(),
+            Systems::RiftboundSql => self.riftbound_prices_path.clone(),
             Systems::PokemonSql => self.pokemon_prices_path.clone(),
-            _ => None,
         };
         let retrieval = Self::new_retrieval(system, db_path, prices_path)?;
         match system {
@@ -449,7 +453,7 @@ impl RetrievalState {
             self.riftbound = Some(Self::new_retrieval(
                 Systems::RiftboundSql,
                 self.riftbound_db_path.clone(),
-                None,
+                self.riftbound_prices_path.clone(),
             )?);
         }
         Ok(())
@@ -557,6 +561,8 @@ pub struct ServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     riftbound_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    riftbound_prices_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pokemon_db_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pokemon_prices_path: Option<String>,
@@ -642,6 +648,7 @@ pub const PATH_ENV_VARS: &[(&str, &str)] = &[
     ("mtg_db_path", "MTG_DB_PATH"),
     ("mtg_prices_path", "MTG_PRICES_PATH"),
     ("riftbound_db_path", "RIFTBOUND_DB_PATH"),
+    ("riftbound_prices_path", "RIFTBOUND_PRICES_PATH"),
     ("pokemon_db_path", "POKEMON_DB_PATH"),
     ("pokemon_prices_path", "POKEMON_PRICES_PATH"),
     ("storage_db_path", "STORAGE_DB_PATH"),
@@ -805,6 +812,7 @@ async fn main() -> eyre::Result<()> {
             mtg_db_path: path_or_default("MTG_DB_PATH", "AllPrintings.db"),
             mtg_prices_path: path_or_default("MTG_PRICES_PATH", "AllPricesToday.sqlite"),
             riftbound_db_path: path_or_default("RIFTBOUND_DB_PATH", "riftbound.db"),
+            riftbound_prices_path: path_or_default("RIFTBOUND_PRICES_PATH", retrieval::RIFTBOUND_PRICES_FILE),
             pokemon_db_path: path_or_default("POKEMON_DB_PATH", "pokemon.db"),
             pokemon_prices_path: path_or_default("POKEMON_PRICES_PATH", retrieval::POKEMON_PRICES_FILE),
             storage_db_path: path_or_default("STORAGE_DB_PATH", "storage.db"),
@@ -882,6 +890,19 @@ async fn main() -> eyre::Result<()> {
     let riftbound_db_path = std::env::var("RIFTBOUND_DB_PATH")
         .ok()
         .or(config.riftbound_db_path);
+    let riftbound_prices_path = std::env::var("RIFTBOUND_PRICES_PATH")
+        .ok()
+        .or(config.riftbound_prices_path)
+        .or_else(|| {
+            riftbound_db_path.as_ref().map(|p| {
+                std::path::Path::new(p)
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join(retrieval::RIFTBOUND_PRICES_FILE)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        });
     let pokemon_db_path = std::env::var("POKEMON_DB_PATH")
         .ok()
         .or(config.pokemon_db_path);
@@ -916,6 +937,7 @@ async fn main() -> eyre::Result<()> {
     if let Some(ref p) = mtg_db_path { info!(path = %p, "MTG DB path"); }
     if let Some(ref p) = mtg_prices_path { info!(path = %p, "MTG prices path"); }
     if let Some(ref p) = riftbound_db_path { info!(path = %p, "Riftbound DB path"); }
+    if let Some(ref p) = riftbound_prices_path { info!(path = %p, "Riftbound prices path"); }
     if let Some(ref p) = pokemon_db_path { info!(path = %p, "Pokemon DB path"); }
     if let Some(ref p) = storage_db_path { info!(path = %p, "Storage DB path"); }
 
@@ -924,6 +946,7 @@ async fn main() -> eyre::Result<()> {
         mtg_db_path.clone(),
         mtg_prices_path.clone(),
         riftbound_db_path.clone(),
+        riftbound_prices_path.clone(),
         pokemon_db_path.clone(),
         pokemon_prices_path.clone(),
         config_path.clone(),

@@ -4,13 +4,14 @@ Standalone binary that snapshots every GatheRs card DB daily and serves them ove
 
 ## What it does
 
-On startup, and then every `MIRROR_INTERVAL_HOURS` (default 24h), it refreshes five components into `MIRROR_DATA_DIR`:
+On startup, and then every `MIRROR_INTERVAL_HOURS` (default 24h), it refreshes six components into `MIRROR_DATA_DIR`:
 
 | Stem | Source | Method |
 |---|---|---|
 | `AllPrintings.sqlite` | [mtgjson.com](https://mtgjson.com) | relays the upstream `.bz2` byte-for-byte, sha256-verified |
 | `AllPricesToday.sqlite` | [mtgjson.com](https://mtgjson.com) | relays the upstream `.bz2` byte-for-byte, sha256-verified |
 | `pokemon_prices_tcgcsv.sqlite` | [TCGCSV](https://tcgcsv.com) (TCGplayer prices) | builds a sqlite snapshot from the per-set price JSON, compresses result |
+| `riftbound_prices_tcgcsv.sqlite` | [TCGCSV](https://tcgcsv.com) (TCGplayer prices) | same, plus card id matches from each product's set + number, compresses result |
 | `riftbound.sqlite` | [Riftbound card gallery](https://riftbound.leagueoflegends.com/en-us/card-gallery/) | live scrape, compresses result |
 | `pokemon.sqlite` | TCGPlayer / Serebii scrapers | live scrape, compresses result |
 
@@ -76,7 +77,7 @@ Ordered, highest priority first. Every retrieval system tries each mirror's `{st
 - **No auth, no TLS by default.** Put it behind a reverse proxy (Caddy/nginx/Traefik) if exposing it publicly — `MIRROR_PORT` binds `0.0.0.0` with no built-in auth.
 - **Disk usage**: MTG cards (~650MB decompressed / ~170MB bz2) + prices (~25MB bz2) dominate. Budget a few hundred MB for the data dir.
 - **First run is slow** (full scrapes + large downloads); subsequent runs only replace what changed upstream (MTG/prices skip re-downloading if the upstream sha256 sidecar is unchanged).
-- **Restarts don't redo finished work.** Each of the five components tracks its own `{stem}.last_update` marker in the data dir, written only on success. On startup (and every cycle), a component refreshed within `MIRROR_INTERVAL_HOURS` is skipped outright; only stale or previously-failed/cancelled components are retried. So a restart mid-cycle re-attempts just what didn't finish, not everything.
+- **Restarts don't redo finished work.** Each of the six components tracks its own `{stem}.last_update` marker in the data dir, written only on success. On startup (and every cycle), a component refreshed within `MIRROR_INTERVAL_HOURS` is skipped outright; only stale or previously-failed/cancelled components are retried. So a restart mid-cycle re-attempts just what didn't finish, not everything.
 - **Pokémon and Riftbound cards persist across cycles.** Both scrapes write into a long-lived working db at `{MIRROR_DATA_DIR}-state/{pokemon,riftbound}.sqlite` (a sibling directory, not served) instead of starting from zero every cycle. Pokémon hits many upstream sources across many requests, so partial failures (a site rate-limiting, one set's page changing layout) are routine; Riftbound fetches everything in one request and hardcodes an upstream blade index, so a site layout change could silently return a partial list without erroring. Either way, a bad cycle just leaves some rows unrefreshed — it never wipes the published snapshot back down to whatever happened to come back that one time. Don't delete that sibling directory expecting a clean `MIRROR_DATA_DIR` wipe to also reset it.
 - **Sets already in the db are never re-scraped, even on a stale db.** Both Pokémon (`Db::has_set`, skipped before any request for that set) and Riftbound (`upsert_riftbound_cards`, skipped at insert time since there's no per-set request) treat "any cards already saved for this set" as "this set is done." This is the same logic the live `server`/`gathers` update paths use (they share these functions with the mirror), so it applies everywhere, not just here. It means a set's data can go stale without ever being refreshed automatically — if a set's data changes upstream (errata, art update), the only way to pick it up is to delete that set's rows (or the whole db) and re-scrape.
 - **Skip-if-unchanged also applies to mirror downloads.** `try_mirrors`/`download_bz2_verified` fetch only the small remote `.sha256` sidecar first and compare it to the locally stored one — the actual `.bz2` is downloaded only on a mismatch. This applies to every mirror-sourced download (and to `gathers`/`server` talking straight to upstream), automatically.

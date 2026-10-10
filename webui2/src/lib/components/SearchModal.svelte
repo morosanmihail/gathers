@@ -2,7 +2,7 @@
 	import SearchPanel from './SearchPanel.svelte';
 	import CardResultsList from './CardResultsList.svelte';
 	import CardDetailModal from './CardDetailModal.svelte';
-	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustWantQuantity, providerFromActiveSystem, getMtgPrices, getPokemonPrices, PAGE_SIZE } from '$lib/api';
+	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, adjustWantQuantity, providerFromActiveSystem, pricesFetcher, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, ViewMode } from '$lib/types';
@@ -68,12 +68,9 @@
 			total = data.length < PAGE_SIZE ? (p - 1) * PAGE_SIZE + data.length : p * PAGE_SIZE + 1;
 			searched = true;
 
-			if (app.pricingEnabled && !activeSystem.startsWith('plugin:')) {
+			if (app.pricingEnabled) {
 				const ids = data.map(c => c.id);
-				const fetch = activeSystem === 'PokemonSQLite' ? getPokemonPrices
-					: activeSystem === 'RiftboundSQLite' ? null
-					: getMtgPrices;
-				fetch?.(ids).then(result => { prices = { ...prices, ...result }; });
+				pricesFetcher(activeSystem)?.(ids).then(result => { prices = { ...prices, ...result }; });
 			}
 		} catch (e) {
 			console.error(e);
