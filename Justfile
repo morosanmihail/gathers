@@ -8,7 +8,7 @@ test:
 
 # Run every e2e test. Each deploys its own throwaway server (plus mirror / dummy plugin where needed) on free ports in a temp dir — no live server needed, real config and data untouched
 e2e:
-    cargo build -p server -p mirror -p dummy-plugin -p e2e --examples
+    cargo build -p server -p mirror -p dummy-plugin -p e2e --bins --examples
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example collection_lifecycle
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example share_view
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example finishes
