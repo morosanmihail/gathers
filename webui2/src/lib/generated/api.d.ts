@@ -152,6 +152,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mtg/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description Everything a game's search can be narrowed by, in one call: the values its
+                 *     set, card type and grouping filters accept.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APISystemMeta"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mtg/update": {
         parameters: {
             query?: never;
@@ -406,6 +444,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/riftbound/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description Everything a game's search can be narrowed by, in one call: the values its
+                 *     set, card type and grouping filters accept.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APISystemMeta"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/riftbound/update": {
         parameters: {
             query?: never;
@@ -648,6 +724,44 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Set"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pokemon/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /**
+                 * @description Everything a game's search can be narrowed by, in one call: the values its
+                 *     set, card type and grouping filters accept.
+                 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APISystemMeta"];
                     };
                 };
             };
@@ -2047,6 +2161,11 @@ export interface components {
         };
         /** @description Server-local version of `models::filters::CardSearchFilters` with `JsonSchema`. */
         APICardSearchFilters: {
+            /**
+             * @description Card types a card must have at least one of: `["Artifact", "Enchantment"]`
+             *     matches artifacts and enchantments alike. `types` requires all of them.
+             */
+            any_types?: string[] | null;
             artist?: string | null;
             border_color?: string | null;
             collector_number?: string | null;
@@ -2118,6 +2237,7 @@ export interface components {
         APIRarity: "Common" | "Uncommon" | "Rare" | "Mythic" | "Special" | "Bonus";
         APIRiftboundCard: {
             artists: string[];
+            cardType: string;
             collectorNumber: string;
             domains: components["schemas"]["APICardDomain"][];
             id: string;
@@ -2130,6 +2250,20 @@ export interface components {
         APISortField: ("Name" | "Rarity" | "SetCode" | "CollectorNumber" | "Artist") | "ReleaseDate" | "Price" | "Quantity" | "WantQuantity";
         /** @enum {string} */
         APISortOrder: "Asc" | "Desc";
+        /**
+         * @description Everything a game's search can be narrowed by, in one call: the values its
+         *     set, card type and grouping filters accept.
+         */
+        APISystemMeta: {
+            /** @description Values for `APICardSearchFilters::any_types`, sorted. */
+            card_types: string[];
+            sets: components["schemas"]["Set"][];
+            /**
+             * @description Values for `APICardSearchFilters::unique`, default first. Empty when
+             *     the system has nothing to choose between.
+             */
+            unique_modes: components["schemas"]["APIUniqueMode"][];
+        };
         /**
          * @description One way a system can collapse search results that share a card; see
          *     `APICardSearchFilters::unique`.

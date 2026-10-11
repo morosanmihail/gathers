@@ -18,6 +18,7 @@
 	function toggleColor(color: string) { set('colorIdentities', toggleInList(filters.colorIdentities, color)); }
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
+	function toggleCardType(t: string) { set('cardTypes', toggleInList(filters.cardTypes, t)); }
 
 	// Provider string for each installed game, '' if that game isn't configured
 	const mtgProvider  = $derived(app.systems.find(s => s === 'MagicSQLite' || s === 'Scryfall') ?? '');
@@ -28,6 +29,21 @@
 	const showMtg  = $derived(!!mtgProvider  && (filters.provider === '' || filters.provider === mtgProvider));
 	const showRift = $derived(!!riftProvider && (filters.provider === '' || filters.provider === riftProvider));
 	const showPoke = $derived(!!pokeProvider && (filters.provider === '' || filters.provider === pokeProvider));
+
+	// Card types of every game shown. A card matching any selected type is kept,
+	// so e.g. Creature + Unit shows MTG creatures and Riftbound units together.
+	const typeGroups = $derived.by(() => {
+		const groups: { game: string; types: string[] }[] = [];
+		if (showMtg) groups.push({ game: 'MTG', types: app.cardTypes('mtg') });
+		if (showRift) groups.push({ game: 'Riftbound', types: app.cardTypes('riftbound') });
+		if (showPoke) groups.push({ game: 'Pokémon', types: app.cardTypes('pokemon') });
+		return groups.filter(g => g.types.length);
+	});
+	$effect(() => {
+		if (showMtg) app.loadMeta('mtg');
+		if (showRift) app.loadMeta('riftbound');
+		if (showPoke) app.loadMeta('pokemon');
+	});
 
 	const colors = colorOptions;
 	const domains = riftboundDomains;
@@ -75,6 +91,27 @@
 			<option value="Rare">Rare</option>
 			<option value="Mythic">{showRift ? 'Epic' : 'Mythic'}</option>
 		</select>
+
+		{#if typeGroups.length}
+			<details class="cfilter-types">
+				<summary class="input cfilter-input" title="Cards of any selected type match">
+					{filters.cardTypes.length ? `Types (${filters.cardTypes.length})` : 'Any type'}
+				</summary>
+				<div class="cfilter-types-menu">
+					{#each typeGroups as g (g.game)}
+						{#if typeGroups.length > 1}<span class="cfilter-group-label">{g.game}</span>{/if}
+						<div class="cfilter-energy-chips">
+							{#each g.types as t}
+								<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
+									<input type="checkbox" checked={filters.cardTypes.includes(t)} onchange={() => toggleCardType(t)} />
+									{t}
+								</label>
+							{/each}
+						</div>
+					{/each}
+				</div>
+			</details>
+		{/if}
 
 		{#if gameCount > 1}
 			<select
@@ -228,6 +265,38 @@
 		background: var(--accent-glow);
 		border-color: var(--accent-text);
 		color: var(--accent-text);
+	}
+
+	.cfilter-types {
+		position: relative;
+	}
+
+	.cfilter-types > summary {
+		display: flex;
+		align-items: center;
+		list-style: none;
+		cursor: pointer;
+		white-space: nowrap;
+		min-width: 100px;
+	}
+
+	.cfilter-types > summary::-webkit-details-marker { display: none; }
+
+	.cfilter-types-menu {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		width: max-content;
+		max-width: min(340px, calc(100vw - 32px));
+		padding: 10px;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 	}
 
 	.cfilter-energy-chips {

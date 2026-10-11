@@ -8,7 +8,8 @@ import type {
 	PokemonCard,
 	PluginCardWire,
 	PluginResultCard,
-	CardSet,
+	GameKey,
+	SystemMeta,
 	SearchFilters,
 	CardPrices,
 	ValueBreakdown,
@@ -572,12 +573,9 @@ export async function getRandomPokemonCard(): Promise<PokemonCard> {
 	return fetchJSON('/api/pokemon/cards/random');
 }
 
-export async function getMtgCardSets(): Promise<CardSet[]> {
-	return cachedFetch('mtg-sets', () => fetchJSON<CardSet[]>('/api/mtg/sets'));
-}
-
-export async function getPokemonCardSets(): Promise<CardSet[]> {
-	return cachedFetch('pokemon-sets', () => fetchJSON<CardSet[]>('/api/pokemon/sets'));
+/** A game's sets, card types and grouping modes — what its search form offers. */
+export async function getSystemMeta(game: GameKey): Promise<SystemMeta> {
+	return cachedFetch(`${game}-meta`, () => fetchJSON<SystemMeta>(`/api/${game}/meta`));
 }
 
 async function fetchPrices(endpoint: string, ids: string[]): Promise<Record<string, CardPrices>> {
@@ -747,6 +745,7 @@ function buildSearchBody(filters: SearchFilters): Partial<ApiSearchFilters> {
 	if (filters.colorIdentities.length) body.color_identities = filters.colorIdentities as ApiSearchFilters['color_identities'];
 	if (filters.domains.length) body.domains = filters.domains as ApiSearchFilters['domains'];
 	if (filters.energyTypes.length) body.energy_types = filters.energyTypes as ApiSearchFilters['energy_types'];
+	if (filters.cardTypes.length) body.any_types = filters.cardTypes;
 	const pokedex = parseInt(filters.pokedex, 10);
 	if (!isNaN(pokedex)) body.pokedex = pokedex;
 	if (filters.sortBy) body.sort_by = filters.sortBy as ApiSearchFilters['sort_by'];

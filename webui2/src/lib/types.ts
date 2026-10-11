@@ -138,6 +138,9 @@ export function availableFinishesToAdd(group: CardGroup): string[] {
 }
 
 export type CardSet = components['schemas']['Set'];
+export type SystemMeta = components['schemas']['APISystemMeta'];
+// The path segment of each game's API (`/api/{game}/...`).
+export type GameKey = 'mtg' | 'riftbound' | 'pokemon';
 
 export interface SearchFilters {
 	// Collection views only: restrict to a single card game's provider (e.g.
@@ -154,6 +157,9 @@ export interface SearchFilters {
 	energyTypes: string[];
 	// Pokemon-only: exact National Pokédex number match.
 	pokedex: string;
+	// Card types (from the game's `SystemMeta.card_types`); a card matching
+	// any one of them is kept.
+	cardTypes: string[];
 	sortBy: string;
 	sortOrder: 'Asc' | 'Desc';
 	// How results sharing a card are collapsed — one of the active system's
@@ -234,6 +240,7 @@ export function defaultFilters(): SearchFilters {
 		domains: [],
 		energyTypes: [],
 		pokedex: '',
+		cardTypes: [],
 		sortBy: 'Name',
 		sortOrder: 'Asc',
 		unique: '',

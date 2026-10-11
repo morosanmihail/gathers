@@ -66,6 +66,7 @@
 		collectionFilters.artist !== '' ||
 		collectionFilters.rarity !== '' ||
 		collectionFilters.colorIdentities.length > 0 ||
+		collectionFilters.cardTypes.length > 0 ||
 		collectionFilters.domains.length > 0 ||
 		collectionFilters.energyTypes.length > 0 ||
 		collectionFilters.provider !== ''
@@ -172,8 +173,19 @@
 		try {
 			await adjustWantQuantity(collectionId, card.id, delta, card.provider);
 			const wantQuantity = Math.max(0, (card.wantQuantity ?? 0) + delta);
-			cards = cards.map(c => (c.id === card.id && !(c.finish ?? '')) ? { ...c, wantQuantity } : c)
-				.filter(c => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
+			// `wantQuantity` lives on the "" (default) finish row, which a card
+			// owned only in another finish (e.g. just foil) doesn't have yet.
+			let found = false;
+			cards = cards.map(c => {
+				if (c.id !== card.id || (c.finish ?? '')) return c;
+				found = true;
+				return { ...c, wantQuantity };
+			});
+			if (!found && wantQuantity > 0) {
+				const { entries: _entries, ...primary } = card as CardGroup;
+				cards = [...cards, { ...primary, finish: '', quantity: 0, wantQuantity }];
+			}
+			cards = cards.filter(c => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
 			if (detailCard?.id === card.id) detailCard = { ...detailCard, wantQuantity };
 		} catch (e) {
 			console.error('[gathers] handleWantChange failed:', e);

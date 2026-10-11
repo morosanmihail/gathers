@@ -25,10 +25,16 @@ name = "price_history"
 [[example]]
 name = "price_history_weeks"
 
+[[example]]
+name = "tokens"
+
+[[example]]
+name = "card_types"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
 retrieval = { path = "../retrieval" }
 rusqlite = { workspace = true }
 serde = { workspace = true }

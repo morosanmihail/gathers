@@ -73,6 +73,19 @@ pub trait RetrievalSystemTrait {
 
     async fn get_sets(&self) -> eyre::Result<Vec<models::Set>>;
 
+    /// Every card type a search's `any_types` can usefully filter by, sorted.
+    async fn get_card_types(&self) -> eyre::Result<Vec<String>>;
+
+    /// Everything a search can be narrowed by, in one call.
+    async fn get_meta(&self) -> eyre::Result<models::SystemMeta> {
+        let (sets, card_types) = tokio::join!(self.get_sets(), self.get_card_types());
+        Ok(models::SystemMeta {
+            sets: sets?,
+            card_types: card_types?,
+            unique_modes: self.unique_modes(),
+        })
+    }
+
     /// Returns a single uniformly-random card from this system's catalog, or
     /// `None` if the catalog is empty.
     async fn get_random_card(&self) -> eyre::Result<Option<models::Card>>;

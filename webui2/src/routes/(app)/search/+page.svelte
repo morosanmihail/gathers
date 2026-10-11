@@ -59,6 +59,7 @@
 		if (params.has('rarity'))          { overrides.rarity = str('rarity'); hasFilter = true; }
 		if (params.has('collectorNumber')) { overrides.collectorNumber = str('collectorNumber'); hasFilter = true; }
 		if (params.has('colors'))          { overrides.colorIdentities = str('colors').split(',').filter(Boolean); hasFilter = true; }
+		if (params.has('types'))           { overrides.cardTypes = str('types').split(',').filter(Boolean); hasFilter = true; }
 		if (params.has('sortBy'))          overrides.sortBy = str('sortBy');
 		if (params.has('sortOrder'))       overrides.sortOrder = str('sortOrder') as 'Asc' | 'Desc';
 		if (params.has('unique'))          overrides.unique = str('unique');
@@ -117,6 +118,7 @@
 		if (filters.rarity)                  params.set('rarity', filters.rarity);
 		if (filters.collectorNumber)         params.set('collectorNumber', filters.collectorNumber);
 		if (filters.colorIdentities.length)  params.set('colors', filters.colorIdentities.join(','));
+		if (filters.cardTypes.length)        params.set('types', filters.cardTypes.join(','));
 		if (filters.sortBy !== 'Name')       params.set('sortBy', filters.sortBy);
 		if (filters.sortOrder !== 'Asc')     params.set('sortOrder', filters.sortOrder);
 		if (filters.unique)                  params.set('unique', filters.unique);

@@ -197,3 +197,37 @@ pub struct CollectionValueCards {
     pub unpriced_count: usize,
     pub entries: Vec<ValueCardEntry>,
 }
+
+/// `/api/{game}/meta`: what a game's search can be narrowed by.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMeta {
+    pub sets: Vec<SetInfo>,
+    pub card_types: Vec<String>,
+    pub unique_modes: Vec<UniqueModeInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetInfo {
+    pub code: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniqueModeInfo {
+    pub id: String,
+}
+
+/// The fields of an MTG card (`/api/mtg/...`) the tests look at.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MtgCard {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "setCode")]
+    pub set_code: String,
+    #[serde(rename = "collectorNumber")]
+    pub collector_number: String,
+    #[serde(rename = "typeLine", default)]
+    pub type_line: String,
+    #[serde(rename = "setName", default)]
+    pub set_name: String,
+}

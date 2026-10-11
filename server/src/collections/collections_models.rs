@@ -77,6 +77,10 @@ pub struct APICardSearchFilters {
     pub subtypes: Option<Vec<String>>,
     pub supertypes: Option<String>,
     pub types: Option<Vec<String>>,
+    /// Card types a card must have at least one of: `["Artifact", "Enchantment"]`
+    /// matches artifacts and enchantments alike. `types` requires all of them.
+    #[serde(alias = "anyTypes")]
+    pub any_types: Option<Vec<String>>,
     #[serde(alias = "manaValueMin")]
     pub mana_value_min: Option<f64>,
     #[serde(alias = "manaValueMax")]
@@ -151,6 +155,7 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
             subtypes: value.subtypes,
             supertypes: value.supertypes,
             types: value.types,
+            any_types: value.any_types,
             mana_value_min: value.mana_value_min,
             mana_value_max: value.mana_value_max,
             colors: value

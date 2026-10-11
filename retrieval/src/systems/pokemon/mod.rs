@@ -156,6 +156,15 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
                 i += 1;
             }
         }
+        if let Some(any_types) = filters.any_types.as_ref().filter(|t| !t.is_empty()) {
+            let mut any = Vec::new();
+            for t in any_types {
+                any.push(format!("cardType = ?{i} COLLATE NOCASE"));
+                params.push(t.to_string());
+                i += 1;
+            }
+            conditions.push(format!("({})", any.join(" OR ")));
+        }
         if let Some(pokedex) = &filters.pokedex {
             conditions.push(format!("pokedex = ?{i}"));
             params.push(pokedex.to_string());
@@ -258,6 +267,15 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             })
         })?;
         Ok(iter.flatten().collect())
+    }
+
+    async fn get_card_types(&self) -> eyre::Result<Vec<String>> {
+        let conn = self.connection.lock().await;
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT cardType FROM cards WHERE cardType IS NOT NULL AND cardType <> '' ORDER BY cardType",
+        )?;
+        let types = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(types.flatten().collect())
     }
 
     async fn get_random_card(&self) -> eyre::Result<Option<Card>> {

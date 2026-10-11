@@ -68,6 +68,10 @@ pub struct CardSearchFilters {
     pub subtypes: Option<Vec<String>>,
     pub supertypes: Option<String>,
     pub types: Option<Vec<String>>,
+    /// Card types (e.g. "Artifact", "Enchantment") a card must have at least one of, unlike
+    /// `types`, which requires all of them.
+    #[serde(alias = "anyTypes")]
+    pub any_types: Option<Vec<String>>,
     /// MTG-only: minimum mana value (converted mana cost), inclusive.
     #[serde(alias = "manaValueMin")]
     pub mana_value_min: Option<f64>,
@@ -173,6 +177,11 @@ impl CardSearchFilters {
 
     pub fn with_types(mut self, types: Vec<String>) -> Self {
         self.types = Some(types);
+        self
+    }
+
+    pub fn with_any_types(mut self, types: Vec<String>) -> Self {
+        self.any_types = Some(types);
         self
     }
 

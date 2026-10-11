@@ -497,6 +497,20 @@ fn matches_known_card_filters(card: &Card, filters: &APICardSearchFilters) -> bo
             return false;
         }
 
+    // A card matches if it has any one of the selected types.
+    if let Some(ref any_types) = filters.any_types
+        && !any_types.is_empty()
+    {
+        let card_types: Vec<&str> = match card {
+            Card::Magic(m) => m.types.iter().map(String::as_str).collect(),
+            Card::Riftbound(r) => vec![r.card_type.as_str()],
+            Card::Pokemon(p) => vec![p.card_type.as_str()],
+        };
+        if !any_types.iter().any(|t| card_types.iter().any(|c| c.eq_ignore_ascii_case(t))) {
+            return false;
+        }
+    }
+
     match card {
         Card::Magic(m) => {
             if let Some(ref v) = filters.artist

@@ -26,6 +26,7 @@ use crate::settings_api::settings_routes;
 
 mod auto_download;
 mod collections;
+mod meta_api;
 mod mtg_api;
 mod plugin_api;
 mod pokemon_api;

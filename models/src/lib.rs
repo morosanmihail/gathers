@@ -46,6 +46,16 @@ pub struct Set {
     pub code: SetCode,
 }
 
+/// What a retrieval system offers to search by, gathered in one call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SystemMeta {
+    pub sets: Vec<Set>,
+    /// Values for `CardSearchFilters::any_types`.
+    pub card_types: Vec<String>,
+    /// Values for `CardSearchFilters::unique`, default first.
+    pub unique_modes: Vec<filters::UniqueMode>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CollectionCard {
     pub uuid: CardID,

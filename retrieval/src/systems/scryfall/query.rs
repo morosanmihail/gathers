@@ -48,6 +48,12 @@ pub fn build_query_string(filters: &CardSearchFilters) -> String {
         }
     }
 
+    // Any one of the types will do.
+    if let Some(any_types) = filters.any_types.as_ref().filter(|t| !t.is_empty()) {
+        let any: Vec<String> = any_types.iter().map(|t| format!("type:{t}")).collect();
+        query.push(format!("({})", any.join(" or ")));
+    }
+
     if let Some(subtypes) = &filters.subtypes {
         for s in subtypes {
             query.push(format!("type:{s}"));
@@ -128,6 +134,17 @@ pub fn build_query_string(filters: &CardSearchFilters) -> String {
     }
 
     query.join(" ")
+}
+
+/// Scryfall leaves tokens (and other extras: art cards, emblems, planes, ...) out of a search
+/// unless it mentions them. This brings tokens back alongside cards, and no other extras.
+pub fn including_tokens(query: &str) -> String {
+    const TOKENS: &str = "(t:token or -is:extra)";
+    if query.is_empty() {
+        TOKENS.to_string()
+    } else {
+        format!("{query} {TOKENS}")
+    }
 }
 
 fn bool_term(term: &str, value: bool) -> String {
@@ -236,6 +253,22 @@ mod tests {
         assert_eq!(
             build_query_string(&filters),
             "kw:\"Flying\" pow:4 tou:4 loy:3 defense:5"
+        );
+    }
+
+    #[test]
+    fn any_types_are_alternatives() {
+        let filters = CardSearchFilters::new()
+            .with_any_types(vec!["Artifact".to_string(), "Enchantment".to_string()]);
+        assert_eq!(build_query_string(&filters), "(type:Artifact or type:Enchantment)");
+    }
+
+    #[test]
+    fn including_tokens_adds_tokens_and_nothing_else() {
+        assert_eq!(including_tokens(""), "(t:token or -is:extra)");
+        assert_eq!(
+            including_tokens("name:\"Goblin\""),
+            "name:\"Goblin\" (t:token or -is:extra)"
         );
     }
 

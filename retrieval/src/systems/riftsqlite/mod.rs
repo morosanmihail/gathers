@@ -164,7 +164,7 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
     ) -> eyre::Result<Vec<Card>> {
         let conn = self.connection.lock().await;
         let mut query =
-            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code FROM cards"
+            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code, type FROM cards"
                 .to_string();
         let mut conditions = Vec::new();
         let mut params = Vec::new();
@@ -224,6 +224,15 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
                 i += 1;
             }
         }
+        if let Some(any_types) = filters.any_types.as_ref().filter(|t| !t.is_empty()) {
+            let mut any = Vec::new();
+            for t in any_types {
+                any.push(format!("type = ?{i} COLLATE NOCASE"));
+                params.push(t.to_string());
+                i += 1;
+            }
+            conditions.push(format!("({})", any.join(" OR ")));
+        }
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&conditions.join(" AND "));
@@ -279,7 +288,7 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         }
         let conn = self.connection.lock().await;
         let query = format!(
-            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code FROM cards WHERE id IN ({})",
+            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code, type FROM cards WHERE id IN ({})",
             sql_placeholders(ids.len())
         );
         let mut stmt = conn.prepare(&query)?;
@@ -303,6 +312,15 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         Ok(iter.flatten().collect())
     }
 
+    async fn get_card_types(&self) -> eyre::Result<Vec<String>> {
+        let conn = self.connection.lock().await;
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT type FROM cards WHERE type IS NOT NULL AND type <> '' ORDER BY type",
+        )?;
+        let types = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(types.flatten().collect())
+    }
+
     async fn get_random_card(&self) -> eyre::Result<Option<Card>> {
         let conn = self.connection.lock().await;
         // LIMIT to a batch rather than 1: a handful of rows with missing
@@ -310,7 +328,7 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         // `.flatten()`), so pick the first parseable row out of a
         // randomly-ordered batch rather than erroring on a single bad draw.
         let query =
-            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code FROM cards \
+            "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code, type FROM cards \
              ORDER BY RANDOM() LIMIT 50";
         let mut stmt = conn.prepare(query)?;
         let user_iter = stmt.query_map([], SqlCard::from_row)?;

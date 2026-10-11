@@ -122,6 +122,15 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         }
     }
 
+    /// Sets, card types and grouping modes, for building a search form.
+    async fn meta(
+        State(state): State<GathersState>,
+    ) -> Result<Json<crate::meta_api::APISystemMeta>, ApiError> {
+        // Cloned out so the shared state isn't locked for the whole query.
+        let ret = state.0.lock().await.require_mtg()?.clone();
+        crate::meta_api::system_meta(ret).await
+    }
+
     async fn get_sets(State(state): State<GathersState>) -> Result<Json<Vec<Set>>, ApiError> {
         // Cloned out so the shared state isn't locked for the whole query.
         let ret = state.0.lock().await.require_mtg()?.clone();
@@ -168,6 +177,7 @@ pub fn mtg_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/random", get(random_card))
         .api_route("/cards", get(retrieve_cards))
         .api_route("/sets", get(get_sets))
+        .api_route("/meta", get(meta))
         .api_route("/update", post(update))
         .merge(crate::prices_api::price_routes::<crate::prices_api::Mtg>())
 }

@@ -54,6 +54,8 @@ pub struct APIRiftboundCard {
     pub domains: Vec<APICardDomain>,
     pub text: String,
     pub image: String,
+    #[serde(rename = "cardType")]
+    pub card_type: String,
 }
 
 impl From<RiftboundCard> for APIRiftboundCard {
@@ -68,6 +70,7 @@ impl From<RiftboundCard> for APIRiftboundCard {
             domains: value.domains.into_iter().map(Into::into).collect(),
             text: value.text,
             image: value.image,
+            card_type: value.card_type,
         }
     }
 }

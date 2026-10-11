@@ -911,3 +911,28 @@ async fn test_cards_with_missing_fields_still_load() {
     let by_id = system.get_cards_by_ids(vec!["bare".to_string()]).await.unwrap();
     assert!(by_id.contains_key("bare"));
 }
+
+#[tokio::test]
+async fn test_card_types_lists_every_type_in_the_database() {
+    let system = setup_test_db().await;
+    assert_eq!(
+        system.get_card_types().await.unwrap(),
+        vec!["Energy", "Item", "Pokemon", "Stadium", "Supporter", "Tool", "Trainer"]
+    );
+}
+
+#[tokio::test]
+async fn test_search_any_types_matches_either_type() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters::new()
+        .with_any_types(vec!["stadium".to_string(), "Tool".to_string()]);
+    let cards = system.search_cards(filters, Some(0), Some(1000)).await.unwrap();
+    let types: std::collections::HashSet<String> = cards
+        .iter()
+        .map(|c| match c {
+            Card::Pokemon(p) => p.card_type.clone(),
+            other => panic!("expected Pokemon card, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(types, ["Stadium".to_string(), "Tool".to_string()].into());
+}
