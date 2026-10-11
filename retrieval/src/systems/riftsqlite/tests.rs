@@ -391,3 +391,30 @@ async fn test_no_prices_without_a_prices_db() {
     .unwrap();
     assert!(missing.get_card_prices("sfd-162-221").await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn test_card_types_lists_every_type_in_the_database() {
+    let system = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap();
+    assert_eq!(
+        system.get_card_types().await.unwrap(),
+        vec!["Battlefield", "Gear", "Legend", "Rune", "Spell", "Unit"]
+    );
+}
+
+#[tokio::test]
+async fn test_search_any_types_matches_either_type() {
+    let system = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap();
+    let filters = ::models::filters::CardSearchFilters::new()
+        .with_any_types(vec!["gear".to_string(), "Rune".to_string()]);
+    let cards = system.search_cards(filters, Some(0), Some(1000)).await.unwrap();
+    let types: std::collections::HashSet<String> = cards
+        .iter()
+        .map(|c| match c {
+            ::models::Card::Riftbound(r) => r.card_type.clone(),
+            other => panic!("expected Riftbound card, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(types, ["Gear".to_string(), "Rune".to_string()].into());
+    // 79 gear + 12 runes in the fixture.
+    assert_eq!(cards.len(), 91);
+}

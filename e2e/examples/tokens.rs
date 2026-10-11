@@ -2,14 +2,13 @@
 //!   - MTGJSON (`sql`) stores them in a `tokens` table of their own, so
 //!     anything not found in `cards` is looked up there before it counts as
 //!     not found.
-//!   - Scryfall leaves them out of a search unless it asks for them by type,
-//!     so a search (or a set/number lookup) that finds nothing is retried
+//!   - Scryfall leaves them out of a search unless it asks for them, so every
+//!     search does, and a set/number lookup that finds nothing is retried
 //!     with `t:token`.
 //!
 //! Covers, for each system:
 //!   1. looking a token up by id
-//!   2. a search that matches no card finds tokens, and one that matches a
-//!      card doesn't mix tokens in
+//!   2. a search finds tokens alongside cards, sorted in among them
 //!   3. importing a CSV of cards and tokens resolves both, whatever the
 //!      case of their set codes
 //!   4. (sql) adding a token without naming its provider resolves the
@@ -30,6 +29,8 @@ use serde_json::json;
 const SQL_WAR_PRIEST: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1";
 // Goblin — TM13 #6, a vanilla token
 const SQL_GOBLIN: &str = "a8d5380a-d799-5464-ae84-8cce56f4b336";
+// Goblin King — 3ED #155, a card
+const SQL_GOBLIN_KING: &str = "0001e0d0-2dcd-5640-aadc-a84765cf5fc9";
 // Drake — TM13 #4
 const SQL_DRAKE: &str = "67f59d92-2f7e-51ea-9fb9-298bdca35cf3";
 // Treasure — TM20 #10
@@ -80,7 +81,7 @@ async fn sql(client: &GathersClient) -> eyre::Result<()> {
     ok("tokens resolve by id alongside cards");
 
     // ── 2. Search ───────────────────────────────────────────────────────────
-    step("sql 2. Search falls back to tokens only when no card matches");
+    step("sql 2. Search finds tokens alongside cards");
 
     let drakes = client.search_mtg(&json!({ "name": "Drake" }), 50).await?;
     eq(ids(&drakes), vec![SQL_DRAKE], "a name only a token has finds the token")?;
@@ -89,9 +90,8 @@ async fn sql(client: &GathersClient) -> eyre::Result<()> {
     eq(ids(&tm13), vec![SQL_DRAKE, SQL_GOBLIN], "a token set's tokens, by name")?;
 
     let goblins = client.search_mtg(&json!({ "name": "Goblin" }), 50).await?;
-    let names: Vec<&str> = goblins.iter().map(|c| c.name.as_str()).collect();
-    eq(names, vec!["Goblin King"], "a name a card matches finds only cards")?;
-    ok("search finds tokens when no card matches, and only then");
+    eq(ids(&goblins), vec![SQL_GOBLIN, SQL_GOBLIN_KING], "the Goblin token, then Goblin King")?;
+    ok("search finds tokens and cards together, in sort order");
 
     // ── 3. CSV import ───────────────────────────────────────────────────────
     step("sql 3. Import a CSV of cards and tokens");
@@ -140,7 +140,7 @@ async fn scryfall(client: &GathersClient) -> eyre::Result<()> {
     ok("tokens resolve by id");
 
     // ── 2. Search ───────────────────────────────────────────────────────────
-    step("scryfall 2. Search retries for tokens when no card matches");
+    step("scryfall 2. Search finds tokens alongside cards");
 
     let spawns = client.search_mtg(&json!({ "name": "Eldrazi Spawn" }), 50).await?;
     ensure(!spawns.is_empty(), "a name only tokens have finds tokens")?;
@@ -149,13 +149,16 @@ async fn scryfall(client: &GathersClient) -> eyre::Result<()> {
         "only Eldrazi Spawn tokens are found",
     )?;
 
-    let kings = client.search_mtg(&json!({ "name": "Goblin King" }), 50).await?;
-    ensure(!kings.is_empty(), "a card name finds the card")?;
+    let goblins = client.search_mtg(&json!({ "name": "Goblin" }), 175).await?;
+    ensure(goblins.iter().any(|c| c.type_line.starts_with("Token")), "Goblin tokens found")?;
+    ensure(goblins.iter().any(|c| !c.type_line.starts_with("Token")), "Goblin cards found")?;
+
+    let meta = client.meta("mtg").await?;
     ensure(
-        kings.iter().all(|c| !c.type_line.starts_with("Token")),
-        "a name a card matches finds no tokens",
+        ["Artifact", "Creature", "Token"].iter().all(|t| meta.card_types.iter().any(|c| c == t)),
+        "Scryfall's card types include Token",
     )?;
-    ok("search finds tokens when no card matches, and only then");
+    ok("search finds tokens and cards together; Token is a card type");
 
     // ── 3. CSV import ───────────────────────────────────────────────────────
     step("scryfall 3. Import a CSV of cards and tokens");

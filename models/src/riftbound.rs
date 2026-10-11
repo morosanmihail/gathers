@@ -13,6 +13,9 @@ pub struct RiftboundCard {
     pub domains: Vec<CardDomain>,
     pub text: CardText,
     pub image: String,
+    /// "Unit", "Spell", "Gear", "Legend", "Battlefield" or "Rune".
+    #[serde(default)]
+    pub card_type: String,
 }
 
 impl CardTrait for RiftboundCard {

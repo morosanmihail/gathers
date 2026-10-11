@@ -16,6 +16,7 @@ e2e:
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history_weeks
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example tokens
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example card_types
 
 # Run criterion benchmarks
 bench:

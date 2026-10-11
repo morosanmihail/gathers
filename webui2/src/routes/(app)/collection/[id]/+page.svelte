@@ -66,6 +66,7 @@
 		collectionFilters.artist !== '' ||
 		collectionFilters.rarity !== '' ||
 		collectionFilters.colorIdentities.length > 0 ||
+		collectionFilters.cardTypes.length > 0 ||
 		collectionFilters.domains.length > 0 ||
 		collectionFilters.energyTypes.length > 0 ||
 		collectionFilters.provider !== ''

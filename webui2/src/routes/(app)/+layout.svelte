@@ -16,7 +16,7 @@
 	onMount(async () => {
 		applyTheme(app.theme);
 		await app.loadSystemInfo();
-		app.loadCardSets();
+		app.loadMeta('mtg');
 		if (app.collectionsEnabled) {
 			await app.loadCollections();
 		} else if (app.ready) {

@@ -2,7 +2,6 @@
 	import type { SearchFilters, CardSet, TriState } from '$lib/types';
 	import { legalityFormats, borderColors, colorOptions, riftboundDomains, pokemonEnergyTypes, toggleInList } from '$lib/types';
 	import { app } from '$lib/state.svelte';
-	import { onMount } from 'svelte';
 
 	interface Props {
 		filters: SearchFilters;
@@ -33,11 +32,6 @@
 		compact = false
 	}: Props = $props();
 
-	onMount(() => {
-		app.loadCardSets();
-		app.loadPokemonCardSets();
-	});
-
 	function set(key: keyof SearchFilters, val: unknown) {
 		onfilters({ ...filters, [key]: val });
 	}
@@ -48,14 +42,22 @@
 	function toggleActualColor(color: string) { set('colors', toggleInList(filters.colors, color)); }
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
+	function toggleCardType(t: string) { set('cardTypes', toggleInList(filters.cardTypes, t)); }
 
 	const isPlugin = $derived(activeSystem?.startsWith('plugin:') ?? false);
 	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
 	const showRift = $derived(activeSystem?.includes('Riftbound') ?? false);
 	const showPoke = $derived(activeSystem?.includes('Pokemon') ?? false);
 
+	// Sets and card types come from the shown game's metadata.
+	$effect(() => {
+		if (showMtg) app.loadMeta('mtg');
+		if (showRift) app.loadMeta('riftbound');
+		if (showPoke) app.loadMeta('pokemon');
+	});
+
 	const setOptions = $derived(
-		(showPoke ? app.pokemonCardSets : app.cardSets)
+		app.sets(showPoke ? 'pokemon' : showRift ? 'riftbound' : 'mtg')
 			.filter(s => !filters.setCode || s.code.toLowerCase().startsWith(filters.setCode.toLowerCase()) || s.name.toLowerCase().includes(filters.setCode.toLowerCase()))
 			.slice(0, 20)
 	);
@@ -176,6 +178,21 @@
 						{/each}
 					</div>
 				</div>
+
+				{#if app.cardTypes('mtg').length}
+				<div class="field">
+					<span class="field-label" title="Cards of any selected type match">Card Type</span>
+					<div class="checkbox-group">
+						{#each app.cardTypes('mtg') as t}
+							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
+								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
+									onchange={() => toggleCardType(t)} />
+								{t}
+							</label>
+						{/each}
+					</div>
+				</div>
+				{/if}
 
 				<div class="field">
 					<select class="input" value={filters.rarity}
@@ -312,6 +329,21 @@
 					</div>
 				</div>
 
+				{#if app.cardTypes('riftbound').length}
+				<div class="field">
+					<span class="field-label" title="Cards of any selected type match">Card Type</span>
+					<div class="checkbox-group">
+						{#each app.cardTypes('riftbound') as t}
+							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
+								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
+									onchange={() => toggleCardType(t)} />
+								{t}
+							</label>
+						{/each}
+					</div>
+				</div>
+				{/if}
+
 				<div class="field">
 					<select class="input" value={filters.rarity}
 						onchange={(e) => set('rarity', (e.target as HTMLSelectElement).value)}>
@@ -342,6 +374,21 @@
 						{/each}
 					</div>
 				</div>
+
+				{#if app.cardTypes('pokemon').length}
+				<div class="field">
+					<span class="field-label" title="Cards of any selected type match">Card Type</span>
+					<div class="checkbox-group">
+						{#each app.cardTypes('pokemon') as t}
+							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
+								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
+									onchange={() => toggleCardType(t)} />
+								{t}
+							</label>
+						{/each}
+					</div>
+				</div>
+				{/if}
 
 				<div class="field">
 					<input class="input" type="number" min="1" placeholder="National Pokédex #" value={filters.pokedex}

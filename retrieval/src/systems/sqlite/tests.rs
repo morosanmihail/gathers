@@ -1458,6 +1458,8 @@ async fn test_random_card_is_never_a_back_face() {
 // these check the results are still what the plain SQL would give.
 
 /// Filters that match every real card in the fixture but not its NULL-set junk rows.
+/// Every printing with a set: the fixture's 10 real cards and its 5 tokens (counting the
+/// double-faced one once).
 fn every_real_card() -> CardSearchFilters {
     CardSearchFilters {
         set_code: Some("%".to_string()),
@@ -1560,8 +1562,10 @@ async fn test_sort_by_collector_number_is_numeric() {
         .collect();
     assert_eq!(
         numbers,
+        // Tokens (4, 6, 7, 10, 26) sort in among the cards.
         vec![
-            "ab89", "12", "35", "39", "42", "52", "63s", "106", "155", "173"
+            "ab89", "4", "6", "7", "10", "12", "26", "35", "39", "42", "52", "63s", "106",
+            "155", "173"
         ]
     );
 }
@@ -1587,7 +1591,7 @@ async fn test_sort_by_artist_ignores_case_in_both_directions() {
         }
     };
     let asc = artists(SortOrder::Asc).await;
-    assert_eq!(asc.len(), 10);
+    assert_eq!(asc.len(), 15);
     let mut expected = asc.clone();
     expected.sort();
     assert_eq!(asc, expected);
@@ -1603,7 +1607,7 @@ async fn test_sort_by_set_code_and_rarity_are_stable_across_pages() {
     let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
     for sort in [SortField::SetCode, SortField::Rarity, SortField::Artist] {
         let mut seen = Vec::new();
-        for page in 0..5 {
+        for page in 0..8 {
             let filters = CardSearchFilters {
                 sort_by: Some(sort.clone()),
                 ..every_real_card()
@@ -1617,8 +1621,8 @@ async fn test_sort_by_set_code_and_rarity_are_stable_across_pages() {
         let mut unique = seen.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(seen.len(), 10, "{sort:?}");
-        assert_eq!(unique.len(), 10, "{sort:?} repeated or skipped a card");
+        assert_eq!(seen.len(), 15, "{sort:?}");
+        assert_eq!(unique.len(), 15, "{sort:?} repeated or skipped a card");
     }
 }
 
@@ -1936,7 +1940,7 @@ async fn test_bulk_search_falls_back_to_tokens() {
 }
 
 #[tokio::test]
-async fn test_search_falls_back_to_tokens_only_when_no_card_matches() {
+async fn test_search_includes_tokens_alongside_cards() {
     let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
 
     let drakes = system
@@ -1945,12 +1949,66 @@ async fn test_search_falls_back_to_tokens_only_when_no_card_matches() {
         .unwrap();
     assert_eq!(drakes.iter().map(|c| magic(c).id.as_str()).collect::<Vec<_>>(), vec![DRAKE_TM13]);
 
-    // "Goblin" matches the card Goblin King, so the Goblin token isn't looked for.
+    // Sorted by name: the Goblin token, then the card Goblin King.
     let goblins = system
         .search_cards(CardSearchFilters::new().with_name("Goblin"), None, Some(10))
         .await
         .unwrap();
-    assert_eq!(goblins.iter().map(|c| magic(c).name.as_str()).collect::<Vec<_>>(), vec!["Goblin King"]);
+    assert_eq!(
+        goblins.iter().map(|c| magic(c).name.as_str()).collect::<Vec<_>>(),
+        vec!["Goblin", "Goblin King"]
+    );
+    let desc = system
+        .search_cards(
+            CardSearchFilters { sort_order: Some(SortOrder::Desc), ..CardSearchFilters::new().with_name("Goblin") },
+            None,
+            Some(10),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        desc.iter().map(|c| magic(c).name.as_str()).collect::<Vec<_>>(),
+        vec!["Goblin King", "Goblin"]
+    );
+
+    // Paging walks the merged list: page 2 of 1 is the card.
+    let second = system
+        .search_cards(CardSearchFilters::new().with_name("Goblin"), Some(1), Some(1))
+        .await
+        .unwrap();
+    assert_eq!(second.iter().map(|c| magic(c).name.as_str()).collect::<Vec<_>>(), vec!["Goblin King"]);
+}
+
+#[tokio::test]
+async fn test_search_any_types_matches_any_of_them() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let names = |types: &[&str]| {
+        let filters = CardSearchFilters::new()
+            .with_any_types(types.iter().map(|t| t.to_string()).collect());
+        let system = &system;
+        async move {
+            let mut names: Vec<String> = system
+                .search_cards(filters, None, Some(50))
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| magic(c).name.clone())
+                .collect();
+            names.sort();
+            names
+        }
+    };
+    let artifacts = names(&["Artifact"]).await;
+    let enchantments = names(&["Enchantment"]).await;
+    assert!(artifacts.contains(&"Treasure".to_string()), "{artifacts:?}");
+    assert!(!enchantments.is_empty());
+    let mut either = [artifacts, enchantments].concat();
+    either.sort();
+    either.dedup();
+    assert_eq!(names(&["Artifact", "Enchantment"]).await, either);
+
+    // "Token" is a type too (MTGJSON types the double-faced Punchcard a "Card").
+    assert_eq!(names(&["Token"]).await, vec!["Drake", "Goblin", "Treasure", "Zombie"]);
 }
 
 #[tokio::test]
@@ -1979,4 +2037,35 @@ async fn test_token_search_ignores_filters_tokens_cannot_match() {
     assert!(system.search_cards(filters, None, Some(10)).await.unwrap().is_empty());
     let filters = CardSearchFilters::new().with_name("Drake").with_legal_in("modern");
     assert!(system.search_cards(filters, None, Some(10)).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_card_types_cover_cards_and_tokens() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    // 6 creature cards and 3 creature tokens; every other type is on fewer than five
+    // printings in the fixture.
+    assert_eq!(system.get_card_types().await.unwrap(), vec!["Creature"]);
+}
+
+#[test]
+fn test_common_types_splits_counts_and_drops_rare_types() {
+    let rows = vec![
+        (Some("Artifact, Creature".to_string()), 4),
+        (Some("Creature".to_string()), 3),
+        (Some("Artifact".to_string()), 1),
+        (Some("Eaturecray".to_string()), 1),
+        (Some(String::new()), 9),
+        (None, 9),
+    ];
+    assert_eq!(common_types(rows, 5), vec!["Artifact", "Creature"]);
+}
+
+#[tokio::test]
+async fn test_meta_gathers_sets_card_types_and_unique_modes() {
+    let system = MagicSQLiteRetrievalSystem::new(None, None).unwrap();
+    let meta = system.get_meta().await.unwrap();
+    assert_eq!(meta.sets, system.get_sets().await.unwrap());
+    assert_eq!(meta.card_types, system.get_card_types().await.unwrap());
+    let modes: Vec<_> = meta.unique_modes.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(modes, vec!["prints", "cards", "art"]);
 }

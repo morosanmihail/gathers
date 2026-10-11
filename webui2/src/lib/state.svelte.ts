@@ -1,5 +1,5 @@
-import type { Collection, SystemInfo, Theme, ViewMode, CardSet, UniqueMode } from './types';
-import { listCollections, getSystemInfo, getMtgCardSets, getPokemonCardSets } from './api';
+import type { Collection, SystemInfo, Theme, ViewMode, CardSet, UniqueMode, GameKey, SystemMeta } from './types';
+import { listCollections, getSystemInfo, getSystemMeta } from './api';
 import { injectThemeStyles } from './themes/index';
 
 class AppState {
@@ -8,8 +8,9 @@ class AppState {
 	ready = $state(false);
 	theme = $state<Theme>('dark');
 	viewMode = $state<ViewMode>('grid');
-	cardSets = $state<CardSet[]>([]);
-	pokemonCardSets = $state<CardSet[]>([]);
+	// Each game's search metadata (sets, card types, grouping modes), loaded on
+	// first use by `loadMeta`.
+	meta = $state<Partial<Record<GameKey, SystemMeta>>>({});
 	selectedCards = $state<Set<string>>(new Set());
 	pendingOps = $state<Map<string, string>>(new Map());
 
@@ -54,21 +55,27 @@ class AppState {
 		}
 	}
 
-	async loadCardSets() {
-		if (this.cardSets.length) return;
-		try {
-			this.cardSets = await getMtgCardSets();
-		} catch {
-			/* ignore */
-		}
+	get cardSets(): CardSet[] {
+		return this.meta.mtg?.sets ?? [];
 	}
 
-	async loadPokemonCardSets() {
-		if (this.pokemonCardSets.length) return;
+	/** Sets of `game`, empty until `loadMeta(game)` has finished. */
+	sets(game: GameKey): CardSet[] {
+		return this.meta[game]?.sets ?? [];
+	}
+
+	/** Card types `game` can be filtered by, empty until `loadMeta(game)` has finished. */
+	cardTypes(game: GameKey): string[] {
+		return this.meta[game]?.card_types ?? [];
+	}
+
+	async loadMeta(game: GameKey) {
+		if (this.meta[game]) return;
 		try {
-			this.pokemonCardSets = await getPokemonCardSets();
+			const meta = await getSystemMeta(game);
+			this.meta = { ...this.meta, [game]: meta };
 		} catch {
-			/* ignore */
+			/* game not configured, or server not ready */
 		}
 	}
 

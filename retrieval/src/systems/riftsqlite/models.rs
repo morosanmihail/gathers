@@ -14,6 +14,7 @@ pub struct SqlCard {
     pub text: String,
     pub image: String,
     pub collector_number: String,
+    pub card_type: String,
 }
 
 impl SqlCard {
@@ -37,6 +38,7 @@ impl SqlCard {
             artists: Self::text(row, 4)?,
             image: Self::text(row, 7)?,
             collector_number: Self::text(row, 8)?,
+            card_type: Self::text(row, 9)?,
         })
     }
 }
@@ -77,6 +79,7 @@ impl From<SqlCard> for RiftboundCard {
             text: value.text,
             image: value.image,
             collector_number: value.collector_number,
+            card_type: value.card_type,
         }
     }
 }

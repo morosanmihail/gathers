@@ -106,6 +106,7 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
         info!("Building MTG search indexes...");
     }
     conn.execute_batch(SEARCH_INDEXES)?;
+    tokens::create_indexes(&conn)?;
 
     // user_version tracks FTS schema version:
     //   0 = fresh/re-downloaded DB, no FTS built yet
@@ -254,6 +255,31 @@ fn resolve_printings(
         .collect())
 }
 
+/// MTGJSON's `types` also holds one-off joke types and typos from Un-sets and promos
+/// ("Eaturecray", "pLAnE"); anything real is printed more than a handful of times.
+const MIN_TYPE_PRINTINGS: i64 = 5;
+
+/// The types on at least `min` printings, sorted, from `(types, printings)` rows where `types`
+/// is a comma-separated list.
+fn common_types(rows: impl IntoIterator<Item = (Option<String>, i64)>, min: i64) -> Vec<String> {
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for (types, count) in rows {
+        for t in types.iter().flat_map(|t| t.split(',')) {
+            let t = t.trim();
+            if !t.is_empty() {
+                *counts.entry(t.to_string()).or_default() += count;
+            }
+        }
+    }
+    let mut types: Vec<String> = counts
+        .into_iter()
+        .filter(|(_, count)| *count >= min)
+        .map(|(t, _)| t)
+        .collect();
+    types.sort();
+    types
+}
+
 impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     fn unique_modes(&self) -> Vec<UniqueMode> {
         mtg_unique_modes()
@@ -355,6 +381,15 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
                 params.push(format!("%{t}%"));
                 i += 1;
             }
+        }
+        if let Some(any_types) = filters.any_types.as_ref().filter(|t| !t.is_empty()) {
+            let mut any = Vec::new();
+            for t in any_types {
+                any.push(format!("a.types LIKE ?{i}"));
+                params.push(format!("%{t}%"));
+                i += 1;
+            }
+            conditions.push(format!("({})", any.join(" OR ")));
         }
         if let Some(min) = filters.mana_value_min {
             conditions.push(format!("a.manaValue >= ?{i}"));
@@ -498,8 +533,18 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
             .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
 
-        // Kept for the tokens fallback below, which needs to know whether any card matched.
-        let filter_params: Vec<Value> = params.iter().cloned().map(Value::Text).collect();
+        // Tokens live in a table of their own, and a search covers them too. Their matches
+        // (few: the whole table is ~10k rows) are merged into the cards' by sort order, so
+        // the cards needed are every one that could land before the end of the page.
+        let tokens = match &self.token_base {
+            Some(_) => tokens::search_tokens(&conn, &filters, mode, skip.saturating_add(limit))?,
+            None => vec![],
+        };
+        let (skip, limit, merge_from) = if tokens.is_empty() {
+            (skip, limit, 0)
+        } else {
+            (0, skip.saturating_add(limit).min(MAX_WINDOW), skip)
+        };
         let page: Vec<String> = if mode != UNIQUE_PRINTS {
             let key_sql = unique::key_sql(mode)?;
             let query = unique::UniqueQuery {
@@ -564,27 +609,29 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             }
         };
 
-        // Only a search no card matches at all falls back to tokens. An empty page past the
-        // end of the card results is just that.
-        if page.is_empty()
-            && let Some(token_base) = &self.token_base
-        {
-            let any_card = skip > 0 && {
-                let query = format!("SELECT EXISTS(SELECT 1{from_where})");
-                conn.prepare_cached(&query)?.query_row(
-                    rusqlite::params_from_iter(filter_params.iter()),
-                    |row| row.get::<_, bool>(0),
-                )?
-            };
-            if !any_card {
-                let page = tokens::search_tokens(&conn, &filters, mode, skip, limit)?;
-                let mut cards = fetch_by_uuids(&conn, token_base, &page)?;
-                return Ok(page
-                    .iter()
-                    .filter_map(|id| cards.remove(id))
-                    .map(|c| Card::Magic(c.into()))
-                    .collect());
-            }
+        if !tokens.is_empty() {
+            let card_keys = tokens::card_sort_values(&conn, &page, filters.sort_by.as_ref())?;
+            let merged = tokens::merge(
+                page.iter().map(|id| (id, card_keys.get(id))),
+                &tokens,
+                descending,
+            );
+            let window: Vec<(bool, &String)> =
+                merged.into_iter().skip(merge_from).take(limit.saturating_sub(merge_from)).collect();
+            let token_base = self.token_base.as_deref().expect("tokens were found");
+            let card_ids: Vec<String> =
+                window.iter().filter(|(t, _)| !t).map(|(_, id)| (*id).clone()).collect();
+            let token_ids: Vec<String> =
+                window.iter().filter(|(t, _)| *t).map(|(_, id)| (*id).clone()).collect();
+            let mut cards = fetch_by_uuids(&conn, &select_base(), &card_ids)?;
+            let mut token_cards = fetch_by_uuids(&conn, token_base, &token_ids)?;
+            return Ok(window
+                .into_iter()
+                .filter_map(|(is_token, id)| {
+                    if is_token { token_cards.remove(id) } else { cards.remove(id) }
+                })
+                .map(|c| Card::Magic(c.into()))
+                .collect());
         }
 
         // Always load the front face, so a card has the same id (and details) however it was
@@ -630,6 +677,20 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             })
         })?;
         Ok(iter.flatten().collect())
+    }
+
+    async fn get_card_types(&self) -> eyre::Result<Vec<String>> {
+        let conn = self.connection.lock().await;
+        let mut query = String::from("SELECT types, COUNT(*) FROM cards GROUP BY types");
+        if self.token_base.is_some() {
+            query.push_str(" UNION ALL SELECT types, COUNT(*) FROM tokens GROUP BY types");
+        }
+        let mut stmt = conn.prepare_cached(&query)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let rows: Vec<(Option<String>, i64)> = rows.flatten().collect();
+        Ok(common_types(rows, MIN_TYPE_PRINTINGS))
     }
 
     async fn get_random_card(&self) -> eyre::Result<Option<Card>> {

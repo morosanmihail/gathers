@@ -59,15 +59,6 @@ fn is_not_found(json: &Value) -> bool {
         && json.get("code").and_then(Value::as_str) == Some("not_found")
 }
 
-/// Scryfall leaves tokens out of a search unless the query asks for them by type.
-fn with_token_type(query: &str) -> Option<String> {
-    let lower = query.to_lowercase();
-    if lower.contains("t:token") || lower.contains("type:token") {
-        return None;
-    }
-    Some(if query.is_empty() { "t:token".to_string() } else { format!("{query} t:token") })
-}
-
 /// One page of `/cards/search` results, or `None` when nothing matched.
 async fn search_page(client: &reqwest::Client, url: &str) -> eyre::Result<Option<Vec<Value>>> {
     let response = client.get(url).headers(request_headers()).send().await?;
@@ -125,14 +116,9 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
         };
 
         let client = reqwest::Client::new();
-        let mut cards_array = search_page(&client, &url(&query_string)).await?;
-        // Nothing matched: try again for tokens, which have to be asked for explicitly.
-        if cards_array.is_none()
-            && let Some(token_query) = with_token_type(&query_string)
-        {
-            cards_array = search_page(&client, &url(&token_query)).await?;
-        }
-        let cards_array = cards_array.unwrap_or_default();
+        let cards_array = search_page(&client, &url(&query::including_tokens(&query_string)))
+            .await?
+            .unwrap_or_default();
 
         let limit = limit.unwrap_or(cards_array.len());
         let cards = cards_array
@@ -185,6 +171,28 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
         }
 
         Ok(parsing::parse_sets_response(&json))
+    }
+
+    async fn get_card_types(&self) -> eyre::Result<Vec<String>> {
+        let client = reqwest::Client::new();
+        let response = client
+            .get("https://api.scryfall.com/catalog/card-types")
+            .headers(request_headers())
+            .send()
+            .await?;
+        let json: Value = response.json().await?;
+
+        if let Some(err) = scryfall_api_error(&json) {
+            return Err(err);
+        }
+
+        let mut types = parsing::parse_string_array(json.get("data"));
+        // The catalog leaves out "Token", which `type:token` finds like any other type.
+        if !types.iter().any(|t| t == "Token") {
+            types.push("Token".to_string());
+        }
+        types.sort();
+        Ok(types)
     }
 
     async fn get_random_card(&self) -> eyre::Result<Option<models::Card>> {

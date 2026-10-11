@@ -203,14 +203,6 @@ fn parses_collection_not_found() {
 }
 
 #[test]
-fn token_retry_adds_the_token_type_once() {
-    assert_eq!(with_token_type("name:\"Drake\"").as_deref(), Some("name:\"Drake\" t:token"));
-    assert_eq!(with_token_type("").as_deref(), Some("t:token"));
-    assert_eq!(with_token_type("type:Token name:\"Drake\""), None);
-    assert_eq!(with_token_type("t:token"), None);
-}
-
-#[test]
 fn not_found_is_only_the_not_found_error() {
     let not_found = serde_json::json!({ "object": "error", "code": "not_found", "details": "x" });
     let bad_request = serde_json::json!({ "object": "error", "code": "bad_request", "details": "x" });
@@ -219,17 +211,68 @@ fn not_found_is_only_the_not_found_error() {
     assert!(!is_not_found(&serde_json::json!({ "object": "list", "data": [] })));
 }
 
-/// Scryfall leaves tokens out of a search unless asked for by type; a search matching no card
-/// is retried for tokens.
+/// Scryfall leaves tokens out of a search unless asked for; every search asks.
 #[tokio::test]
 #[ignore]
-async fn search_finds_tokens_when_no_card_matches() -> eyre::Result<()> {
+async fn search_finds_tokens() -> eyre::Result<()> {
     let r = ScryfallRetrievalSystem {};
     let cards = r
         .search_cards(CardSearchFilters::new().with_name("Eldrazi Spawn"), None, None)
         .await?;
     assert!(!cards.is_empty());
     assert!(cards.iter().all(|c| as_magic(c.clone()).types.contains(&"Token".to_string())));
+    Ok(())
+}
+
+/// Tokens come back alongside cards of the same name.
+#[tokio::test]
+#[ignore]
+async fn search_finds_cards_and_tokens_together() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem {};
+    let cards = r
+        .search_cards(CardSearchFilters::new().with_name("Goblin"), None, None)
+        .await?;
+    let cards: Vec<_> = cards.into_iter().map(as_magic).collect();
+    let is_token = |c: &models::MagicCard| c.types.contains(&"Token".to_string());
+    assert!(cards.iter().any(is_token), "tokens named Goblin are found");
+    assert!(cards.iter().any(|c| !is_token(c)), "cards named Goblin are found");
+    Ok(())
+}
+
+/// Selecting several card types finds cards of any of them.
+#[tokio::test]
+#[ignore]
+async fn search_any_types_matches_either_type() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem {};
+    let cards = r
+        .search_cards(
+            CardSearchFilters::new()
+                .with_set_code("m13")
+                .with_any_types(vec!["Artifact".to_string(), "Enchantment".to_string()]),
+            None,
+            None,
+        )
+        .await?;
+    let cards: Vec<_> = cards.into_iter().map(as_magic).collect();
+    let has = |t: &str| cards.iter().any(|c| c.types.contains(&t.to_string()));
+    assert!(has("Artifact") && has("Enchantment"));
+    assert!(cards
+        .iter()
+        .all(|c| c.types.contains(&"Artifact".to_string()) || c.types.contains(&"Enchantment".to_string())));
+    Ok(())
+}
+
+/// Scryfall's type catalog, with tokens added.
+#[tokio::test]
+#[ignore]
+async fn card_types_include_tokens() -> eyre::Result<()> {
+    let types = ScryfallRetrievalSystem {}.get_card_types().await?;
+    for t in ["Artifact", "Creature", "Enchantment", "Token"] {
+        assert!(types.contains(&t.to_string()), "{t} missing from {types:?}");
+    }
+    let mut sorted = types.clone();
+    sorted.sort();
+    assert_eq!(types, sorted);
     Ok(())
 }
 

@@ -28,6 +28,9 @@ name = "price_history_weeks"
 [[example]]
 name = "tokens"
 
+[[example]]
+name = "card_types"
+
 [dependencies]
 chrono = { workspace = true }
 eyre = { workspace = true }
