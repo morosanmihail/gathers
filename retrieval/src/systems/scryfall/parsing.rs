@@ -249,3 +249,21 @@ pub fn parse_collection_response(json: &Value) -> Vec<(SetCode, CollectorNumber,
         })
         .unwrap_or_default()
 }
+
+/// The `{set, collector_number}` identifiers a `/cards/collection` response lists as
+/// `not_found`.
+pub fn parse_not_found(json: &Value) -> Vec<(SetCode, CollectorNumber)> {
+    json.get("not_found")
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| {
+                    Some((
+                        id.get("set")?.as_str()?.to_string(),
+                        id.get("collector_number")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}

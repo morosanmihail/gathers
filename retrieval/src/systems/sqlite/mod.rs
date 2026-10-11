@@ -1,5 +1,6 @@
 mod models;
 mod prices;
+mod tokens;
 mod unique;
 pub mod update;
 
@@ -40,6 +41,9 @@ pub struct MagicSQLiteRetrievalSystem {
     /// SQL ranking which printing best represents a card in the `unique` modes, built once
     /// from the columns this database has (see `unique::build_rank_sql`).
     rank_sql: Arc<String>,
+    /// `select_base` for the `tokens` table (see `tokens::token_select_base`), or `None` when
+    /// the database has no tokens.
+    token_base: Option<Arc<String>>,
 }
 
 /// Largest `skip`/`limit` a search honours (see `search_cards`): far beyond
@@ -141,12 +145,14 @@ impl MagicSQLiteRetrievalSystem {
         };
         let conn = open_mtg_connection(&path)?;
         let rank_sql = Arc::new(unique::build_rank_sql(&conn));
+        let token_base = tokens::token_select_base(&conn)?.map(Arc::new);
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             db_path: path,
             prices_path,
             prices_cache,
             rank_sql,
+            token_base,
         })
     }
 }
@@ -181,20 +187,71 @@ fn select_base() -> String {
     )
 }
 
-/// Cards by uuid, straight from the `cards` table (faces are not collapsed). Rows that fail
-/// to parse are skipped.
-fn fetch_by_uuids(conn: &Connection, ids: &[String]) -> eyre::Result<HashMap<String, SqlCard>> {
+/// Cards by uuid, straight from the table `base` selects from (`select_base` or
+/// `token_base`; faces are not collapsed). Rows that fail to parse are skipped.
+fn fetch_by_uuids(
+    conn: &Connection,
+    base: &str,
+    ids: &[String],
+) -> eyre::Result<HashMap<String, SqlCard>> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let query = format!(
-        "{} WHERE a.uuid IN ({})",
-        select_base(),
-        sql_placeholders(ids.len())
-    );
+    let query = format!("{base} WHERE a.uuid IN ({})", sql_placeholders(ids.len()));
     let mut stmt = conn.prepare_cached(&query)?;
     let iter = stmt.query_map(rusqlite::params_from_iter(ids), SqlCard::from_row)?;
     Ok(iter.flatten().map(|c| (c.id.clone(), c)).collect())
+}
+
+/// Resolves set codes and collector numbers to uuids in `table` (`cards` or `tokens`, which
+/// share these columns). Pairs that match nothing are left out.
+fn resolve_printings(
+    conn: &Connection,
+    table: &str,
+    cards: &[(SetCode, CollectorNumber)],
+) -> eyre::Result<Vec<(SetCode, CollectorNumber, CardID)>> {
+    if cards.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut params = vec![];
+    cards.iter().for_each(|c| {
+        params.push(c.0.clone());
+        params.push(c.1.clone());
+    });
+    let query = format!(
+        "SELECT uuid, setCode, number, side FROM {table} WHERE (setCode, number) IN (VALUES {});",
+        sql_pair_placeholders(cards.len())
+    );
+    let mut stmt = conn.prepare_cached(&query)?;
+    let iter = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    // Every face of a double-faced card matches its set and number; keep the front one
+    // (no `side`, else the lowest) so a card resolves to a single id.
+    let mut resolved: Vec<(SetCode, CollectorNumber, CardID, Option<String>)> = vec![];
+    let mut index: HashMap<(String, String), usize> = HashMap::new();
+    for (id, set, num, side) in iter.flatten() {
+        match index.get(&(set.clone(), num.clone())) {
+            Some(&i) => {
+                if side < resolved[i].3 {
+                    resolved[i] = (set, num, id, side);
+                }
+            }
+            None => {
+                index.insert((set.clone(), num.clone()), resolved.len());
+                resolved.push((set, num, id, side));
+            }
+        }
+    }
+    Ok(resolved
+        .into_iter()
+        .map(|(set, num, id, _)| (set, num, id))
+        .collect())
 }
 
 impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
@@ -441,6 +498,8 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         let mode = resolve_unique_mode(&modes, filters.unique.as_deref())?
             .map_or(UNIQUE_PRINTS, |m| m.id.as_str());
 
+        // Kept for the tokens fallback below, which needs to know whether any card matched.
+        let filter_params: Vec<Value> = params.iter().cloned().map(Value::Text).collect();
         let page: Vec<String> = if mode != UNIQUE_PRINTS {
             let key_sql = unique::key_sql(mode)?;
             let query = unique::UniqueQuery {
@@ -505,10 +564,33 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             }
         };
 
+        // Only a search no card matches at all falls back to tokens. An empty page past the
+        // end of the card results is just that.
+        if page.is_empty()
+            && let Some(token_base) = &self.token_base
+        {
+            let any_card = skip > 0 && {
+                let query = format!("SELECT EXISTS(SELECT 1{from_where})");
+                conn.prepare_cached(&query)?.query_row(
+                    rusqlite::params_from_iter(filter_params.iter()),
+                    |row| row.get::<_, bool>(0),
+                )?
+            };
+            if !any_card {
+                let page = tokens::search_tokens(&conn, &filters, mode, skip, limit)?;
+                let mut cards = fetch_by_uuids(&conn, token_base, &page)?;
+                return Ok(page
+                    .iter()
+                    .filter_map(|id| cards.remove(id))
+                    .map(|c| Card::Magic(c.into()))
+                    .collect());
+            }
+        }
+
         // Always load the front face, so a card has the same id (and details) however it was
         // found, including when only its back face matched. Ids that don't resolve (rows
         // that fail to parse) are skipped, as before.
-        let mut cards = fetch_by_uuids(&conn, &page)?;
+        let mut cards = fetch_by_uuids(&conn, &select_base(), &page)?;
         Ok(page
             .iter()
             .filter_map(|id| cards.remove(id))
@@ -518,7 +600,16 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
 
     async fn get_cards_by_ids(&self, ids: Vec<String>) -> eyre::Result<HashMap<String, Card>> {
         let conn = self.connection.lock().await;
-        Ok(fetch_by_uuids(&conn, &ids)?
+        let mut found = fetch_by_uuids(&conn, &select_base(), &ids)?;
+        if let Some(token_base) = &self.token_base {
+            let missing: Vec<String> = ids
+                .iter()
+                .filter(|id| !found.contains_key(*id))
+                .cloned()
+                .collect();
+            found.extend(fetch_by_uuids(&conn, token_base, &missing)?);
+        }
+        Ok(found
             .into_iter()
             .map(|(id, c)| (id, Card::Magic(c.into())))
             .collect())
@@ -562,45 +653,21 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             return Ok(vec![]);
         }
         let conn = self.connection.lock().await;
-        let mut params = vec![];
-        cards.iter().for_each(|c| {
-            params.push(c.0.clone());
-            params.push(c.1.clone());
-        });
-        let query = format!(
-            "SELECT uuid, setCode, number, side FROM cards WHERE (setCode, number) IN (VALUES {});",
-            sql_pair_placeholders(cards.len())
-        );
-        let mut stmt = conn.prepare_cached(&query)?;
-        let iter = stmt.query_map(rusqlite::params_from_iter(params), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })?;
-        // Every face of a double-faced card matches its set and number; keep the front one
-        // (no `side`, else the lowest) so a card resolves to a single id.
-        let mut resolved: Vec<(SetCode, CollectorNumber, CardID, Option<String>)> = vec![];
-        let mut index: HashMap<(String, String), usize> = HashMap::new();
-        for (id, set, num, side) in iter.flatten() {
-            match index.get(&(set.clone(), num.clone())) {
-                Some(&i) => {
-                    if side < resolved[i].3 {
-                        resolved[i] = (set, num, id, side);
-                    }
-                }
-                None => {
-                    index.insert((set.clone(), num.clone()), resolved.len());
-                    resolved.push((set, num, id, side));
-                }
-            }
+        let mut resolved = resolve_printings(&conn, "cards", &cards)?;
+        // Tokens live in a table of their own; look there for whatever no card matched.
+        if self.token_base.is_some() {
+            let found: HashSet<(&str, &str)> = resolved
+                .iter()
+                .map(|(set, num, _)| (set.as_str(), num.as_str()))
+                .collect();
+            let missing: Vec<(SetCode, CollectorNumber)> = cards
+                .iter()
+                .filter(|(set, num)| !found.contains(&(set.as_str(), num.as_str())))
+                .cloned()
+                .collect();
+            resolved.extend(resolve_printings(&conn, "tokens", &missing)?);
         }
-        Ok(resolved
-            .into_iter()
-            .map(|(set, num, id, _)| (set, num, id))
-            .collect())
+        Ok(resolved)
     }
 
     async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {

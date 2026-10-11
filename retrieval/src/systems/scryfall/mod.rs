@@ -53,6 +53,40 @@ fn scryfall_api_error(json: &Value) -> Option<eyre::Report> {
     Some(eyre::eyre!("Scryfall API error: {}", error_msg))
 }
 
+/// Scryfall answers a search that matches nothing with a `not_found` error, not an empty list.
+fn is_not_found(json: &Value) -> bool {
+    json.get("object").and_then(Value::as_str) == Some("error")
+        && json.get("code").and_then(Value::as_str) == Some("not_found")
+}
+
+/// Scryfall leaves tokens out of a search unless the query asks for them by type.
+fn with_token_type(query: &str) -> Option<String> {
+    let lower = query.to_lowercase();
+    if lower.contains("t:token") || lower.contains("type:token") {
+        return None;
+    }
+    Some(if query.is_empty() { "t:token".to_string() } else { format!("{query} t:token") })
+}
+
+/// One page of `/cards/search` results, or `None` when nothing matched.
+async fn search_page(client: &reqwest::Client, url: &str) -> eyre::Result<Option<Vec<Value>>> {
+    let response = client.get(url).headers(request_headers()).send().await?;
+    let json: Value = response.json().await?;
+
+    if is_not_found(&json) {
+        return Ok(None);
+    }
+    if let Some(err) = scryfall_api_error(&json) {
+        return Err(err);
+    }
+
+    let cards = json
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_eyre("Could not retrieve cards array")?;
+    Ok(Some(cards.clone()).filter(|cards| !cards.is_empty()))
+}
+
 impl RetrievalSystemTrait for ScryfallRetrievalSystem {
     fn unique_modes(&self) -> Vec<UniqueMode> {
         mtg_unique_modes()
@@ -83,24 +117,22 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
             "asc"
         };
         let include_extras = false;
-
-        let url = format!(
-            "https://api.scryfall.com/cards/search?q={}&page={}&unique={}&order={}&dir={}&include_extras={}",
-            query_string, page, unique, order, dir, include_extras
-        );
+        let url = |q: &str| {
+            format!(
+                "https://api.scryfall.com/cards/search?q={}&page={}&unique={}&order={}&dir={}&include_extras={}",
+                q, page, unique, order, dir, include_extras
+            )
+        };
 
         let client = reqwest::Client::new();
-        let response = client.get(url).headers(request_headers()).send().await?;
-        let json: Value = response.json().await?;
-
-        if let Some(err) = scryfall_api_error(&json) {
-            return Err(err);
+        let mut cards_array = search_page(&client, &url(&query_string)).await?;
+        // Nothing matched: try again for tokens, which have to be asked for explicitly.
+        if cards_array.is_none()
+            && let Some(token_query) = with_token_type(&query_string)
+        {
+            cards_array = search_page(&client, &url(&token_query)).await?;
         }
-
-        let cards_array = json
-            .get("data")
-            .and_then(Value::as_array)
-            .ok_or_eyre("Could not retrieve cards array")?;
+        let cards_array = cards_array.unwrap_or_default();
 
         let limit = limit.unwrap_or(cards_array.len());
         let cards = cards_array
@@ -201,7 +233,39 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
                 return Err(err);
             }
 
-            result.extend(parsing::parse_collection_response(&json));
+            // Scryfall reports set codes in lowercase; give back the caller's own spelling, so
+            // results can be matched against the input.
+            let requested: HashMap<(String, &str), &(SetCode, CollectorNumber)> = batch
+                .iter()
+                .map(|c| ((c.0.to_lowercase(), c.1.as_str()), c))
+                .collect();
+            for (set, number, id) in parsing::parse_collection_response(&json) {
+                let (set, number) = match requested.get(&(set.to_lowercase(), number.as_str())) {
+                    Some((set, number)) => (set.clone(), number.clone()),
+                    None => (set, number),
+                };
+                result.push((set, number, id));
+            }
+
+            // Not found as a card: try again as a token, which a search must ask for by type.
+            for (set, number) in parsing::parse_not_found(&json) {
+                let Some((set, number)) = requested.get(&(set.to_lowercase(), number.as_str()))
+                else {
+                    continue;
+                };
+                let query = format!("set:{set} cn:{number} t:token");
+                let url = format!(
+                    "https://api.scryfall.com/cards/search?q={query}&unique=prints&include_extras=true"
+                );
+                // Scryfall asks for 50-100ms between requests.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                if let Some(id) = search_page(&client, &url)
+                    .await?
+                    .and_then(|cards| cards.first()?.get("id")?.as_str().map(String::from))
+                {
+                    result.push((set.clone(), number.clone(), id));
+                }
+            }
         }
 
         Ok(result)

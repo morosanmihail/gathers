@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 
 use crate::models::{
     AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, CollectionValueCards, CollectionValueHistory, CollectionRemoveResponse, PublicCollectionPage,
+    CollectionAddResponse, CollectionCard, MtgCard, CollectionValueCards, CollectionValueHistory, CollectionRemoveResponse, PublicCollectionPage,
     PriceHistoryResponse, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo,
 };
 
@@ -240,6 +240,39 @@ impl GathersClient {
             urlenc(collection_id),
         ))
         .await
+    }
+
+    // ── MTG cards ─────────────────────────────────────────────────────────────
+
+    /// Searches the MTG system with `filters` (an `APICardSearchFilters` object).
+    pub async fn search_mtg(&self, filters: &serde_json::Value, limit: usize) -> eyre::Result<Vec<MtgCard>> {
+        self.post(&format!("/api/mtg/cards/search?limit={limit}"), filters).await
+    }
+
+    /// MTG cards by id; ids the system doesn't know are left out.
+    pub async fn mtg_cards(&self, ids: &[&str]) -> eyre::Result<std::collections::HashMap<String, MtgCard>> {
+        let query: Vec<String> = ids.iter().map(|id| format!("ids={}", urlenc(id))).collect();
+        self.get(&format!("/api/mtg/cards?{}", query.join("&"))).await
+    }
+
+    /// Imports `csv` (gathers' own `Set,CollectorNumber,Quantity,FoilQuantity`
+    /// format) as a new collection named `collection`.
+    pub async fn import_csv(&self, collection: &str, csv: &str) -> eyre::Result<()> {
+        let url = format!("{}/api/collection/import", self.base_url);
+        let form = reqwest::multipart::Form::new()
+            .text("collection", collection.to_string())
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(csv.as_bytes().to_vec()).file_name("import.csv"),
+            );
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        parse_response(resp, "POST", &url).await
     }
 
     // ── system & prices ───────────────────────────────────────────────────────

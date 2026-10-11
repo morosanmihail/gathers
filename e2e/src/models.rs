@@ -197,3 +197,18 @@ pub struct CollectionValueCards {
     pub unpriced_count: usize,
     pub entries: Vec<ValueCardEntry>,
 }
+
+/// The fields of an MTG card (`/api/mtg/...`) the tests look at.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MtgCard {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "setCode")]
+    pub set_code: String,
+    #[serde(rename = "collectorNumber")]
+    pub collector_number: String,
+    #[serde(rename = "typeLine", default)]
+    pub type_line: String,
+    #[serde(rename = "setName", default)]
+    pub set_name: String,
+}

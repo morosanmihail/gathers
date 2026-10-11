@@ -12,6 +12,7 @@ const ADVENTURE_BONECRUSHER: &str = include_str!("testdata/adventure_bonecrusher
 const TRANSFORM_DELVER: &str = include_str!("testdata/transform_delver.json");
 const SETS_RESPONSE: &str = include_str!("testdata/sets_response.json");
 const COLLECTION_RESPONSE: &str = include_str!("testdata/collection_response.json");
+const TOKEN_GOBLIN: &str = include_str!("testdata/token_goblin.json");
 
 fn parse_fixture(json: &str) -> Card {
     let value: Value = serde_json::from_str(json).expect("fixture should be valid JSON");
@@ -179,6 +180,80 @@ fn parses_collection_response_skips_not_found() {
     )));
     // "zzzz"/"999" was in `not_found` and must not appear.
     assert!(!resolved.iter().any(|(set, _, _)| set == "zzzz"));
+}
+
+#[test]
+fn parses_vanilla_token() {
+    let card = as_magic(parse_fixture(TOKEN_GOBLIN));
+    assert_eq!(card.name, "Goblin");
+    assert_eq!(card.set_code, "tm13");
+    assert_eq!(card.collector_number, "6");
+    assert_eq!(card.text, "");
+    assert_eq!(card.types, vec!["Token", "Creature"]);
+    assert_eq!(card.subtypes, vec!["Goblin"]);
+}
+
+#[test]
+fn parses_collection_not_found() {
+    let json: Value = serde_json::from_str(COLLECTION_RESPONSE).expect("valid JSON");
+    assert_eq!(
+        parsing::parse_not_found(&json),
+        vec![("zzzz".to_string(), "999".to_string())]
+    );
+}
+
+#[test]
+fn token_retry_adds_the_token_type_once() {
+    assert_eq!(with_token_type("name:\"Drake\"").as_deref(), Some("name:\"Drake\" t:token"));
+    assert_eq!(with_token_type("").as_deref(), Some("t:token"));
+    assert_eq!(with_token_type("type:Token name:\"Drake\""), None);
+    assert_eq!(with_token_type("t:token"), None);
+}
+
+#[test]
+fn not_found_is_only_the_not_found_error() {
+    let not_found = serde_json::json!({ "object": "error", "code": "not_found", "details": "x" });
+    let bad_request = serde_json::json!({ "object": "error", "code": "bad_request", "details": "x" });
+    assert!(is_not_found(&not_found));
+    assert!(!is_not_found(&bad_request));
+    assert!(!is_not_found(&serde_json::json!({ "object": "list", "data": [] })));
+}
+
+/// Scryfall leaves tokens out of a search unless asked for by type; a search matching no card
+/// is retried for tokens.
+#[tokio::test]
+#[ignore]
+async fn search_finds_tokens_when_no_card_matches() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem {};
+    let cards = r
+        .search_cards(CardSearchFilters::new().with_name("Eldrazi Spawn"), None, None)
+        .await?;
+    assert!(!cards.is_empty());
+    assert!(cards.iter().all(|c| as_magic(c.clone()).types.contains(&"Token".to_string())));
+    Ok(())
+}
+
+/// Set codes come back in the caller's spelling, tokens included.
+#[tokio::test]
+#[ignore]
+async fn bulk_search_resolves_tokens_in_the_callers_set_spelling() -> eyre::Result<()> {
+    let r = ScryfallRetrievalSystem {};
+    let mut resolved = r
+        .bulk_search_cards(vec![
+            ("M13".to_string(), "39".to_string()),
+            ("TM13".to_string(), "6".to_string()),
+            ("TM13".to_string(), "999".to_string()),
+        ])
+        .await?;
+    resolved.sort();
+    assert_eq!(
+        resolved,
+        vec![
+            ("M13".to_string(), "39".to_string(), "d28eb320-aea7-466e-8718-de8652a2b191".to_string()),
+            ("TM13".to_string(), "6".to_string(), "0e67efea-8a80-42ec-8e77-07d387d933d4".to_string()),
+        ]
+    );
+    Ok(())
 }
 
 #[tokio::test]

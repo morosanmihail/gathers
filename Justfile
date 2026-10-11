@@ -15,6 +15,7 @@ e2e:
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example plugin_provider_resolution
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history
     GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example price_history_weeks
+    GATHERS_BIN_DIR=target/debug cargo run -q -p e2e --example tokens
 
 # Run criterion benchmarks
 bench:
