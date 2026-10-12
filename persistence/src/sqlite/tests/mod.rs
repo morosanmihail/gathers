@@ -62,6 +62,7 @@ pub async fn record_purchase(
     }
 }
 
+mod backup;
 mod cards;
 mod collections;
 mod move_cards;

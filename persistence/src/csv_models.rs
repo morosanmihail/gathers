@@ -11,15 +11,23 @@ pub enum CsvField {
     Quantity,
     FoilQuantity,
     Provider,
+    /// Which finish `Quantity` and `WantQuantity` are of, using
+    /// `models::CollectionCard::finish`'s names. Empty is the default finish,
+    /// whose row also carries `FoilQuantity` — the same shape as exports
+    /// from before this column existed.
+    Finish,
+    WantQuantity,
 }
 
 impl CsvField {
-    pub const ALL: [CsvField; 5] = [
+    pub const ALL: [CsvField; 7] = [
         CsvField::SetCode,
         CsvField::CollectorNumber,
         CsvField::Quantity,
         CsvField::FoilQuantity,
         CsvField::Provider,
+        CsvField::Finish,
+        CsvField::WantQuantity,
     ];
 
     /// The column header gathers has always used for this field. Used for
@@ -34,6 +42,8 @@ impl CsvField {
             CsvField::Quantity => "Quantity",
             CsvField::FoilQuantity => "FoilQuantity",
             CsvField::Provider => "Provider",
+            CsvField::Finish => "Finish",
+            CsvField::WantQuantity => "WantQuantity",
         }
     }
 }
@@ -171,4 +181,7 @@ pub struct CSVCard {
     pub quantity: u32,
     pub foil_quantity: u32,
     pub provider: String,
+    /// See `CsvField::Finish`.
+    pub finish: String,
+    pub want_quantity: u32,
 }

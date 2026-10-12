@@ -1,3 +1,4 @@
+mod backup;
 mod cards;
 mod collections;
 mod price_history;
@@ -14,6 +15,8 @@ use rusqlite_migration::Migrations;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::Mutex;
+
+pub use backup::{latest_price_history_schema_version, latest_storage_schema_version};
 
 use crate::{CollectionCard, CollectionCardsParams, CollectionInfo, DailyPrice, PersistenceError, PersistenceSystemTrait, PriceHistoryEntry, PricePoint, PurchaseHistoryEntry, PurchaseSummary, ShareLink, UpdateEntryResult};
 

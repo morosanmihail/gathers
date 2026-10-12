@@ -727,6 +727,24 @@ export async function restartServer(timeoutMs = 60_000): Promise<void> {
 	throw new Error('Server did not come back after restarting');
 }
 
+/** Downloads a zip of every collection (and price history, when kept). */
+export const BACKUP_URL = '/api/settings/backup';
+
+/**
+ * Replaces all collections (and price history, when the backup has it) with
+ * an uploaded backup zip. Returns whether price history was replaced too.
+ */
+export async function restoreBackup(file: File): Promise<{ priceHistoryRestored: boolean }> {
+	const form = new FormData();
+	form.append('file', file);
+	const result = await fetchJSON<{ price_history_restored: boolean }>(BACKUP_URL, { method: 'POST', body: form });
+	// Everything cached may describe data that no longer exists.
+	invalidateCache();
+	invalidateCollectionStats();
+	purchaseHistoryCache.clear();
+	return { priceHistoryRestored: result.price_history_restored };
+}
+
 export async function triggerUpdate(endpoint: string): Promise<string> {
 	const result = await fetchJSON<string | boolean>(endpoint, { method: 'POST' });
 	return typeof result === 'string' ? result : 'Done';

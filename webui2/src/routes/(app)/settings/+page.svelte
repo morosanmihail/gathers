@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { saveSettings, triggerUpdate, restartServer, invalidateSystemInfo, getEnvOverrides } from '$lib/api';
+	import { saveSettings, triggerUpdate, restartServer, invalidateSystemInfo, getEnvOverrides, restoreBackup, BACKUP_URL } from '$lib/api';
 	import { app } from '$lib/state.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import type { EnvOverride, PluginConfig, Settings, System } from '$lib/types';
@@ -53,6 +53,40 @@
 		{ key: 'storage_db_path',     label: 'Storage Database path' },
 		{ key: 'price_history_db_path', label: 'Price History Database path', placeholder: '(next to the storage database)' },
 	];
+
+	// Backup restore: the chosen file waits here for confirmation.
+	let restoreFile = $state<File | null>(null);
+	let restoring = $state(false);
+	let restoreMsg = $state<{ ok: boolean; text: string } | null>(null);
+	let restoreInput = $state<HTMLInputElement | null>(null);
+
+	function pickRestoreFile(e: Event) {
+		const input = e.target as HTMLInputElement;
+		restoreFile = input.files?.[0] ?? null;
+		// Lets the same file be picked again after cancelling.
+		input.value = '';
+	}
+
+	async function handleRestore() {
+		const file = restoreFile;
+		restoreFile = null;
+		if (!file) return;
+		restoring = true; restoreMsg = null;
+		try {
+			const { priceHistoryRestored } = await restoreBackup(file);
+			await app.loadCollections();
+			restoreMsg = {
+				ok: true,
+				text: priceHistoryRestored
+					? 'Backup restored, including price history.'
+					: 'Backup restored. Price history was left as it was (not in the backup, or not enabled).',
+			};
+		} catch (e) {
+			restoreMsg = { ok: false, text: e instanceof Error ? e.message : String(e) };
+		} finally {
+			restoring = false;
+		}
+	}
 
 	// Per-button update state
 	let updateStates = $state<Record<string, { running: boolean; msg: string; ok: boolean }>>({});
@@ -225,6 +259,17 @@
 		confirmLabel="Restart"
 		onconfirm={handleRestart}
 		oncancel={() => (confirmRestart = false)}
+	/>
+{/if}
+
+{#if restoreFile}
+	<ConfirmDialog
+		title="Restore backup?"
+		message={`This replaces all collections, cards, purchase history and share links with the contents of "${restoreFile.name}"${app.systemInfo?.price_history_enabled ? ', along with price history if the backup has it' : ''}. Anything not in the backup is lost. Download a backup first if you may want it back.`}
+		confirmLabel="Replace everything"
+		danger
+		onconfirm={handleRestore}
+		oncancel={() => (restoreFile = null)}
 	/>
 {/if}
 
@@ -536,6 +581,30 @@
 									{/if}
 								</div>
 							{/each}
+						</div>
+				</div>
+
+					<!-- Backup -->
+					<div class="panel">
+						<div class="panel-title">
+							Backup
+						</div>
+						<div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+							<div style="font-size: 0.8rem; color: var(--text2);">
+								A backup is a zip of the storage database (collections, cards, purchase history, share links) and, when recorded, the price history database. Card and price databases aren't included; they are downloaded again.
+							</div>
+							<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+								<a class="btn btn-sm" href={BACKUP_URL} download>Download backup</a>
+								<button class="btn btn-sm" onclick={() => restoreInput?.click()} disabled={restoring}>
+									{restoring ? 'Restoring…' : 'Restore from backup…'}
+								</button>
+								<input bind:this={restoreInput} type="file" accept=".zip,application/zip" onchange={pickRestoreFile} hidden />
+							</div>
+							{#if restoreMsg}
+								<div role="status" style="font-size: 0.85rem; color: {restoreMsg.ok ? 'var(--text2)' : 'var(--danger)'};">
+									{restoreMsg.text}
+								</div>
+							{/if}
 						</div>
 				</div>
 				</div>

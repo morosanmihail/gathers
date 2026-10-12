@@ -13,10 +13,11 @@ fn systems_by_name<'a>(retrievals: &'a [RetrievalSystem]) -> HashMap<&'a str, &'
 /// the header text `mapping` says holds it (falling back to
 /// `CsvField::default_header` for anything not overridden) rather than
 /// assuming gathers' own fixed column names. `SetCode`/`CollectorNumber`/
-/// `Quantity` must all be present under their resolved header; `Provider`
-/// and `FoilQuantity` are optional and default to an empty string / 0 when
-/// the file has no such column at all — several third-party formats (see
-/// `CsvFieldMapping::preset`) don't track foil as a separate count.
+/// `Quantity` must all be present under their resolved header; the rest are
+/// optional and default to an empty string / 0 when the file has no such
+/// column at all — several third-party formats (see
+/// `CsvFieldMapping::preset`) don't track foil as a separate count, and
+/// files exported before `Finish`/`WantQuantity` existed have neither.
 fn read_csv(filename: &str, mapping: &CsvFieldMapping) -> eyre::Result<Vec<CSVCard>> {
     let mut rdr = csv::Reader::from_path(filename)?;
     let header_to_field = mapping.header_to_field();
@@ -65,26 +66,34 @@ fn read_csv(filename: &str, mapping: &CsvFieldMapping) -> eyre::Result<Vec<CSVCa
             quantity: parse_count(CsvField::Quantity)?,
             foil_quantity: parse_count(CsvField::FoilQuantity)?,
             provider: get(CsvField::Provider).unwrap_or_default().to_string(),
+            finish: get(CsvField::Finish).unwrap_or_default().to_string(),
+            want_quantity: parse_count(CsvField::WantQuantity)?,
         });
     }
     Ok(cards)
 }
 
-/// Folds rows naming the same card (same provider, set and collector number)
-/// into one, summing their quantities — otherwise only the first such row
+/// Folds rows naming the same card and finish (same provider, set, collector
+/// number and finish) into one, summing their quantities — otherwise only the first such row
 /// would be matched back to the resolved card and the rest silently lost.
 /// Sums saturate at `i32::MAX`, the most a collection row can hold.
 fn merge_duplicate_rows(cards: Vec<CSVCard>) -> Vec<CSVCard> {
     let mut merged: Vec<CSVCard> = Vec::with_capacity(cards.len());
-    let mut index: HashMap<(String, String, String), usize> = HashMap::new();
+    let mut index: HashMap<(String, String, String, String), usize> = HashMap::new();
     for card in cards {
-        let key = (card.provider.clone(), card.set_code.clone(), card.collector_number.clone());
+        let key = (
+            card.provider.clone(),
+            card.set_code.clone(),
+            card.collector_number.clone(),
+            card.finish.clone(),
+        );
         match index.get(&key) {
             Some(&i) => {
                 let max = i32::MAX as u32;
                 let existing = &mut merged[i];
                 existing.quantity = existing.quantity.saturating_add(card.quantity).min(max);
                 existing.foil_quantity = existing.foil_quantity.saturating_add(card.foil_quantity).min(max);
+                existing.want_quantity = existing.want_quantity.saturating_add(card.want_quantity).min(max);
             }
             None => {
                 index.insert(key, merged.len());
@@ -123,8 +132,8 @@ impl PersistenceSystem {
             groups.entry(card.provider.as_str()).or_default().push(card);
         }
 
-        // (uuid, quantity, foil_quantity, provider_name)
-        let mut cta: Vec<(String, u32, u32, String)> = vec![];
+        // (uuid, row, provider_name)
+        let mut cta: Vec<(String, &CSVCard, String)> = vec![];
         for (provider, group) in &groups {
             let system = if provider.is_empty() {
                 by_name
@@ -145,10 +154,13 @@ impl PersistenceSystem {
                 })?
             };
 
-            let input: Vec<(String, String)> = group
+            // Rows for several finishes of one card share a lookup.
+            let mut input: Vec<(String, String)> = group
                 .iter()
                 .map(|c| (c.set_code.clone(), c.collector_number.clone()))
                 .collect();
+            input.sort_unstable();
+            input.dedup();
 
             let mut resolved = vec![];
             for chunk in input.chunks(BULK_CHUNK_SIZE) {
@@ -156,11 +168,11 @@ impl PersistenceSystem {
             }
 
             for (set_code, collector_number, uuid) in resolved {
-                if let Some(c) = group
+                for c in group
                     .iter()
-                    .find(|c| c.set_code == set_code && c.collector_number == collector_number)
+                    .filter(|c| c.set_code == set_code && c.collector_number == collector_number)
                 {
-                    cta.push((uuid, c.quantity, c.foil_quantity, system.name().to_string()));
+                    cta.push((uuid.clone(), c, system.name().to_string()));
                 }
             }
         }
@@ -179,33 +191,26 @@ impl PersistenceSystem {
         let mut i: f32 = 0.0;
 
         for g in cta.chunks(50) {
-            // The CSV interchange format only understands two finishes —
-            // the default (nonfoil) bucket and `foil` — so each resolved
-            // row expands into up to two finish rows.
+            // `Quantity`/`WantQuantity` are of the row's own finish, while
+            // `FoilQuantity` is always of `foil` — so each resolved row
+            // expands into up to two finish rows.
             let mut batch: Vec<CollectionCard> = vec![];
-            for c in g {
-                if c.1 > 0 {
-                    batch.push(CollectionCard {
-                        uuid: c.0.clone(),
-                        finish: String::new(),
-                        quantity: c.1 as i32,
-                        want_quantity: 0,
-                        collection: collection_id.clone(),
-                        time_added: time_added.clone(),
-                        provider: c.3.clone(),
-                    });
-                }
-                if c.2 > 0 {
-                    batch.push(CollectionCard {
-                        uuid: c.0.clone(),
-                        finish: "foil".to_string(),
-                        quantity: c.2 as i32,
-                        want_quantity: 0,
-                        collection: collection_id.clone(),
-                        time_added: time_added.clone(),
-                        provider: c.3.clone(),
-                    });
-                }
+            for (uuid, row, provider) in g {
+                let mut push = |finish: &str, quantity: u32, want_quantity: u32| {
+                    if quantity > 0 || want_quantity > 0 {
+                        batch.push(CollectionCard {
+                            uuid: uuid.clone(),
+                            finish: finish.to_string(),
+                            quantity: quantity as i32,
+                            want_quantity: want_quantity as i32,
+                            collection: collection_id.clone(),
+                            time_added: time_added.clone(),
+                            provider: provider.clone(),
+                        });
+                    }
+                };
+                push(&row.finish, row.quantity, row.want_quantity);
+                push("foil", row.foil_quantity, 0);
             }
             self.add_cards_to_collection(&collection_id, &batch).await?;
 
@@ -226,12 +231,12 @@ impl PersistenceSystem {
     ) -> eyre::Result<String> {
         let by_name = systems_by_name(retrievals);
 
-        // Fetch every (uuid, finish) row first and group by uuid — the CSV
-        // interchange format only has two quantity columns, so each card's
-        // rows collapse into (quantity for the default finish, quantity for
-        // `foil`). Any other finish (e.g. a Pokemon reverse-holo) isn't
-        // representable in this two-column format and is left out of the
-        // export entirely, rather than mislabeling it as foil.
+        // Fetch every (uuid, finish) row first. A card's default and `foil`
+        // rows share one CSV row (`Quantity` / `FoilQuantity`, empty
+        // `Finish`) — what exports looked like before other finishes were
+        // supported, so they still import anywhere. Every other finish
+        // (e.g. a Pokemon `1st Edition`) gets a row of its own, named in
+        // `Finish`, with its count in `Quantity`.
         let mut offset = 0;
         let limit = 500;
         let mut all_cards = vec![];
@@ -246,32 +251,38 @@ impl PersistenceSystem {
             all_cards.extend(page);
         }
 
+        #[derive(Default)]
         struct ExportRow {
             quantity: u32,
             foil_quantity: u32,
+            want_quantity: u32,
             provider: String,
         }
-        let mut by_uuid: HashMap<String, ExportRow> = HashMap::new();
+        // Keyed by (uuid, CSV `Finish`).
+        let mut rows: HashMap<(String, String), ExportRow> = HashMap::new();
         for card in &all_cards {
-            let entry = by_uuid.entry(card.uuid.clone()).or_insert_with(|| ExportRow {
-                quantity: 0,
-                foil_quantity: 0,
-                provider: card.provider.clone(),
-            });
-            match card.finish.as_str() {
-                "" if card.quantity > 0 => entry.quantity += card.quantity as u32,
-                "foil" if card.quantity > 0 => entry.foil_quantity += card.quantity as u32,
-                _ => {}
+            let quantity = card.quantity.max(0) as u32;
+            let want_quantity = card.want_quantity.max(0) as u32;
+            let csv_finish = if card.finish == "foil" { "" } else { card.finish.as_str() };
+            let entry = rows
+                .entry((card.uuid.clone(), csv_finish.to_string()))
+                .or_insert_with(|| ExportRow { provider: card.provider.clone(), ..Default::default() });
+            if card.finish == "foil" {
+                entry.foil_quantity += quantity;
+            } else {
+                entry.quantity += quantity;
             }
+            entry.want_quantity += want_quantity;
         }
-        // A card whose only rows are an unrepresentable finish (or a
-        // wishlist-only `""` row with quantity 0) has nothing to export.
-        by_uuid.retain(|_, row| row.quantity > 0 || row.foil_quantity > 0);
+        rows.retain(|_, row| row.quantity > 0 || row.foil_quantity > 0 || row.want_quantity > 0);
 
         // Group UUIDs by stored provider so we issue one lookup per system.
         let mut ids_by_provider: HashMap<&str, Vec<String>> = Default::default();
-        for (uuid, row) in &by_uuid {
-            ids_by_provider.entry(row.provider.as_str()).or_default().push(uuid.clone());
+        for ((uuid, _), row) in &rows {
+            let ids = ids_by_provider.entry(row.provider.as_str()).or_default();
+            if !ids.contains(uuid) {
+                ids.push(uuid.clone());
+            }
         }
 
         let mut looked_up: HashMap<String, (models::Card, String)> = Default::default();
@@ -285,7 +296,14 @@ impl PersistenceSystem {
         }
 
         // Fall back: try every system for cards not yet resolved.
-        let unfound: Vec<String> = by_uuid.keys().filter(|u| !looked_up.contains_key(*u)).cloned().collect();
+        let mut unfound: Vec<String> = rows
+            .keys()
+            .map(|(uuid, _)| uuid)
+            .filter(|u| !looked_up.contains_key(*u))
+            .cloned()
+            .collect();
+        unfound.sort_unstable();
+        unfound.dedup();
         if !unfound.is_empty() {
             for system in retrievals {
                 if let Ok(result) = system.get_cards_by_ids(unfound.clone()).await {
@@ -303,18 +321,29 @@ impl PersistenceSystem {
             mapping.header_for(CsvField::Quantity),
             mapping.header_for(CsvField::FoilQuantity),
             mapping.header_for(CsvField::Provider),
+            mapping.header_for(CsvField::Finish),
+            mapping.header_for(CsvField::WantQuantity),
         ])?;
-        for (uuid, row) in &by_uuid {
-            if let Some((searched, provider)) = looked_up.get(uuid) {
+        let mut records: Vec<[String; 7]> = rows
+            .iter()
+            .filter_map(|((uuid, finish), row)| {
                 use models::CardTrait as _;
-                wtr.write_record([
+                let (searched, provider) = looked_up.get(uuid)?;
+                Some([
                     searched.get_set(),
                     searched.get_collector_number(),
                     row.quantity.to_string(),
                     row.foil_quantity.to_string(),
                     provider.clone(),
-                ])?;
-            }
+                    finish.clone(),
+                    row.want_quantity.to_string(),
+                ])
+            })
+            .collect();
+        // Stable output: by provider, set, collector number, finish.
+        records.sort_unstable_by(|a, b| (&a[4], &a[0], &a[1], &a[5]).cmp(&(&b[4], &b[0], &b[1], &b[5])));
+        for record in &records {
+            wtr.write_record(record)?;
         }
         let data = String::from_utf8(wtr.into_inner()?)?;
         Ok(data)
@@ -398,11 +427,9 @@ mod tests {
 
         println!("{export}");
         let provider = "MagicSQLite";
-        assert!(
-            export
-                == format!("Set,CollectorNumber,Quantity,FoilQuantity,Provider\nM13,39,2,1,{provider}\nISD,173,0,4,{provider}\n")
-                || export
-                    == format!("Set,CollectorNumber,Quantity,FoilQuantity,Provider\nISD,173,0,4,{provider}\nM13,39,2,1,{provider}\n")
+        assert_eq!(
+            export,
+            format!("Set,CollectorNumber,Quantity,FoilQuantity,Provider,Finish,WantQuantity\nISD,173,0,4,{provider},,0\nM13,39,2,1,{provider},,0\n")
         );
     }
 
@@ -432,7 +459,7 @@ mod tests {
         let export = s.export_collection(&collection, &[r], &mapping).await.unwrap();
 
         // Overridden headers used for the mapped fields, defaults kept for the rest.
-        assert!(export.starts_with("Code,Number,Quantity,FoilQuantity,Provider\n"));
+        assert!(export.starts_with("Code,Number,Quantity,FoilQuantity,Provider,Finish,WantQuantity\n"));
         assert!(export.contains("M13,39,2,1,"));
         assert!(export.contains("ISD,173,0,4,"));
     }
@@ -574,9 +601,65 @@ mod tests {
             quantity: q,
             foil_quantity: 0,
             provider: String::new(),
+            finish: String::new(),
+            want_quantity: 0,
         };
         let merged = merge_duplicate_rows(vec![row(i32::MAX as u32), row(10)]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].quantity, i32::MAX as u32);
+    }
+
+    /// Every row survives a round trip: wishlist-only cards, and finishes
+    /// other than the default and `foil`.
+    #[tokio::test]
+    async fn test_export_import_round_trips_finishes_and_wants() {
+        const A: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1"; // M13 39
+        const B: &str = "0003caab-9ff5-5d1a-bc06-976dd0457f19"; // ISD 173
+        let mut s = PersistenceSystem::SQLitePersistenceSystem(SQLitePersistenceSystem::new(true, None).unwrap());
+        let r = RetrievalSystem::MagicSQLiteRetrievalSystem(MagicSQLiteRetrievalSystem::new(None, None).unwrap());
+        let col = s.add_collection("Source".to_string()).await.unwrap();
+        let p = "MagicSQLite";
+        let t = "2026-01-01T00:00:00Z";
+        s.add_card_to_collection(&col, &A.to_string(), "", 2, t, p).await.unwrap();
+        s.add_card_to_collection(&col, &A.to_string(), "foil", 1, t, p).await.unwrap();
+        s.add_card_to_collection(&col, &A.to_string(), "etched", 3, t, p).await.unwrap();
+        s.adjust_want_quantity(&col, &B.to_string(), 2, p).await.unwrap();
+
+        let export = s.export_collection(&col, std::slice::from_ref(&r), &CsvFieldMapping::default()).await.unwrap();
+        assert_eq!(
+            export,
+            format!(
+                "Set,CollectorNumber,Quantity,FoilQuantity,Provider,Finish,WantQuantity\n\
+                 ISD,173,0,0,{p},,2\n\
+                 M13,39,2,1,{p},,0\n\
+                 M13,39,3,0,{p},etched,0\n"
+            )
+        );
+
+        let path = std::env::temp_dir().join(format!("gathers_test_{}.csv", uuid::Uuid::new_v4()));
+        std::fs::write(&path, &export).unwrap();
+        let result = s
+            .import_csv(path.to_string_lossy().to_string(), "Copy".to_string(), &[r], None, &CsvFieldMapping::default())
+            .await;
+        std::fs::remove_file(&path).ok();
+        result.unwrap();
+
+        let rows = |name: &str| {
+            let s = s.clone();
+            let name = name.to_string();
+            async move {
+                let mut rows: Vec<_> = s
+                    .get_cards_in_collection_paginated(&name, CollectionCardsParams::new(0, 100))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|c| (c.uuid, c.finish, c.quantity, c.want_quantity, c.provider))
+                    .collect();
+                rows.sort();
+                rows
+            }
+        };
+        assert_eq!(rows("Copy").await, rows("Source").await);
+        assert_eq!(rows("Copy").await.len(), 4);
     }
 }

@@ -1255,7 +1255,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     /// both endpoints (as query params on export, matching-named multipart
     /// text fields on import — see `build_csv_mapping`). `preset` names one
     /// of `persistence::CsvFieldMapping`'s built-in third-party formats
-    /// (e.g. `tcgplayer`); any of the five `*_field` overrides given on top
+    /// (e.g. `tcgplayer`); any of the `*_field` overrides given on top
     /// of it replace just that one field, preset or not. Defaults (nothing
     /// given at all) reproduce gathers' own original fixed CSV format.
     #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
@@ -1272,6 +1272,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         foil_quantity_field: Option<String>,
         #[serde(default)]
         provider_field: Option<String>,
+        #[serde(default)]
+        finish_field: Option<String>,
+        #[serde(default)]
+        want_quantity_field: Option<String>,
     }
 
     fn build_csv_mapping(params: &CsvMappingParams) -> Result<persistence::CsvFieldMapping, ApiError> {
@@ -1294,6 +1298,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             (persistence::CsvField::Quantity, &params.quantity_field),
             (persistence::CsvField::FoilQuantity, &params.foil_quantity_field),
             (persistence::CsvField::Provider, &params.provider_field),
+            (persistence::CsvField::Finish, &params.finish_field),
+            (persistence::CsvField::WantQuantity, &params.want_quantity_field),
         ] {
             if let Some(header) = value {
                 mapping.set(field, Some(header.clone()));
@@ -1392,7 +1398,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                 }
                 // Optional CSV field-mapping overrides — see `CsvMappingParams`.
                 Some(field_name @ ("preset" | "set_code_field" | "collector_number_field"
-                    | "quantity_field" | "foil_quantity_field" | "provider_field")) => {
+                    | "quantity_field" | "foil_quantity_field" | "provider_field"
+                    | "finish_field" | "want_quantity_field")) => {
                     let value = field.text().await.map_err(|e| {
                         (
                             StatusCode::BAD_REQUEST,
@@ -1408,6 +1415,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                         "quantity_field" => &mut mapping_params.quantity_field,
                         "foil_quantity_field" => &mut mapping_params.foil_quantity_field,
                         "provider_field" => &mut mapping_params.provider_field,
+                        "finish_field" => &mut mapping_params.finish_field,
+                        "want_quantity_field" => &mut mapping_params.want_quantity_field,
                         _ => unreachable!(),
                     };
                     *target = Some(value);

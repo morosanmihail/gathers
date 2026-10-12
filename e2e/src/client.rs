@@ -301,6 +301,35 @@ impl GathersClient {
         parse_response(resp, "POST", &url).await
     }
 
+    // ── backups ───────────────────────────────────────────────────────────────
+
+    /// Downloads a full backup zip (`GET /api/settings/backup`).
+    pub async fn download_backup(&self) -> eyre::Result<Vec<u8>> {
+        let url = format!("{}/api/settings/backup", self.base_url);
+        let resp = self.client.get(&url).send().await.with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        let body = resp.bytes().await.with_context(|| format!("reading GET {url}"))?;
+        if !status.is_success() {
+            bail!("GET {url} returned {status}: {}", String::from_utf8_lossy(&body));
+        }
+        Ok(body.to_vec())
+    }
+
+    /// Replaces the server's data with a backup zip (`POST /api/settings/backup`).
+    pub async fn restore_backup(&self, zip: Vec<u8>) -> eyre::Result<serde_json::Value> {
+        let url = format!("{}/api/settings/backup", self.base_url);
+        let form = reqwest::multipart::Form::new()
+            .part("file", reqwest::multipart::Part::bytes(zip).file_name("backup.zip"));
+        let resp = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        parse_response(resp, "POST", &url).await
+    }
+
     // ── system & prices ───────────────────────────────────────────────────────
 
     pub async fn system_info(&self) -> eyre::Result<SystemInfo> {
