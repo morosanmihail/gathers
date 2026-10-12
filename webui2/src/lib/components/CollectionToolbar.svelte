@@ -1,13 +1,13 @@
 <script lang="ts">
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import CsvExportModal from './CsvExportModal.svelte';
+	import CsvImportModal from './CsvImportModal.svelte';
 	import { app } from '$lib/state.svelte';
 	import { goto } from '$app/navigation';
 	import {
 		deleteCollection,
 		deleteCardFromCollection,
 		moveCards,
-		importCards,
-		exportCollectionUrl,
 		renameCollection,
 		invalidateCache
 	} from '$lib/api';
@@ -31,8 +31,9 @@
 	let confirmDelete = $state<'collection' | 'cards' | null>(null);
 	let moveDest = $state('');
 	let moveError = $state('');
-	let importing = $state(false);
-	let importError = $state('');
+	// The file picked for import, waiting on its column mapping.
+	let importFile = $state<File | null>(null);
+	let exportOpen = $state(false);
 	let renaming = $state(false);
 	let renameValue = $state('');
 	let renameError = $state('');
@@ -130,20 +131,11 @@
 		}
 	}
 
-	async function handleImport(e: Event) {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (!file) return;
-		importing = true;
-		importError = '';
-		try {
-			await app.withOp('Importing', () => importCards(collection, file));
-			onRefresh();
-		} catch (err) {
-			importError = String(err);
-		} finally {
-			importing = false;
-			(e.target as HTMLInputElement).value = '';
-		}
+	function pickImportFile(e: Event) {
+		const input = e.target as HTMLInputElement;
+		importFile = input.files?.[0] ?? null;
+		// Lets the same file be picked again later.
+		input.value = '';
 	}
 </script>
 
@@ -225,18 +217,17 @@
 		<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
 			<path d="M7 9V2M4 7l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 		</svg>
-		{importing ? 'Importing…' : 'Import'}
-		<input type="file" accept=".csv,.txt,.json" style="display:none;" onchange={handleImport} disabled={importing} />
+		Import
+		<input type="file" accept=".csv,.txt,text/csv" style="display:none;" onchange={pickImportFile} />
 	</label>
-	{#if importError}<span style="color:var(--danger);font-size:0.78rem;">{importError}</span>{/if}
 
 	<!-- Export -->
-	<a href={exportCollectionUrl(collection)} class="btn" title="Export collection" download>
+	<button class="btn" title="Export collection as CSV" onclick={() => (exportOpen = true)}>
 		<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
 			<path d="M7 2v7M4 6l3-3 3 3M2 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 		</svg>
 		Export
-	</a>
+	</button>
 
 	<div class="toolbar-sep"></div>
 
@@ -299,6 +290,19 @@
 		</button>
 	{/if}
 </div>
+
+{#if importFile}
+	<CsvImportModal
+		{collection}
+		file={importFile}
+		onclose={() => (importFile = null)}
+		ondone={() => { importFile = null; onRefresh(); }}
+	/>
+{/if}
+
+{#if exportOpen}
+	<CsvExportModal {collection} onclose={() => (exportOpen = false)} />
+{/if}
 
 <!-- Confirm dialogs -->
 {#if confirmDelete === 'collection'}

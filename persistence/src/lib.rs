@@ -8,7 +8,7 @@ use models::CollectionCard;
 use models::CollectionID;
 use models::filters::SortOrder;
 
-pub use crate::csv_models::{CsvField, CsvFieldMapping};
+pub use crate::csv_models::{CsvColumn, CsvField, CsvImportUse, CsvLayout, CsvPreset};
 pub use crate::sqlite::{
     SQLitePersistenceSystem, default_price_history_path, latest_price_history_schema_version,
     latest_storage_schema_version,

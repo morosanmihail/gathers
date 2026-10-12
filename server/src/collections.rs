@@ -1278,18 +1278,15 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         want_quantity_field: Option<String>,
     }
 
-    fn build_csv_mapping(params: &CsvMappingParams) -> Result<persistence::CsvFieldMapping, ApiError> {
-        let mut mapping = match params.preset.as_deref() {
-            None | Some("") => persistence::CsvFieldMapping::default(),
-            Some(name) => persistence::CsvFieldMapping::preset(name).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorPayload {
-                        error: format!(
-                            "Unknown CSV mapping preset '{name}' (known presets: tcgplayer, cardkingdom, deckbox, mtggoldfish)"
-                        ),
-                    }),
-                )
+    /// The layout the legacy mapping params describe: a preset (gathers'
+    /// own format by default) with any `*_field` header overrides applied —
+    /// adding that field's column when the preset lacks it.
+    fn build_csv_mapping(params: &CsvMappingParams) -> Result<persistence::CsvLayout, ApiError> {
+        let mut layout = match params.preset.as_deref() {
+            None | Some("") => persistence::CsvLayout::gathers(),
+            Some(name) => persistence::CsvLayout::preset(name).ok_or_else(|| {
+                let known: Vec<String> = persistence::CsvLayout::presets().into_iter().map(|p| p.id).collect();
+                crate::bad_request(format!("Unknown CSV mapping preset '{name}' (known presets: {})", known.join(", ")))
             })?,
         };
         for (field, value) in [
@@ -1301,20 +1298,73 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             (persistence::CsvField::Finish, &params.finish_field),
             (persistence::CsvField::WantQuantity, &params.want_quantity_field),
         ] {
-            if let Some(header) = value {
-                mapping.set(field, Some(header.clone()));
+            if let Some(header) = value.as_ref().filter(|h| !h.is_empty()) {
+                layout.set_header(field, header.clone());
             }
         }
-        Ok(mapping)
+        Ok(layout)
     }
 
+    #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+    struct CsvFieldInfo {
+        field: persistence::CsvField,
+        label: &'static str,
+        description: &'static str,
+        /// Header gathers' own format uses for it.
+        default_header: &'static str,
+        import_use: persistence::CsvImportUse,
+    }
+
+    #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+    struct CsvLayoutsInfo {
+        /// Every field a CSV column can hold.
+        fields: Vec<CsvFieldInfo>,
+        /// Built-in layouts, gathers' own first.
+        presets: Vec<persistence::CsvPreset>,
+    }
+
+    /// The fields CSV import/export understands and the built-in layouts
+    /// (gathers' own and popular collection managers').
+    async fn csv_layouts() -> Json<CsvLayoutsInfo> {
+        Json(CsvLayoutsInfo {
+            fields: persistence::CsvField::ALL
+                .into_iter()
+                .map(|field| CsvFieldInfo {
+                    field,
+                    label: field.label(),
+                    description: field.description(),
+                    default_header: field.default_header(),
+                    import_use: field.import_use(),
+                })
+                .collect(),
+            presets: persistence::CsvLayout::presets(),
+        })
+    }
+
+    /// Exports with the legacy query params (see `CsvMappingParams`).
     async fn export(
-        State(state): State<GathersState>,
+        state: State<GathersState>,
         Path(collection_id): Path<String>,
         Query(mapping_params): Query<CsvMappingParams>,
     ) -> Result<Response, ApiError> {
-        let mapping = build_csv_mapping(&mapping_params)?;
+        let layout = build_csv_mapping(&mapping_params)?;
+        export_with(state, collection_id, layout).await
+    }
 
+    /// Exports with exactly the given columns, in order.
+    async fn export_layout(
+        state: State<GathersState>,
+        Path(collection_id): Path<String>,
+        Json(layout): Json<persistence::CsvLayout>,
+    ) -> Result<Response, ApiError> {
+        export_with(state, collection_id, layout).await
+    }
+
+    async fn export_with(
+        State(state): State<GathersState>,
+        collection_id: String,
+        layout: persistence::CsvLayout,
+    ) -> Result<Response, ApiError> {
         let retrievals: Vec<RetrievalSystem> = {
             let guard = state.0.lock().await;
             [guard.mtg.clone(), guard.riftbound.clone(), guard.pokemon.clone()]
@@ -1328,16 +1378,9 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .lock()
             .await
             .storage
-            .export_collection(&collection_id, &retrievals, &mapping)
+            .export_collection(&collection_id, &retrievals, &layout)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorPayload {
-                        error: format!("Export failed: {e}"),
-                    }),
-                )
-            })?;
+            .map_err(|e| crate::storage_error("Export failed", e))?;
 
         let safe_filename: String = collection_id
             .chars()
@@ -1365,6 +1408,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         let mut file_bytes: Option<Vec<u8>> = None;
         let mut collection_name: Option<String> = None;
         let mut mapping_params = CsvMappingParams::default();
+        let mut layout: Option<persistence::CsvLayout> = None;
 
         while let Some(field) = multipart.next_field().await.map_err(|e| {
             (
@@ -1396,6 +1440,17 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
                         )
                     })?);
                 }
+                // Which column holds which field, as a JSON `CsvLayout`.
+                // Replaces the legacy params below when given.
+                Some("layout") => {
+                    let text = field
+                        .text()
+                        .await
+                        .map_err(|e| crate::bad_request(format!("Failed to read 'layout' field: {e}")))?;
+                    let parsed: persistence::CsvLayout = serde_json::from_str(&text)
+                        .map_err(|e| crate::bad_request(format!("Invalid 'layout' field: {e}")))?;
+                    layout = Some(parsed);
+                }
                 // Optional CSV field-mapping overrides — see `CsvMappingParams`.
                 Some(field_name @ ("preset" | "set_code_field" | "collector_number_field"
                     | "quantity_field" | "foil_quantity_field" | "provider_field"
@@ -1425,7 +1480,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             }
         }
 
-        let mapping = build_csv_mapping(&mapping_params)?;
+        let mapping = match layout {
+            Some(layout) => layout,
+            None => build_csv_mapping(&mapping_params)?,
+        };
 
         let bytes = file_bytes.ok_or_else(|| {
             (
@@ -1797,7 +1855,8 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/cards/{id}/value_cards", get(value::value_cards))
         .api_route("/price_history/{provider}/{card_uuid}", get(price_history))
         .route("/import", axum::routing::post(import))
-        .route("/export/{id}", axum::routing::get(export))
+        .route("/export/{id}", axum::routing::get(export).post(export_layout))
+        .api_route("/csv_layouts", get(csv_layouts))
 }
 
 /// Routes for read-only, shareable collection links. Distinct from

@@ -457,22 +457,43 @@ export async function moveCards(
 	});
 }
 
-export async function importCards(collection: string, file: File): Promise<void> {
+export type CsvField = components['schemas']['CsvField'];
+export type CsvColumn = components['schemas']['CsvColumn'];
+export type CsvLayout = components['schemas']['CsvLayout'];
+export type CsvLayoutsInfo = components['schemas']['CsvLayoutsInfo'];
+export type CsvFieldInfo = components['schemas']['CsvFieldInfo'];
+export type CsvPreset = components['schemas']['CsvPreset'];
+
+/** The fields CSV import/export understands, and the built-in layouts. */
+export async function getCsvLayouts(): Promise<CsvLayoutsInfo> {
+	return cachedFetch('csv_layouts', () => fetchJSON<CsvLayoutsInfo>('/api/collection/csv_layouts'));
+}
+
+/**
+ * Imports a CSV file as `collection`. `layout` says which of the file's
+ * columns holds which field; without it the server expects gathers' own
+ * column names.
+ */
+export async function importCards(collection: string, file: File, layout?: CsvLayout): Promise<void> {
 	const form = new FormData();
 	form.append('file', file);
 	form.append('collection', collection);
-	const res = await fetch('/api/collection/import', { method: 'POST', body: form });
-	if (!res.ok) {
-		const body = await res.json().catch(() => null) as { error?: string } | null;
-		if (res.status === 403 && body?.error === 'Disabled in demo mode') {
-			demoAlert.show();
-		}
-		throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
-	}
+	if (layout) form.append('layout', JSON.stringify(layout));
+	await fetchJSON<null>('/api/collection/import', { method: 'POST', body: form });
 }
 
-export function exportCollectionUrl(collection: string): string {
-	return `/api/collection/export/${encodeURIComponent(collection)}`;
+/** The collection as CSV with exactly `layout`'s columns. */
+export async function exportCollection(collection: string, layout: CsvLayout): Promise<Blob> {
+	const res = await fetch(`/api/collection/export/${encodeURIComponent(collection)}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(layout)
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => null) as { error?: string } | null;
+		throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
+	}
+	return res.blob();
 }
 
 export async function getCollectionValue(collection: string): Promise<ValueBreakdown | null> {
