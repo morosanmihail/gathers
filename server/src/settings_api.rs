@@ -16,6 +16,7 @@ pub fn settings_routes() -> ApiRouter<GathersState> {
         .api_route("/", get(get_settings).post(post_settings))
         .api_route("/restart", post(restart_server))
         .api_route("/env_overrides", get(get_env_overrides))
+        .route("/backup", crate::backup_api::backup_route())
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

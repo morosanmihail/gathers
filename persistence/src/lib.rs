@@ -8,8 +8,11 @@ use models::CollectionCard;
 use models::CollectionID;
 use models::filters::SortOrder;
 
-pub use crate::csv_models::{CsvField, CsvFieldMapping};
-pub use crate::sqlite::{SQLitePersistenceSystem, default_price_history_path};
+pub use crate::csv_models::{CsvColumn, CsvField, CsvImportUse, CsvLayout, CsvPreset};
+pub use crate::sqlite::{
+    SQLitePersistenceSystem, default_price_history_path, latest_price_history_schema_version,
+    latest_storage_schema_version,
+};
 
 /// Errors caused by the request rather than by storage itself, so callers
 /// can tell "you asked for something invalid" apart from a database failure

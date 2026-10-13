@@ -28,7 +28,7 @@ fn bench_csv_import(c: &mut Criterion) {
                     "Pokemon Import".to_string(),
                     &[retrieval.clone()],
                     None,
-                    &persistence::CsvFieldMapping::default(),
+                    &persistence::CsvLayout::default(),
                 )
                 .await;
             let duration = start.elapsed();

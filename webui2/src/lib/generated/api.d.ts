@@ -1760,6 +1760,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collection/csv_layouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CsvLayoutsInfo"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/share/{token}": {
         parameters: {
             query?: never;
@@ -2499,6 +2533,51 @@ export interface components {
              * @default 24
              */
             page_size: number;
+        };
+        /** @description One CSV column: which field it holds and its header text. */
+        CsvColumn: {
+            field: components["schemas"]["CsvField"];
+            header: string;
+        };
+        /**
+         * @description Canonical fields making up gathers' collection CSV import/export
+         *     contract — stable identifiers for what a piece of data *is*, independent
+         *     of what column header text a particular CSV file actually uses for it
+         *     (see `CsvLayout`).
+         */
+        CsvField: ("set_code" | "collector_number" | "quantity" | "foil_quantity" | "provider" | "want_quantity") | "finish" | "name" | "id";
+        CsvFieldInfo: {
+            /** @description Header gathers' own format uses for it. */
+            default_header: string;
+            description: string;
+            field: components["schemas"]["CsvField"];
+            import_use: components["schemas"]["CsvImportUse"];
+            label: string;
+        };
+        /** @description What import does with a field. */
+        CsvImportUse: "identifies" | "count" | "optional" | "ignored";
+        /**
+         * @description Which columns a CSV file has, in order. Export writes exactly these
+         *     columns; import reads each field from the column with that header (any
+         *     other columns in the file are ignored).
+         */
+        CsvLayout: {
+            columns: components["schemas"]["CsvColumn"][];
+        };
+        CsvLayoutsInfo: {
+            /** @description Every field a CSV column can hold. */
+            fields: components["schemas"]["CsvFieldInfo"][];
+            /** @description Built-in layouts, gathers' own first. */
+            presets: components["schemas"]["CsvPreset"][];
+        };
+        /** @description A built-in layout matching a popular collection manager's CSV format. */
+        CsvPreset: {
+            /** @description What carries over and what doesn't. */
+            description: string;
+            /** @description Short name it's selected by, e.g. `tcgplayer`. */
+            id: string;
+            label: string;
+            layout: components["schemas"]["CsvLayout"];
         };
         CurrencyValue: {
             /** @description ISO 4217 code, e.g. "USD", "EUR". */

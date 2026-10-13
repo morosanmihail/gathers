@@ -25,6 +25,7 @@ use crate::riftbound_api::riftbound_routes;
 use crate::settings_api::settings_routes;
 
 mod auto_download;
+mod backup_api;
 mod collections;
 mod meta_api;
 mod mtg_api;
