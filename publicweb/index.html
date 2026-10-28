@@ -264,7 +264,7 @@
         <div class="terminal-wrap" data-animate>
           <div class="terminal">
             <div class="terminal-bar">
-		    <span class="terminal-title">gsh</span>
+		    <span class="terminal-title">gathers</span>
               <span class="dot dot-g"></span><span class="dot dot-y"></span><span class="dot dot-r"></span>
             </div>
             <pre class="terminal-body"><span class="t-comment"># Search Magic cards by name + color</span>
@@ -340,9 +340,16 @@ Chain Lightning      LEA   51  Common   Brian Snoddy
             </div>
           </div>
           <div class="coll-item">
+            <div class="coll-icon">&#128200;</div>
+            <div>
+              <strong>Price History</strong>
+              <p>Optionally record daily TCGplayer prices for your collection cards (Pokémon &amp; Riftbound via TCGCSV snapshots).</p>
+            </div>
+          </div>
+          <div class="coll-item">
             <div class="coll-icon">&#128274;</div>
             <div>
-              <strong>Local & Private</strong>
+              <strong>Local &amp; Private</strong>
               <p>All data lives wherever you let it live. No cloud, no account, no tracking.</p>
             </div>
           </div>
@@ -462,7 +469,7 @@ cd gathers</code>
   gathers-webui2:
     image: ghcr.io/morosanmihail/gathers-webui2:latest
     ports:
-      - "3000:3001"
+      - "3001:3001"
     depends_on:
       - gathers-api
     restart: unless-stopped
@@ -496,7 +503,7 @@ volumes:
             <div class="step-num">3</div>
             <div class="step-body">
               <h4>Open the web UI</h4>
-              <code class="code-block">http://localhost:3000</code>
+              <code class="code-block">http://localhost:3001</code>
               <p class="step-note">API available at <code>http://localhost:5234</code>, with docs at <code>/swagger</code> and <code>/api.json</code>. Stop with <code>docker-compose down</code>.</p>
             </div>
           </div>
