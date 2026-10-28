@@ -94,7 +94,7 @@
 			{/if}
 			{#each others as h (h.deck + ':' + h.board + ':' + h.finish)}
 				<span class="deck-badge" title="This many copies are in a deck that is currently built">
-					{h.quantity} in {h.deck}{h.location ? ` ()` : ''}
+					{h.quantity} in {h.deck}{h.location ? ` (${h.location})` : ''}
 				</span>
 			{/each}
 		</div>
