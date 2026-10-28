@@ -93,8 +93,6 @@
 			}
 			meta = deckMeta;
 			locationDraft = deckMeta.location ?? '';
-			// Non-blocking, like a collection's: prices can take a while and the list doesn't need them
-			refreshValue();
 			// One lookup for the whole list rather than one per row.
 			availability = await getCardAvailability([...new Set(deckCards.map((c) => c.id))]);
 		} catch (e) {
@@ -116,6 +114,16 @@
 		}
 		deckId;
 		load();
+	});
+
+	// An effect rather than a call from `load`: the layout loads the system info at the same time
+	// as this page loads its cards, so on a fresh page load `pricingEnabled` can still be false
+	// when the cards arrive, and the value would never be fetched. Non-blocking, like a
+	// collection's, since prices can take a while and the list doesn't need them.
+	$effect(() => {
+		deckId;
+		valueBreakdown = null;
+		refreshValue();
 	});
 
 	function refreshValue() {
