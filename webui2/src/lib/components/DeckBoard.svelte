@@ -36,6 +36,7 @@
 	// Wanting four and holding three is four cards of the board, not seven.
 	const count = $derived(cards.reduce((n, c) => n + deckSlots(c), 0));
 	const otherBoards = $derived(boards.filter((b) => b !== board));
+	const canTransfer = $derived(!!onTransfer && collections.length > 0);
 
 	/**
 	 * Copies of this card sitting in *other* built decks.
@@ -83,7 +84,9 @@
 			{/each}
 		</div>
 	{:else}
-		<div class="deck-row-list">
+		<!-- Each row is its own grid, so the columns line up only if every row has the same ones;
+		     both dropdowns depend on the board rather than the card, so they always do -->
+		<div class="deck-row-list" class:has-move={otherBoards.length > 0} class:has-transfer={canTransfer}>
 			{#each cards as card (card.id + ':' + (card.finish ?? '') + ':' + (card.board ?? ''))}
 				{@const others = elsewhere(card)}
 				{@const short = shortfall(card)}
@@ -151,8 +154,10 @@
 								<button class="qty-btn add" onclick={() => onAdjust(card, 1, 'wantQuantity')}>+</button>
 							</div>
 						</div>
+					</div>
 
-						{#if otherBoards.length > 0}
+					{#if otherBoards.length > 0}
+						<div class="deck-row-select" role="presentation" onclick={(e) => e.stopPropagation()}>
 							<select
 								class="deck-move-select"
 								title="Move one copy to another board"
@@ -168,9 +173,11 @@
 									<option value={b}>{b}</option>
 								{/each}
 							</select>
-						{/if}
+						</div>
+					{/if}
 
-						{#if onTransfer && collections.length > 0}
+					{#if onTransfer && canTransfer}
+						<div class="deck-row-select" role="presentation" onclick={(e) => e.stopPropagation()}>
 							<!-- A transfer, unlike the steppers above: the copy leaves the collection.
 							     Each option carries its direction by name, so the two halves of the
 							     list can't be told apart by a sign. -->
@@ -200,8 +207,8 @@
 									</option>
 								{/each}
 							</select>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>

@@ -9,6 +9,7 @@ use crate::models::{
     DeckBoard, DeckCard, DeckCardAdjustment, DeckCardMove, DeckCardTransfer,
     DeckCardTransferResult, DeckMeta, MtgCard, PriceHistoryResponse, PublicCollectionPage,
     PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo, SystemMeta, Transfer,
+    ValueBreakdown,
 };
 
 /// HTTP client for the GatheRs server.
@@ -418,6 +419,16 @@ impl GathersClient {
     /// and wanted copies rather than their sum.
     pub async fn deck_card_count(&self, deck: &str) -> eyre::Result<i64> {
         self.get(&format!("/api/deck/cards/{}/count", urlenc(deck))).await
+    }
+
+    /// A collection's value; reports nothing for a deck, whose cards aren't in `cards`.
+    pub async fn collection_value(&self, collection: &str) -> eyre::Result<ValueBreakdown> {
+        self.get(&format!("/api/collection/cards/{}/value_breakdown", urlenc(collection))).await
+    }
+
+    /// A deck's value. Its `wanted_value` prices only the wanted copies the deck doesn't have yet.
+    pub async fn deck_value(&self, deck: &str) -> eyre::Result<ValueBreakdown> {
+        self.get(&format!("/api/deck/cards/{}/value_breakdown", urlenc(deck))).await
     }
 
     /// Changes one card's owned count on one board.

@@ -487,8 +487,10 @@ pub struct CurrencyValue {
     pub total_value: f64,
     pub profit: f64,
     pub untracked_value: f64,
-    /// Total price of cards on the wishlist (`want_quantity`), independent of
-    /// what's owned. Not included in `total_value`.
+    /// For a collection, the total price of cards on the wishlist
+    /// (`want_quantity`), independent of what's owned. For a deck, the price
+    /// of the wanted copies not yet had, i.e. what completing it would cost.
+    /// Not included in `total_value` either way.
     pub wanted_value: f64,
     /// Owned entries priced in this currency.
     pub priced_count: usize,

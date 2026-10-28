@@ -1377,7 +1377,7 @@ label.field-label {
 
 .deck-row {
 	display: grid;
-	grid-template-columns: 1fr 110px minmax(0, 1.2fr) minmax(0, 320px);
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px;
 	align-items: center;
 	gap: 8px;
 	padding: 6px 4px;
@@ -1396,8 +1396,18 @@ label.field-label {
 	align-items: flex-end;
 	justify-content: flex-end;
 	gap: 8px;
-	flex-wrap: wrap;
 }
+
+/* The dropdowns take columns of their own rather than wrapping under the steppers, which
+   doubled the height of every row. Fixed widths, since each row is a separate grid and only
+   matching tracks keep the columns aligned. */
+.deck-row-list.has-move .deck-row { grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 120px; }
+.deck-row-list.has-transfer .deck-row { grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 140px; }
+.deck-row-list.has-move.has-transfer .deck-row {
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 120px 140px;
+}
+.deck-row-select { min-width: 0; }
+.deck-row-select .deck-move-select { width: 100%; }
 
 /* Owned and wanted sit side by side and mean different things, so each stepper is labelled */
 .qty-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -1422,7 +1432,14 @@ label.field-label {
 	border-top: 1px solid var(--border);
 }
 
+/* The move control shares the set code's line, pushed to the right and capped so a long board
+   name can't run past the tile's edge */
+.deck-tile-meta { align-items: center; }
+
 .deck-tile-move {
+	margin-left: auto;
+	max-width: 60%;
+	min-width: 0;
 	opacity: 0;
 	transition: opacity 0.12s ease;
 }

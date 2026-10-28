@@ -1901,6 +1901,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deck/cards/{id}/value_breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionValueBreakdown"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/deck/cards/{id}/adjust": {
         parameters: {
             query?: never;
@@ -3175,8 +3209,10 @@ export interface components {
             untracked_value: number;
             /**
              * Format: double
-             * @description Total price of cards on the wishlist (`want_quantity`), independent of
-             *     what's owned. Not included in `total_value`.
+             * @description For a collection, the total price of cards on the wishlist
+             *     (`want_quantity`), independent of what's owned. For a deck, the price
+             *     of the wanted copies not yet had, i.e. what completing it would cost.
+             *     Not included in `total_value` either way.
              */
             wanted_value: number;
         };

@@ -137,10 +137,11 @@ fn compute_value_breakdown(
         // better, same as an unpriced card would fall back to 0.
         let unit_price = if card.finish == "foil" { unit.foil } else { unit.normal };
 
-        // want_quantity is only ever tracked on the "" (default) finish row.
-        if card.want_quantity > 0 && unit.normal > 0.0 {
+        // Priced at the row's own finish: a collection only tracks wants on the "" (default)
+        // row, so that's the normal price there, but a deck can want a foil copy specifically.
+        if card.want_quantity > 0 && unit_price > 0.0 {
             by_currency.entry(unit.currency.clone()).or_default().wanted_value +=
-                unit.normal * card.want_quantity as f64;
+                unit_price * card.want_quantity as f64;
         }
 
         if card.quantity <= 0 {
@@ -258,6 +259,60 @@ async fn load_collection_pricing(state: &GathersState, collection_id: &str) -> R
     let (unit_prices, retailers) = lookup_unit_prices(state, ids_by_provider).await;
 
     Ok(CollectionPricing { cards, unit_prices, retailers, purchase_totals })
+}
+
+/// A deck's value, broken down the same way as a collection's.
+///
+/// A deck's rows are split by board as well as finish, so they're folded into one row per
+/// `(uuid, finish)` first: the same card on two boards is that many more copies, and the counts
+/// then line up with a collection holding the same cards.
+///
+/// `wanted_value` means something different from a collection's. There a want is a wishlist,
+/// independent of what's owned; in a deck it's the target the owned copies count towards, so
+/// only the shortfall is priced: wanting four and having three is three copies of value and one
+/// still to buy to complete the deck. The shortfall is taken per row, before folding, as the
+/// deck view's "N to find" is: spare copies on the sideboard don't fill a gap in the mainboard.
+///
+/// A deck has no purchase history of its own (it stays with the collection the copies were bought
+/// into), so profit says nothing useful here.
+///
+/// Rows from a plugin that's since been disabled are left out, as `load_collection_pricing`
+/// leaves them out of a collection: they can't be priced, and the client doesn't list them.
+pub(crate) async fn deck_value_breakdown(
+    state: &GathersState,
+    deck_cards: Vec<models::DeckCard>,
+) -> collections_models::CollectionValueBreakdown {
+    let enabled_plugins = enabled_plugin_providers(state).await;
+    let mut folded: HashMap<(String, String), models::CollectionCard> = HashMap::new();
+    for row in deck_cards {
+        if row.provider.starts_with("plugin-") && !enabled_plugins.contains(&row.provider) {
+            continue;
+        }
+        let card = folded
+            .entry((row.uuid.clone(), row.finish.clone()))
+            .or_insert_with(|| models::CollectionCard {
+                uuid: row.uuid,
+                finish: row.finish,
+                quantity: 0,
+                want_quantity: 0,
+                time_added: row.time_added,
+                collection: row.deck,
+                provider: row.provider,
+            });
+        card.quantity = card.quantity.saturating_add(row.quantity);
+        card.want_quantity = card
+            .want_quantity
+            .saturating_add((row.want_quantity - row.quantity).max(0));
+    }
+    let cards: Vec<_> = folded.into_values().collect();
+
+    let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for card in &cards {
+        ids_by_provider.entry(card.provider.clone()).or_default().push(card.uuid.clone());
+    }
+    let (unit_prices, _) = lookup_unit_prices(state, ids_by_provider).await;
+
+    compute_value_breakdown(&cards, &unit_prices, &HashMap::new())
 }
 
 /// Current unit prices of the cards in `ids_by_provider`, and the retailer
@@ -2301,6 +2356,18 @@ mod value_breakdown_tests {
         assert_eq!(cur(&breakdown, "USD").wanted_value, 5.0);
         assert_eq!(breakdown.total_count, 1);
         assert_eq!(breakdown.priced_count, 1);
+    }
+
+    #[test]
+    fn wanted_foil_copy_is_priced_as_foil() {
+        // A deck can want a foil copy specifically; a collection only wants on the "" row
+        let cards = vec![card("a", "foil", 0, 2)];
+        let unit_prices = HashMap::from([("a".to_string(), usd(1.0, 6.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(cur(&breakdown, "USD").wanted_value, 12.0);
     }
 
     #[test]

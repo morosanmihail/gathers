@@ -182,6 +182,21 @@ pub struct DatedPrice {
     pub price: f64,
 }
 
+/// `/api/{collection,deck}/cards/{id}/value_breakdown`: totals per currency.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueBreakdown {
+    pub currencies: Vec<CurrencyValue>,
+    pub priced_count: usize,
+    pub total_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyValue {
+    pub currency: String,
+    pub total_value: f64,
+    pub wanted_value: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueCardEntry {
     pub card_uuid: String,

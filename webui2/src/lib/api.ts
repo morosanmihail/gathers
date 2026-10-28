@@ -179,6 +179,19 @@ export async function getDeckCardCount(deck: string): Promise<number> {
 }
 
 /**
+ * What a deck's cards are worth. `total_value` prices the copies it has; `wanted_value` prices
+ * only those still missing (wanted beyond what it has), so it's what completing the deck costs.
+ *
+ * Keyed apart from a collection's value, so the same name converted from one to the other can't
+ * be answered from the other's entry.
+ */
+export async function getDeckValue(deck: string): Promise<ValueBreakdown | null> {
+	return cachedStats(`stats:${deck}:deck_value`, () =>
+		fetchJSON<ValueBreakdown>(`/api/deck/cards/${encodeURIComponent(deck)}/value_breakdown`).catch(() => null)
+	);
+}
+
+/**
  * Changes one card's owned and wanted counts on one board.
  *
  * Additive with respect to ownership: this never changes what any collection
@@ -513,16 +526,19 @@ async function enrichDeckEntries(entries: DeckEntry[]): Promise<DeckCard[]> {
 			const p = entry.provider || 'MagicSQLite';
 			return !(p.startsWith('plugin-') && allDetails[entry.id] === undefined);
 		})
-		.map(entry => ({
+		// Annotated rather than cast, so a field left out here is a type error rather than an
+		// undefined the deck view turns into NaN
+		.map((entry): DeckCard => ({
 			...(allDetails[entry.id] ?? {}),
 			id: entry.id,
 			finish: entry.finish ?? '',
 			board: entry.board ?? '',
 			quantity: entry.quantity,
+			wantQuantity: entry.wantQuantity,
 			provider: entry.provider || 'MagicSQLite',
 			timeAdded: entry.timeAdded,
 			timeUpdated: entry.timeUpdated
-		}) as DeckCard);
+		}));
 }
 
 export async function getCollectionCards(

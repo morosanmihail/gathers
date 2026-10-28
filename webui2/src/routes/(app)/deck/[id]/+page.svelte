@@ -8,10 +8,13 @@
 	import SearchModal from '$lib/components/SearchModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ShareLinksModal from '$lib/components/ShareLinksModal.svelte';
+	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
+	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
+	import { formatMoney, formatMoneyList } from '$lib/currency.svelte';
 	import {
 		getDeckCards, adjustDeckCard, moveDeckCard, transferDeckCard,
 		getDeckBoards, addDeckBoard, renameDeckBoard, deleteDeckBoard, reorderDeckBoards,
-		getDeckMeta, setDeckMeta, getCardAvailability,
+		getDeckMeta, setDeckMeta, getCardAvailability, getDeckValue,
 		renameCollection, deleteCollection, setCollectionKind, invalidateCache
 	} from '$lib/api';
 	import { app } from '$lib/state.svelte';
@@ -21,7 +24,8 @@
 		DeckBoard as DeckBoardInfo,
 		DeckCard,
 		DeckMeta,
-		TransferDirection
+		TransferDirection,
+		ValueBreakdown
 	} from '$lib/types';
 
 	const deckId = $derived(decodeURIComponent($page.params.id ?? ''));
@@ -32,6 +36,17 @@
 	let availability = $state<Record<string, CardAvailability>>({});
 	let loading = $state(true);
 	let searchOpen = $state(false);
+	let detailCard = $state<DeckCard | null>(null);
+	let valueBreakdown = $state<ValueBreakdown | null>(null);
+	let valueHover = $state(false);
+	const currencyTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map((c) => ({ currency: c.currency, value: c.total_value }))
+	);
+	// Only the copies still missing: a want is what the owned copies count towards, so wanting
+	// four and having three is one card short, not four
+	const toCompleteTotals = $derived(
+		(valueBreakdown?.currencies ?? []).map((c) => ({ currency: c.currency, value: c.wanted_value }))
+	);
 	let addBoard = $state('');
 	let locationDraft = $state('');
 	let savingMeta = $state(false);
@@ -78,6 +93,8 @@
 			}
 			meta = deckMeta;
 			locationDraft = deckMeta.location ?? '';
+			// Non-blocking, like a collection's: prices can take a while and the list doesn't need them
+			refreshValue();
 			// One lookup for the whole list rather than one per row.
 			availability = await getCardAvailability([...new Set(deckCards.map((c) => c.id))]);
 		} catch (e) {
@@ -100,6 +117,12 @@
 		deckId;
 		load();
 	});
+
+	function refreshValue() {
+		if (app.pricingEnabled) {
+			getDeckValue(deckId).then((v) => { valueBreakdown = v; });
+		}
+	}
 
 	async function refreshAvailability() {
 		availability = await getCardAvailability([...new Set(cards.map((c) => c.id))]);
@@ -130,6 +153,7 @@
 				// A row survives until both counts are gone: giving up the last owned copy leaves
 				// the want standing.
 				.filter((c) => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
+			refreshValue();
 			// A built deck's contents change what every card is short by.
 			if (meta.built) refreshAvailability();
 		} catch (e) {
@@ -170,6 +194,7 @@
 				return;
 			}
 			cards = await getDeckCards(deckId);
+			refreshValue();
 			await refreshAvailability();
 		} catch (e) {
 			console.error('[gathers] deck transfer failed:', e);
@@ -216,6 +241,7 @@
 			boardInfo = await deleteDeckBoard(deckId, board);
 			cards = await getDeckCards(deckId);
 			if (addBoard === board) addBoard = boardInfo[0]?.board ?? '';
+			refreshValue();
 			if (meta.built) await refreshAvailability();
 		} catch (err) {
 			actionError = `Couldn't delete that board. ${err}`;
@@ -471,6 +497,37 @@
 				</span>
 			{/if}
 		{/if}
+		{#if valueBreakdown}
+			<span
+				class="page-subtitle"
+				role="status"
+				aria-label="Deck value"
+				style="margin-left: auto; position: relative;"
+				onmouseenter={() => valueHover = true}
+				onmouseleave={() => valueHover = false}
+			>
+				≈ {formatMoneyList(currencyTotals) || formatMoney(0)}
+				<ConvertedTotal items={currencyTotals} />
+				{#if valueHover}
+					<!-- No profit rows, unlike a collection's: purchase history stays with the
+					     collection a copy was bought into -->
+					<div class="value-breakdown-tooltip">
+						{#if valueBreakdown.priced_count != null && valueBreakdown.total_count != null}
+							<div class="vb-row">
+								<span class="vb-label">Priced</span>
+								<span class="vb-val">{valueBreakdown.priced_count} / {valueBreakdown.total_count}</span>
+							</div>
+						{/if}
+						{#if toCompleteTotals.some((m) => m.value > 0)}
+							<div class="vb-row">
+								<span class="vb-label" title="Price of the wanted copies the deck doesn't have yet">To complete</span>
+								<span class="vb-val">{formatMoneyList(toCompleteTotals)}</span>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</span>
+		{/if}
 	</div>
 
 	{#if actionError}
@@ -505,6 +562,7 @@
 					onAdjust={adjust}
 					onMove={move}
 					onTransfer={transfer}
+					onclick={(c) => (detailCard = c)}
 				/>
 			{/each}
 		</div>
@@ -554,4 +612,8 @@
 
 {#if shareOpen}
 	<ShareLinksModal collection={deckId} onclose={() => shareOpen = false} />
+{/if}
+
+{#if detailCard}
+	<CardDetailModal card={detailCard} onclose={() => (detailCard = null)} />
 {/if}

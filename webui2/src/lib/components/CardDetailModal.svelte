@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AnyCard, CollectionCard, CardGroup, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
+	import type { AnyCard, CollectionCard, CardGroup, DeckCard, MtgCard, RiftboundCard, PokemonCard } from '$lib/types';
 	import { cardImageUrl, rarityClass, finishLabel, catalogFinishes } from '$lib/types';
 	import { cachedImageUrl, syncCachedImageUrl } from '$lib/imageCache';
 	import { app } from '$lib/state.svelte';
@@ -13,7 +13,7 @@
 	import PokemonCardDetail from './PokemonCardDetail.svelte';
 
 	interface Props {
-		card: AnyCard | CollectionCard | CardGroup;
+		card: AnyCard | CollectionCard | CardGroup | DeckCard;
 		onclose: () => void;
 		onWantChange?: (delta: number) => void;
 	}
@@ -24,6 +24,10 @@
 	// Only present when opened from the collection view (a CardGroup) —
 	// a search-result card has no owned finishes to list.
 	const ownedFinishes = $derived((card as CardGroup).entries?.filter(e => (e.quantity ?? 0) > 0) ?? []);
+
+	// The one finish a single row stands for (a deck row's foil copy, say), when there are no
+	// grouped entries to say which are owned. Search results carry none.
+	const ownFinish = $derived((card as CardGroup).entries ? undefined : (card as { finish?: string }).finish);
 
 	// Catalog finishes this card is actually printed in (MTG, Pokemon — see
 	// `CollectionCard.finishes`). Only worth a row when there's a real choice.
@@ -88,9 +92,11 @@
 	});
 
 	// Current price of each finish worth showing: the ones owned (collection
-	// view), else the ones it's printed in, else just the default.
+	// view), else the row's own (deck view), else the ones it's printed in,
+	// else just the default.
 	const priceFinishes = $derived(
 		ownedFinishes.length ? ownedFinishes.map(e => e.finish ?? '')
+		: ownFinish !== undefined ? [ownFinish]
 		: printedFinishes.length ? printedFinishes
 		: ['']
 	);
@@ -234,7 +240,7 @@
 			<PriceHistoryChart
 				{provider}
 				cardId={card.id}
-				initialFinish={ownedFinishes[0]?.finish ?? ''}
+				initialFinish={ownedFinishes[0]?.finish ?? ownFinish ?? ''}
 				{currentPrices}
 			/>
 		</div>

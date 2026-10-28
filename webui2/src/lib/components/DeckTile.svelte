@@ -69,8 +69,31 @@
 
 	<div class="card-tile-body">
 		<div class="card-tile-name" title={card.name}>{card.name}</div>
-		{#if card.setCode}
-			<div class="card-tile-meta"><SetTooltip setCode={card.setCode} /></div>
+		{#if card.setCode || otherBoards.length > 0}
+			<div class="card-tile-meta deck-tile-meta">
+				{#if card.setCode}<SetTooltip setCode={card.setCode} />{/if}
+				{#if otherBoards.length > 0}
+					<!-- Inside the clickable tile, so neither a click nor Enter on it may open the
+					     card's details -->
+					<select
+						class="deck-move-select deck-tile-move"
+						title="Move one copy to another board"
+						value=""
+						onclick={(e) => e.stopPropagation()}
+						onkeydown={(e) => e.stopPropagation()}
+						onchange={(e) => {
+							const target = e.currentTarget.value;
+							e.currentTarget.value = '';
+							if (target) onMove(card, target);
+						}}
+					>
+						<option value="">Move to…</option>
+						{#each otherBoards as b (b)}
+							<option value={b}>{b}</option>
+						{/each}
+					</select>
+				{/if}
+			</div>
 		{/if}
 	</div>
 
@@ -121,22 +144,5 @@
 				<button class="qty-btn add" onclick={() => onAdjust(card, 1, 'wantQuantity')}>+</button>
 			</div>
 		</div>
-		{#if otherBoards.length > 0}
-			<select
-				class="deck-move-select deck-tile-move"
-				title="Move one copy to another board"
-				value=""
-				onchange={(e) => {
-					const target = e.currentTarget.value;
-					e.currentTarget.value = '';
-					if (target) onMove(card, target);
-				}}
-			>
-				<option value="">Move to…</option>
-				{#each otherBoards as b (b)}
-					<option value={b}>{b}</option>
-				{/each}
-			</select>
-		{/if}
 	</div>
 </div>

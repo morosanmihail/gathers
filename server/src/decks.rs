@@ -10,8 +10,10 @@ use persistence::{BoardRenameResult, PersistenceSystem, PersistenceSystemTrait};
 
 use std::collections::HashMap;
 
+use crate::collections::collections_models::CollectionValueBreakdown;
 use crate::collections::{
-    card_id, card_name, card_not_found, clone_retrieval_systems_by_name, resolve_provider,
+    card_id, card_name, card_not_found, clone_retrieval_systems_by_name, deck_value_breakdown,
+    resolve_provider,
 };
 use crate::{bad_request, demo_err, demo_mode, storage_error};
 use crate::{ApiError, ErrorPayload, GathersState};
@@ -113,6 +115,27 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
             .map_err(|e| storage_error("Failed to get deck cards", e))?;
 
         Ok(Json(cards.into_iter().map(DeckCard::from).collect()))
+    }
+
+    /// What the deck's cards are worth, owned and wanted, across all boards.
+    ///
+    /// The same breakdown `/api/collection/cards/{id}/value_breakdown` gives a collection, which
+    /// reports nothing for a deck since a deck's cards aren't in `cards`.
+    async fn cards_value_breakdown(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+    ) -> Result<Json<CollectionValueBreakdown>, ApiError> {
+        let cards = {
+            let storage = &state.1.lock().await.storage;
+            require_deck(storage, &id).await?;
+            storage
+                .deck(&id)
+                .cards()
+                .await
+                .map_err(|e| storage_error("Failed to get deck cards", e))?
+        };
+
+        Ok(Json(deck_value_breakdown(&state, cards).await))
     }
 
     /// Slots filled in the deck, across all boards.
@@ -429,6 +452,7 @@ pub fn deck_routes() -> ApiRouter<GathersState> {
     ApiRouter::new()
         .api_route("/cards/{id}/list", get(cards_list))
         .api_route("/cards/{id}/count", get(cards_count))
+        .api_route("/cards/{id}/value_breakdown", get(cards_value_breakdown))
         .api_route("/cards/{id}/adjust", post(cards_adjust))
         .api_route("/cards/{id}/move", post(cards_move))
         .api_route("/cards/{id}/transfer", post(cards_transfer))

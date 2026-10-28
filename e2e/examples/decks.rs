@@ -22,11 +22,12 @@
 //!  10. over-commitment is reported, never refused
 //!  11. build state and location survive a rename
 //!  12. a deck row carries owned and wanted counts at once, and the deck's size
-//!      counts the greater of them rather than their sum
+//!      counts the greater of them rather than their sum; its value prices the
+//!      copies it has, and what completing it costs prices only those missing
 //!  13. boards are free-form and user-editable: added, renamed (carrying their
 //!      cards), and reordered
 //!  14. a card can be transferred between a collection and a deck, and a
-//!      collection converted to a deck and back
+//!      collection converted to a deck and back, keeping its wanted counts
 //!
 //! Cross-printing matching (owning the Revised printing satisfying a deck that
 //! lists the M13 one) is covered by unit tests in `server::decks` instead: the
@@ -42,7 +43,7 @@ use std::num::NonZeroU32;
 
 use e2e::GathersClient;
 use e2e::harness::{Harness, ServerSetup};
-use e2e::models::{CollectionKind, DeckCard, Transfer};
+use e2e::models::{CollectionKind, CurrencyValue, DeckCard, Transfer, ValueBreakdown};
 
 // War Priest of Thune, M13 #39
 const CARD_A: &str = "0005d268-3fd0-5424-bc6b-573ecd713aa1";
@@ -52,6 +53,7 @@ const CARD_B: &str = "0001e0d0-2dcd-5640-aadc-a84765cf5fc9";
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
     let mut harness = Harness::new("decks")?;
+    write_prices(&harness.root().join("db/AllPricesToday.db"))?;
     let setup = ServerSetup::mtg(&harness)?;
     let client = harness.start_server(&setup).await?;
 
@@ -359,6 +361,34 @@ async fn run(
         4,
         "and the deck's size counts it once",
     )?;
+
+    // Valued the same way: the three to hand are worth what three owned in a collection are, and
+    // the want only prices the one still missing. Compared against collections rather than fixed
+    // amounts, so the test doesn't care which retailer the server values at.
+    let owns_three = format!("e2e-decks-owns-three-{}", std::process::id());
+    let wants_one = format!("e2e-decks-wants-one-{}", std::process::id());
+    client.add_collection(&owns_three).await?;
+    client.add_cards(&owns_three, CARD_A, "", 3, None).await?;
+    client.add_collection(&wants_one).await?;
+    client.adjust_want(&wants_one, CARD_A, 1).await?;
+
+    let deck_value = totals(&client.deck_value(&wants).await?, |c| c.total_value);
+    ensure(
+        deck_value.iter().any(|(_, v)| *v > 0.0),
+        "the card has a price, or the comparisons below would prove nothing",
+    )?;
+    eq(
+        deck_value,
+        totals(&client.collection_value(&owns_three).await?, |c| c.total_value),
+        "the deck is worth the copies it has",
+    )?;
+    eq(
+        totals(&client.deck_value(&wants).await?, |c| c.wanted_value),
+        totals(&client.collection_value(&wants_one).await?, |c| c.wanted_value),
+        "and completing it costs only the copy still missing",
+    )?;
+    client.remove_collection(&owns_three).await?;
+    client.remove_collection(&wants_one).await?;
     ok("a deck row carries both counts, and the size takes the greater");
 
     step("14. Free-form, editable boards");
@@ -426,17 +456,33 @@ async fn run(
     let convert = format!("e2e-decks-convert-{}", std::process::id());
     client.add_collection(&convert).await?;
     client.add_cards(&convert, CARD_A, "", 4, None).await?;
+    // Wants as well as owned copies, including a card only wanted: the deck view sizes every
+    // row from both counts, so a converted row missing either renders as NaN
+    client.adjust_want(&convert, CARD_A, 6).await?;
+    client.adjust_want(&convert, CARD_B, 2).await?;
 
     client.set_collection_kind(&convert, CollectionKind::Deck).await?;
+    let converted = client.deck_cards(&convert).await?;
     eq(
-        client
-            .deck_cards(&convert)
-            .await?
+        converted
             .iter()
             .find(|c| c.id == CARD_A)
-            .map(|c| (c.quantity, c.board.as_str())),
-        Some((4, "Mainboard")),
-        "the cards come across onto the first default board",
+            .map(|c| (c.quantity, c.want_quantity, c.board.as_str())),
+        Some((4, 6, "Mainboard")),
+        "the cards come across onto the first default board, owned and wanted alike",
+    )?;
+    eq(
+        converted
+            .iter()
+            .find(|c| c.id == CARD_B)
+            .map(|c| (c.quantity, c.want_quantity)),
+        Some((0, 2)),
+        "a card only wanted comes across too",
+    )?;
+    eq(
+        client.deck_card_count(&convert).await?,
+        8,
+        "the converted deck counts max(4, 6) + max(0, 2), not the sum",
     )?;
 
     client.set_collection_kind(&convert, CollectionKind::Collection).await?;
@@ -487,6 +533,28 @@ async fn availability(
         .into_iter()
         .next()
         .ok_or_else(|| eyre::eyre!("no availability returned for '{id}'"))
+}
+
+/// An `AllPricesToday` database pricing card A at one retailer, so a deck has something to value.
+fn write_prices(path: &std::path::Path) -> eyre::Result<()> {
+    let conn = rusqlite::Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE TABLE prices (uuid TEXT, date TEXT, source TEXT, provider TEXT, priceType TEXT, finish TEXT, price REAL, currency TEXT);",
+    )?;
+    for (finish, price) in [("normal", 0.5), ("foil", 2.25)] {
+        conn.execute(
+            "INSERT INTO prices VALUES (?1, '2026-03-02', 'paper', 'cardkingdom', 'retail', ?2, ?3, 'USD')",
+            rusqlite::params![CARD_A, finish, price],
+        )?;
+    }
+    Ok(())
+}
+
+/// One figure per currency, for comparing two breakdowns.
+fn totals(b: &ValueBreakdown, figure: impl Fn(&CurrencyValue) -> f64) -> Vec<(String, f64)> {
+    let mut out: Vec<_> = b.currencies.iter().map(|c| (c.currency.clone(), figure(c))).collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 fn ensure(cond: bool, msg: &str) -> eyre::Result<()> {
