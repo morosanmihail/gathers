@@ -537,6 +537,27 @@ fn priced_system(dir: &TempDir) -> PokemonSQLiteRetrievalSystem {
 }
 
 #[tokio::test]
+async fn test_reset_prices_picks_up_a_replaced_prices_db() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+    let card = "card-zero";
+    assert!(system.get_card_prices(card).await.unwrap().is_none());
+
+    crate::systems::tcgcsv::write_prices_db(
+        &dir.path().join("prices.sqlite"),
+        "2026-10-10T20:05:19+00:00",
+        [row(300, "Normal", Some(9.0), None)],
+        [],
+    )
+    .unwrap();
+    assert!(system.get_card_prices(card).await.unwrap().is_none());
+
+    system.reset_prices().await;
+    let prices = system.get_card_prices(card).await.unwrap().unwrap();
+    assert_eq!(prices.paper["tcgplayer"].normal, Some(9.0));
+}
+
+#[tokio::test]
 async fn test_get_card_prices_found() {
     let dir = TempDir::new().unwrap();
     let system = priced_system(&dir);

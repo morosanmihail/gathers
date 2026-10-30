@@ -726,8 +726,9 @@ async fn get_system_info(
     Ok(Json(ret.get_system_info().await))
 }
 
-async fn serve_api(Extension(api): Extension<OpenApi>) -> impl axum::response::IntoResponse {
-    Json(api)
+async fn serve_api(Extension(api): Extension<Arc<OpenApi>>) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    Json(&*api).into_response()
 }
 
 fn openapi_doc() -> OpenApi {
@@ -1147,7 +1148,9 @@ async fn main() -> eyre::Result<()> {
         .layer(axum::middleware::from_fn_with_state(retrieval.clone(), feature_gate))
         .layer(axum::middleware::from_fn_with_state(allowed_origins, reject_cross_site))
         .layer(cors)
-        .layer(Extension(api))
+        // Behind an `Arc`: every route's layers are cloned for each connection,
+        // so a bare `OpenApi` costs ~230MB per open connection.
+        .layer(Extension(Arc::new(api)))
         .with_state((retrieval, storage));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;

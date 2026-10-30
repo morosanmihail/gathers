@@ -2482,6 +2482,7 @@ dependencies = [
  "persistence",
  "reqwest",
  "retrieval",
+ "rusqlite",
  "schemars",
  "serde",
  "serde_json",

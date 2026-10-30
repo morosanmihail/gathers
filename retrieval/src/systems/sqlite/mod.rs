@@ -779,8 +779,12 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             None => return Ok(false),
         };
         update::download_prices(&prices_path).await?;
-        *self.prices_cache.lock().await = None;
+        self.reset_prices().await;
         Ok(true)
+    }
+
+    async fn reset_prices(&self) {
+        *self.prices_cache.lock().await = None;
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {

@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use retrieval::{RetrievalSystem, RetrievalSystemTrait as _};
+use retrieval::RetrievalSystemTrait as _;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
@@ -57,20 +57,19 @@ where
     retrieval.lock().await.finish_download(key);
 }
 
-/// Updates `system`'s price database, then records price history from it.
+/// Updates `S`'s price database, then records price history from it.
 async fn update_prices<S: PricedSystem>(
     retrieval: &Arc<Mutex<RetrievalState>>,
     storage: &Arc<Mutex<StorageState>>,
-    system: &RetrievalSystem,
 ) {
     let label = S::LABEL;
     run_exclusive(retrieval, S::DOWNLOAD_KEY, async {
-        match system.update_prices().await {
-            Ok(true) => {
+        match prices_api::update_live_prices::<S>(retrieval).await {
+            Ok(Some(system)) => {
                 info!("{label} price DB auto-downloaded");
-                price_history::snapshot_tracked(retrieval, storage, system, false).await;
+                price_history::snapshot_tracked(retrieval, storage, &system, false).await;
             }
-            Ok(false) => {}
+            Ok(None) => {}
             Err(e) => error!(error = %e, "Auto-download of {label} price DB failed"),
         }
     })
@@ -93,7 +92,9 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
-        update_prices::<prices_api::Mtg>(retrieval, storage, &mtg).await;
+        // Replaced by the reload above; don't keep it and its prices alive.
+        drop(mtg);
+        update_prices::<prices_api::Mtg>(retrieval, storage).await;
     }
 
     let riftbound = retrieval.lock().await.riftbound.clone();
@@ -108,7 +109,9 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
-        update_prices::<prices_api::Riftbound>(retrieval, storage, &riftbound).await;
+        // Replaced by the reload above; don't keep it and its prices alive.
+        drop(riftbound);
+        update_prices::<prices_api::Riftbound>(retrieval, storage).await;
     }
 
     let pokemon = retrieval.lock().await.pokemon.clone();
@@ -123,7 +126,9 @@ async fn run_all(retrieval: &Arc<Mutex<RetrievalState>>, storage: &Arc<Mutex<Sto
             }
         })
         .await;
-        update_prices::<prices_api::Pokemon>(retrieval, storage, &pokemon).await;
+        // Replaced by the reload above; don't keep it and its prices alive.
+        drop(pokemon);
+        update_prices::<prices_api::Pokemon>(retrieval, storage).await;
     }
 }
 
