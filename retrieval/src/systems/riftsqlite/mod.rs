@@ -398,6 +398,10 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         Ok(true)
     }
 
+    async fn reset_prices(&self) {
+        self.prices.reset().await;
+    }
+
     async fn update_backend(&self) -> eyre::Result<bool> {
         let target = PathBuf::from(&self.db_path);
         if crate::mirror::try_mirrors("riftbound.sqlite", &target, None).await {

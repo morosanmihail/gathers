@@ -2,9 +2,14 @@ use eyre::{Context, bail};
 use reqwest::StatusCode;
 
 use crate::models::{
-    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, CardToAdd, Collection,
-    CollectionAddResponse, CollectionCard, MtgCard, SystemMeta, CollectionValueCards, CollectionValueHistory, CollectionRemoveResponse, PublicCollectionPage,
-    PriceHistoryResponse, PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo,
+    AdjustWantQuantityRequest, AllPurchaseHistoryResponse, AvailabilityRequest, BoardCreate,
+    BoardRename, BoardReorder, CardAvailability, CardToAdd, Collection, CollectionAddResponse,
+    CollectionCard, CollectionKind, CollectionKindChange, CollectionRemoveResponse,
+    CollectionRenameRequest, CollectionToAdd, CollectionValueCards, CollectionValueHistory,
+    DeckBoard, DeckCard, DeckCardAdjustment, DeckCardMove, DeckCardTransfer,
+    DeckCardTransferResult, DeckMeta, MtgCard, PriceHistoryResponse, PublicCollectionPage,
+    PurchaseHistoryResponse, ShareLink, ShareLinkRevokeResponse, SystemInfo, SystemMeta, Transfer,
+    ValueBreakdown,
 };
 
 /// HTTP client for the GatheRs server.
@@ -35,8 +40,20 @@ impl GathersClient {
     }
 
     pub async fn add_collection(&self, name: &str) -> eyre::Result<CollectionAddResponse> {
-        self.post("/api/collection/add", &Collection { id: name.to_string() })
-            .await
+        self.post(
+            "/api/collection/add",
+            &Collection { id: name.to_string(), kind: None },
+        )
+        .await
+    }
+
+    /// Renames a collection or deck. A deck stays a deck, and its cards follow it.
+    pub async fn rename_collection(&self, id: &str, new_id: &str) -> eyre::Result<Collection> {
+        self.post(
+            &format!("/api/collection/rename/{}", urlenc(id)),
+            &CollectionRenameRequest { new_id: new_id.to_string() },
+        )
+        .await
     }
 
     pub async fn remove_collection(&self, id: &str) -> eyre::Result<CollectionRemoveResponse> {
@@ -379,6 +396,212 @@ impl GathersClient {
 
     // ── low-level helpers ─────────────────────────────────────────────────────
 
+    // ── decks ────────────────────────────────────────────────────────────────
+
+    /// Creates a deck: a collection with `kind = "deck"`, whose cards live in `deck_cards` and are
+    /// reached through `/api/deck` rather than `/api/collection`.
+    pub async fn add_deck(&self, name: &str) -> eyre::Result<CollectionAddResponse> {
+        self.post(
+            "/api/collection/add",
+            &CollectionToAdd {
+                id: name.to_string(),
+                kind: CollectionKind::Deck,
+            },
+        )
+        .await
+    }
+
+    pub async fn deck_cards(&self, deck: &str) -> eyre::Result<Vec<DeckCard>> {
+        self.get(&format!("/api/deck/cards/{}/list", urlenc(deck))).await
+    }
+
+    /// Slots filled in the deck; the server's count, which takes the greater of a row's owned
+    /// and wanted copies rather than their sum.
+    pub async fn deck_card_count(&self, deck: &str) -> eyre::Result<i64> {
+        self.get(&format!("/api/deck/cards/{}/count", urlenc(deck))).await
+    }
+
+    /// A collection's value; reports nothing for a deck, whose cards aren't in `cards`.
+    pub async fn collection_value(&self, collection: &str) -> eyre::Result<ValueBreakdown> {
+        self.get(&format!("/api/collection/cards/{}/value_breakdown", urlenc(collection))).await
+    }
+
+    /// A deck's value. Its `wanted_value` prices only the wanted copies the deck doesn't have yet.
+    pub async fn deck_value(&self, deck: &str) -> eyre::Result<ValueBreakdown> {
+        self.get(&format!("/api/deck/cards/{}/value_breakdown", urlenc(deck))).await
+    }
+
+    /// Changes one card's owned count on one board.
+    ///
+    /// Never changes what any collection says is owned; `transfer_deck_card` is for copies that
+    /// actually move.
+    pub async fn adjust_deck_card(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+    ) -> eyre::Result<Option<DeckCard>> {
+        self.adjust_deck_card_counts(deck, card_id, finish, board, quantity, 0).await
+    }
+
+    /// Changes both of a card's counts on one board.
+    pub async fn adjust_deck_card_counts(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+        want_quantity: i32,
+    ) -> eyre::Result<Option<DeckCard>> {
+        self.post(
+            &format!("/api/deck/cards/{}/adjust", urlenc(deck)),
+            &DeckCardAdjustment {
+                id: card_id.to_string(),
+                finish: finish.to_string(),
+                board: board.to_string(),
+                quantity,
+                want_quantity,
+            },
+        )
+        .await
+    }
+
+    pub async fn move_deck_card(
+        &self,
+        deck: &str,
+        card_id: &str,
+        finish: &str,
+        from_board: &str,
+        to_board: &str,
+        quantity: u32,
+    ) -> eyre::Result<Vec<DeckCard>> {
+        self.post(
+            &format!("/api/deck/cards/{}/move", urlenc(deck)),
+            &DeckCardMove {
+                id: card_id.to_string(),
+                finish: finish.to_string(),
+                from_board: from_board.to_string(),
+                to_board: to_board.to_string(),
+                quantity,
+                want_quantity: 0,
+            },
+        )
+        .await
+    }
+
+    /// Moves copies between a collection and one of a deck's boards.
+    pub async fn transfer_deck_card(
+        &self,
+        deck: &str,
+        collection: &str,
+        card_id: &str,
+        finish: &str,
+        board: &str,
+        transfer: Transfer,
+    ) -> eyre::Result<i32> {
+        let result: DeckCardTransferResult = self
+            .post(
+                &format!("/api/deck/cards/{}/transfer", urlenc(deck)),
+                &DeckCardTransfer {
+                    id: card_id.to_string(),
+                    finish: finish.to_string(),
+                    collection: collection.to_string(),
+                    board: board.to_string(),
+                    transfer,
+                },
+            )
+            .await?;
+        Ok(result.moved)
+    }
+
+    pub async fn deck_boards(&self, deck: &str) -> eyre::Result<Vec<DeckBoard>> {
+        self.get(&format!("/api/deck/boards/{}", urlenc(deck))).await
+    }
+
+    pub async fn add_deck_board(&self, deck: &str, board: &str) -> eyre::Result<Vec<DeckBoard>> {
+        self.post(
+            &format!("/api/deck/boards/{}", urlenc(deck)),
+            &BoardCreate { board: board.to_string() },
+        )
+        .await
+    }
+
+    pub async fn rename_deck_board(
+        &self,
+        deck: &str,
+        from: &str,
+        to: &str,
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        self.put(
+            &format!("/api/deck/boards/{}", urlenc(deck)),
+            &BoardRename { from: from.to_string(), to: to.to_string() },
+        )
+        .await
+    }
+
+    pub async fn reorder_deck_boards(
+        &self,
+        deck: &str,
+        boards: &[&str],
+    ) -> eyre::Result<Vec<DeckBoard>> {
+        self.post(
+            &format!("/api/deck/boards/{}/order", urlenc(deck)),
+            &BoardReorder { boards: boards.iter().map(|b| b.to_string()).collect() },
+        )
+        .await
+    }
+
+    /// Converts a collection to a deck or back, carrying its cards across.
+    pub async fn set_collection_kind(
+        &self,
+        collection: &str,
+        kind: CollectionKind,
+    ) -> eyre::Result<()> {
+        let _: serde_json::Value = self
+            .post(
+                &format!("/api/collection/kind/{}", urlenc(collection)),
+                &CollectionKindChange { kind },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn deck_meta(&self, deck: &str) -> eyre::Result<DeckMeta> {
+        self.get(&format!("/api/deck/meta/{}", urlenc(deck))).await
+    }
+
+    pub async fn set_deck_meta(
+        &self,
+        deck: &str,
+        built: bool,
+        location: Option<&str>,
+    ) -> eyre::Result<DeckMeta> {
+        self.put(
+            &format!("/api/deck/meta/{}", urlenc(deck)),
+            &DeckMeta {
+                built,
+                location: location.map(str::to_string),
+                notes: None,
+            },
+        )
+        .await
+    }
+
+    /// Where the copies of each card currently are: owned, committed to built decks, and which
+    /// decks those are.
+    pub async fn card_availability(&self, ids: &[&str]) -> eyre::Result<Vec<CardAvailability>> {
+        self.post(
+            "/api/cards/availability",
+            &AvailabilityRequest {
+                ids: ids.iter().map(|s| s.to_string()).collect(),
+            },
+        )
+        .await
+    }
+
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {
         let url = format!("{}{path}", self.base_url);
         let resp = self
@@ -404,6 +627,22 @@ impl GathersClient {
             .await
             .with_context(|| format!("POST {url}"))?;
         parse_response(resp, "POST", &url).await
+    }
+
+    async fn put<B: serde::Serialize + ?Sized, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> eyre::Result<T> {
+        let url = format!("{}{path}", self.base_url);
+        let resp = self
+            .client
+            .put(&url)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("PUT {url}"))?;
+        parse_response(resp, "PUT", &url).await
     }
 
     async fn post_empty<T: serde::de::DeserializeOwned>(&self, path: &str) -> eyre::Result<T> {

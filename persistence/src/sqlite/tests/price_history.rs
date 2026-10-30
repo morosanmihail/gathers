@@ -156,8 +156,8 @@ async fn retailer_histories_read_one_retailer_per_card() {
 #[tokio::test]
 async fn tracked_uuids_cover_all_collections_and_wants() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let a = p.add_collection("A".to_string()).await.unwrap();
-    let b = p.add_collection("B".to_string()).await.unwrap();
+    let a = new_collection(&mut p, "A".to_string()).await;
+    let b = new_collection(&mut p, "B".to_string()).await;
     p.add_card_to_collection(&a, &"c1".to_string(), "", 1, OLD_TIME, "prov").await.unwrap();
     p.add_card_to_collection(&a, &"c1".to_string(), "foil", 1, OLD_TIME, "prov").await.unwrap();
     p.add_card_to_collection(&b, &"c1".to_string(), "", 1, OLD_TIME, "prov").await.unwrap();

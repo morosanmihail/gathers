@@ -364,6 +364,10 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         Ok(true)
     }
 
+    async fn reset_prices(&self) {
+        self.prices.reset().await;
+    }
+
     async fn update_backend(&self) -> eyre::Result<bool> {
         let target = PathBuf::from(&self._db_path);
         if crate::mirror::try_mirrors("pokemon.sqlite", &target, None).await {

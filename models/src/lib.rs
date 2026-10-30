@@ -79,3 +79,140 @@ pub struct CollectionCard {
     pub provider: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectionKind {
+    /// A set of *owned* cards.
+    #[default]
+    Collection,
+    /// A set of *allocated* cards (intended to be played in a given format).
+    Deck,
+}
+
+impl CollectionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Collection => "collection",
+            Self::Deck => "deck",
+        }
+    }
+}
+
+/// Returned when a stored `kind` doesn't match any known variant.
+#[derive(Debug, Clone)]
+pub struct UnknownCollectionKind(pub String);
+
+impl std::fmt::Display for UnknownCollectionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown collection kind: {:?}", self.0)
+    }
+}
+
+impl std::error::Error for UnknownCollectionKind {}
+
+impl std::str::FromStr for CollectionKind {
+    type Err = UnknownCollectionKind;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "collection" => Ok(Self::Collection),
+            "deck" => Ok(Self::Deck),
+            other => Err(UnknownCollectionKind(other.to_string())),
+        }
+    }
+}
+
+/// A card allocated to one zone of one deck.
+///
+/// The `(deck, uuid, finish, board)` key means the same card can appear on multiple boards of the
+/// same deck with independent quantities.
+#[derive(Debug, Clone)]
+pub struct DeckCard {
+    pub deck: CollectionID,
+    pub uuid: CardID,
+    /// Which finish this allocation is for; same meaning as `CollectionCard::finish`.
+    pub finish: String,
+    /// Which zone of the deck: `"Mainboard"` and `"Sideboard"` by default, Riftbound's
+    /// `"Legend"`/`"Runes"`/`"Battlefield"`, and so on. Free-form per game, like `finish`, and
+    /// renamed by the user.
+    pub board: String,
+    /// Copies of this card the deck already has to hand.
+    pub quantity: i32,
+    /// Copies the deck calls for. Independent of `quantity`: a slot can be wanted and filled at
+    /// once, so the two are not added together. See [`DeckCard::slots`].
+    pub want_quantity: i32,
+    pub provider: String,
+    pub time_added: String,
+    pub time_updated: String,
+}
+
+impl DeckCard {
+    /// How many of the deck's slots this row accounts for.
+    ///
+    /// Wanting four Tarmogoyf and owning three of them is four slots, not seven: the owned copies
+    /// are filling the wanted ones rather than sitting alongside them.
+    pub fn slots(&self) -> i32 {
+        self.quantity.max(self.want_quantity)
+    }
+}
+
+/// One zone of one deck.
+///
+/// Stored rather than derived from the cards, so a board can be empty, keep its place in the
+/// deck's order, and be renamed without losing its contents.
+#[derive(Debug, Clone)]
+pub struct DeckBoard {
+    pub deck: CollectionID,
+    pub board: String,
+    pub position: i32,
+}
+
+/// The boards a deck is created with, in order.
+pub const DEFAULT_BOARDS: [&str; 2] = ["Mainboard", "Sideboard"];
+
+/// Per-deck state that a plain collection has no use for.
+///
+/// A built deck is physically assembled, so its cards are committed and unavailable for
+/// another deck. An unbuilt deck is just a list.
+#[derive(Debug, Clone, Default)]
+pub struct DeckMeta {
+    pub deck: CollectionID,
+    pub built: bool,
+    pub location: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Where the copies of one card currently are.
+///
+/// `owned` counts every copy across all collections; `committed` counts copies allocated to decks
+/// that are currently *built*. `free` is what's left, and may go negative, since over-commitment
+/// is reported rather than prevented.
+#[derive(Debug, Clone)]
+pub struct CardAvailability {
+    pub uuid: CardID,
+    pub owned: i32,
+    pub committed: i32,
+    pub free: i32,
+    pub over_committed: bool,
+    /// Which built decks hold this card, and where those decks physically are.
+    pub holdings: Vec<CardHolding>,
+    /// Which collections the owned copies are in, so a deck can say not just how many are short
+    /// but where the rest are to be found.
+    pub copies: Vec<CardCopies>,
+}
+
+/// How many copies of a card one collection holds.
+#[derive(Debug, Clone)]
+pub struct CardCopies {
+    pub collection: CollectionID,
+    pub quantity: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CardHolding {
+    pub deck: CollectionID,
+    pub location: Option<String>,
+    pub board: String,
+    pub finish: String,
+    pub quantity: i32,
+}

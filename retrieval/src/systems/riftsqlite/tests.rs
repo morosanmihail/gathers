@@ -379,6 +379,27 @@ async fn test_bulk_prices_skip_unpriced_cards() {
 }
 
 #[tokio::test]
+async fn test_reset_prices_picks_up_a_replaced_prices_db() {
+    use crate::systems::tcgcsv::{tests::row, write_prices_db};
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+    let normal = async || system.get_card_prices("sfd-162-221").await.unwrap().unwrap().paper["tcgplayer"].normal;
+    assert_eq!(normal().await, Some(0.25));
+
+    write_prices_db(
+        &dir.path().join("prices.sqlite"),
+        "2026-10-10T20:05:19+00:00",
+        [row(1, "Normal", Some(9.0), None)],
+        [("sfd-162-221".to_string(), 1)],
+    )
+    .unwrap();
+    assert_eq!(normal().await, Some(0.25));
+
+    system.reset_prices().await;
+    assert_eq!(normal().await, Some(9.0));
+}
+
+#[tokio::test]
 async fn test_no_prices_without_a_prices_db() {
     let system = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap();
     assert!(system.get_card_prices("sfd-162-221").await.unwrap().is_none());

@@ -7,14 +7,35 @@
 	import { groupByCard } from '$lib/types';
 	import type { CollectionCard, CardGroup } from '$lib/types';
 
+	/** A share row, which for a deck also names the board it sits on. */
+	type SharedCard = CollectionCard & { board?: string };
+
 	// Fields the /api/share endpoint can sort by server-side (mirrors the
 	// collection-entry columns, not card-level fields like name/rarity).
 	const SORTABLE_FIELDS = new Set(['Quantity']);
 
 	const token = $derived(decodeURIComponent($page.params.token ?? ''));
 
-	let cards = $state<CollectionCard[]>([]);
+	// A shared deck's rows carry the board they sit on; a collection's don't, since a collection
+	// is one undifferentiated pile.
+	let cards = $state<SharedCard[]>([]);
 	const groups = $derived(groupByCard(cards));
+
+	// Boards in the order the server sent them, which is the deck's own order. Empty for a
+	// collection, which is what keeps the single-list rendering below.
+	const boards = $derived([...new Set(cards.map((c) => c.board).filter((b): b is string => !!b))]);
+
+	function groupsOn(board: string): CardGroup[] {
+		return groupByCard(cards.filter((c) => c.board === board));
+	}
+
+	// Summed over the rows rather than the groups: a group's own quantity is its primary finish's,
+	// so a card held in two finishes would count only one of them
+	function countOn(board: string): number {
+		return cards
+			.filter((c) => c.board === board)
+			.reduce((n, c) => n + Math.max(c.quantity ?? 0, c.wantQuantity ?? 0), 0);
+	}
 	let total = $state(0);
 	let currentPage = $state(1);
 	let loading = $state(true);
@@ -137,6 +158,32 @@
 				<div class="empty-state-icon">📦</div>
 				<div class="empty-state-text">No cards in this collection.</div>
 			</div>
+		{:else if boards.length > 0}
+			<!-- A shared deck: one list per board, so a sideboard reads as a sideboard. Pagination
+			     stays on the last list, the page covering the deck rather than any one board. -->
+			{#each boards as board, i (board)}
+				<section class="deck-board">
+					<header class="deck-board-header">
+						<h2 class="deck-board-title">{board}</h2>
+						<span class="deck-board-count">{countOn(board)} cards</span>
+					</header>
+					<CardResultsList
+						cards={groupsOn(board)}
+						viewMode={app.viewMode}
+						{listHeaders}
+						keyFn={(c) => c.id}
+						collectionMode
+						selectable={false}
+						onclick={(c) => detailCard = c as CardGroup}
+						{sortBy}
+						{sortOrder}
+						onSortClick={handleSortClick}
+						total={i === boards.length - 1 ? total : 0}
+						page={currentPage}
+						onPageChange={handlePageChange}
+					/>
+				</section>
+			{/each}
 		{:else}
 			<CardResultsList
 				cards={groups}

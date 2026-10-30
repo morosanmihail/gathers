@@ -19,12 +19,14 @@ use retrieval::{NamedRetrievalSystem as _, RetrievalSystem, RetrievalSystemTrait
 use crate::{
     ApiError, ErrorPayload, GathersState, demo_mode, demo_err, find_plugin, plugin_provider,
     collections::collections_models::{
-        APICardSearchFilters, APISortField, AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
+        APICardSearchFilters, APICollectionSortField, APISortField, APISortOrder,
+        AdjustWantQuantityRequest, CardIdentInner, CardToAdd,
         CollectionAddResponse, CollectionCard, CollectionCardsQuery, CollectionRemoveResponse,
         CollectionAllPurchaseHistoryResponse, CollectionListEntry, CollectionPurchaseHistoryEntry,
         CollectionRemoveQuery,
-        CollectionRenameRequest, CollectionValueBreakdown, CollectionsSearchQuery,
-        PriceHistoryResponse, PublicCollectionPage, PurchaseHistoryResponse, ResultCard, ResultCardInner,
+        CollectionKindChange, CollectionRenameRequest, CollectionValueBreakdown,
+        CollectionsSearchQuery, PriceHistoryResponse, PublicCollectionPage,
+        PurchaseHistoryResponse, ResultCard, ResultCardInner,
         ShareLinkResponse, ShareLinkRevokeResponse,
     },
 };
@@ -135,10 +137,11 @@ fn compute_value_breakdown(
         // better, same as an unpriced card would fall back to 0.
         let unit_price = if card.finish == "foil" { unit.foil } else { unit.normal };
 
-        // want_quantity is only ever tracked on the "" (default) finish row.
-        if card.want_quantity > 0 && unit.normal > 0.0 {
+        // Priced at the row's own finish: a collection only tracks wants on the "" (default)
+        // row, so that's the normal price there, but a deck can want a foil copy specifically.
+        if card.want_quantity > 0 && unit_price > 0.0 {
             by_currency.entry(unit.currency.clone()).or_default().wanted_value +=
-                unit.normal * card.want_quantity as f64;
+                unit_price * card.want_quantity as f64;
         }
 
         if card.quantity <= 0 {
@@ -258,6 +261,60 @@ async fn load_collection_pricing(state: &GathersState, collection_id: &str) -> R
     Ok(CollectionPricing { cards, unit_prices, retailers, purchase_totals })
 }
 
+/// A deck's value, broken down the same way as a collection's.
+///
+/// A deck's rows are split by board as well as finish, so they're folded into one row per
+/// `(uuid, finish)` first: the same card on two boards is that many more copies, and the counts
+/// then line up with a collection holding the same cards.
+///
+/// `wanted_value` means something different from a collection's. There a want is a wishlist,
+/// independent of what's owned; in a deck it's the target the owned copies count towards, so
+/// only the shortfall is priced: wanting four and having three is three copies of value and one
+/// still to buy to complete the deck. The shortfall is taken per row, before folding, as the
+/// deck view's "N to find" is: spare copies on the sideboard don't fill a gap in the mainboard.
+///
+/// A deck has no purchase history of its own (it stays with the collection the copies were bought
+/// into), so profit says nothing useful here.
+///
+/// Rows from a plugin that's since been disabled are left out, as `load_collection_pricing`
+/// leaves them out of a collection: they can't be priced, and the client doesn't list them.
+pub(crate) async fn deck_value_breakdown(
+    state: &GathersState,
+    deck_cards: Vec<models::DeckCard>,
+) -> collections_models::CollectionValueBreakdown {
+    let enabled_plugins = enabled_plugin_providers(state).await;
+    let mut folded: HashMap<(String, String), models::CollectionCard> = HashMap::new();
+    for row in deck_cards {
+        if row.provider.starts_with("plugin-") && !enabled_plugins.contains(&row.provider) {
+            continue;
+        }
+        let card = folded
+            .entry((row.uuid.clone(), row.finish.clone()))
+            .or_insert_with(|| models::CollectionCard {
+                uuid: row.uuid,
+                finish: row.finish,
+                quantity: 0,
+                want_quantity: 0,
+                time_added: row.time_added,
+                collection: row.deck,
+                provider: row.provider,
+            });
+        card.quantity = card.quantity.saturating_add(row.quantity);
+        card.want_quantity = card
+            .want_quantity
+            .saturating_add((row.want_quantity - row.quantity).max(0));
+    }
+    let cards: Vec<_> = folded.into_values().collect();
+
+    let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for card in &cards {
+        ids_by_provider.entry(card.provider.clone()).or_default().push(card.uuid.clone());
+    }
+    let (unit_prices, _) = lookup_unit_prices(state, ids_by_provider).await;
+
+    compute_value_breakdown(&cards, &unit_prices, &HashMap::new())
+}
+
 /// Current unit prices of the cards in `ids_by_provider`, and the retailer
 /// each is valued at (see `preferred_retailer`), both keyed by card uuid.
 /// Cards without prices, or whose provider has none, are left out.
@@ -288,7 +345,7 @@ async fn lookup_unit_prices(
 
 /// Returns all configured retrieval systems, cloned out of the state lock,
 /// keyed by their provider name.
-async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
+pub(crate) async fn clone_retrieval_systems_by_name(state: &GathersState) -> HashMap<String, RetrievalSystem> {
     let guard = state.0.lock().await;
     [
         guard.mtg.clone(),
@@ -348,7 +405,7 @@ async fn provider_has_card(
 /// taking the first match, which is only correct when ids are unique
 /// across all of them (two plugins both minting an id like `book-1` would
 /// otherwise let the wrong one "win" the card).
-async fn resolve_provider(state: &GathersState, card_id: &str, explicit: Option<&str>) -> String {
+pub(crate) async fn resolve_provider(state: &GathersState, card_id: &str, explicit: Option<&str>) -> String {
     let systems = clone_retrieval_systems_by_name(state).await;
     let plugins = clone_plugins_by_name(state).await;
 
@@ -616,7 +673,59 @@ fn plugin_card_to_public_json(card: &retrieval::PluginCard) -> serde_json::Map<S
     map
 }
 
-fn card_name(card: &Card) -> &str {
+/// 404s unless the collection exists, and rejects a deck.
+///
+/// A deck name reaching one of the card-mutation endpoints would write an orphaned row into
+/// `cards`, since a deck's cards are served from `deck_cards`. Deck contents belong to
+/// `/api/deck/cards/{id}/<action>` instead.
+async fn validate_collection(
+    storage: &PersistenceSystem,
+    collection_id: &String,
+) -> Result<(), ApiError> {
+    let kind = storage
+        .get_collection_kind(collection_id)
+        .await
+        .map_err(|e| crate::storage_error("Failed to verify collection", e))?;
+
+    match kind {
+        Some(models::CollectionKind::Collection) => Ok(()),
+        Some(models::CollectionKind::Deck) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorPayload {
+                error: format!(
+                    "'{collection_id}' is a deck; use /api/deck/{collection_id}/cards"
+                ),
+            }),
+        )),
+        None => Err(crate::storage_error(
+            "",
+            persistence::PersistenceError::CollectionNotFound(collection_id.clone()).into(),
+        )),
+    }
+}
+
+/// Shared by the collection and deck add paths.
+///
+/// A card no configured system knows can't be hydrated later, so storing it would leave a
+/// nameless row.
+pub(crate) fn card_not_found(card_id: &str) -> ApiError {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorPayload {
+            error: format!("Card '{card_id}' wasn't found in any configured system or plugin"),
+        }),
+    )
+}
+
+pub(crate) fn card_id(card: &Card) -> &str {
+    match card {
+        Card::Magic(m) => &m.id,
+        Card::Riftbound(r) => &r.id,
+        Card::Pokemon(p) => &p.id,
+    }
+}
+
+pub(crate) fn card_name(card: &Card) -> &str {
     match card {
         Card::Magic(m) => &m.name,
         Card::Riftbound(r) => &r.name,
@@ -770,7 +879,11 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Ok(Json(
             collections
                 .into_iter()
-                .map(|c| CollectionListEntry { id: c.name, removable: c.removable })
+                .map(|c| CollectionListEntry {
+                    id: c.name,
+                    removable: c.removable,
+                    kind: c.kind.into(),
+                })
                 .collect(),
         ))
     }
@@ -791,7 +904,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             ));
         }
         let collection_id = storage
-            .add_collection(input.id.clone())
+            .add_collection(input.id.clone(), input.kind.into())
             .await
             .map_err(|e| crate::storage_error("Failed to add collection", e))?;
         Ok(Json(CollectionAddResponse { id: collection_id, name: input.id }))
@@ -826,7 +939,52 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .rename_collection(&id, &input.new_id)
             .await
             .map_err(|e| crate::storage_error("Failed to rename collection", e))?;
-        Ok(Json(Collection { id: input.new_id }))
+
+        // Read the kind back rather than assuming: renaming a deck leaves it a deck, and reporting
+        // it as a plain collection would have the client send its next card edit to the wrong
+        // endpoint.
+        let kind = storage
+            .get_collection_kind(&input.new_id)
+            .await
+            .map_err(|e| crate::storage_error("Failed to read collection kind", e))?
+            .unwrap_or_default();
+
+        Ok(Json(Collection {
+            id: input.new_id,
+            kind: kind.into(),
+        }))
+    }
+
+    /// Converts a collection to a deck or back, carrying its cards across.
+    ///
+    /// Lives here rather than on `/api/deck` because it changes what the collection *is*, and the
+    /// target may not be a deck yet; `require_deck` would reject half the calls.
+    async fn set_kind(
+        State(state): State<GathersState>,
+        Path(id): Path<String>,
+        Json(input): Json<CollectionKindChange>,
+    ) -> Result<Json<Collection>, ApiError> {
+        if demo_mode() { return Err(demo_err()); }
+
+        let storage = &mut state.1.lock().await.storage;
+        let kind: models::CollectionKind = input.kind.into();
+        if !storage
+            .set_collection_kind(&id, kind)
+            .await
+            .map_err(|e| crate::storage_error("Failed to convert collection", e))?
+        {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorPayload {
+                    error: format!("Collection '{id}' not found"),
+                }),
+            ));
+        }
+
+        Ok(Json(Collection {
+            id,
+            kind: kind.into(),
+        }))
     }
 
     #[axum::debug_handler]
@@ -837,6 +995,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
     ) -> Result<Json<()>, ApiError> {
         if demo_mode() { return Err(demo_err()); }
         let storage = &mut state.1.lock().await.storage;
+
+        // Cards move between things that record ownership. Without this, a deck named as the
+        // destination would have orphaned rows written into `cards` under its name
+        validate_collection(storage, &to_collection_id).await?;
 
         let cards: Vec<models::CollectionCard> = input.iter().map(|card| card.into()).collect();
         storage
@@ -870,7 +1032,14 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         if demo_mode() { return Err(demo_err()); }
 
         let storage = &mut state.1.lock().await.storage;
-        validate_collection(storage, &id).await?;
+        // Existence only, not `validate_collection`: decks are shareable, and that guard's
+        // remediation (use /api/deck/cards/{id}/list) has nothing to do with share links
+        if !collection_exists(storage, &id).await? {
+            return Err(crate::storage_error(
+                "",
+                persistence::PersistenceError::CollectionNotFound(id.clone()).into(),
+            ));
+        }
 
         match storage.create_share_link(&id).await {
             Ok(link) => Ok(Json(link.into())),
@@ -936,29 +1105,6 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         Ok(collections.contains(collection_id))
     }
 
-    /// 404s unless the collection exists.
-    async fn validate_collection(
-        storage: &PersistenceSystem,
-        collection_id: &String,
-    ) -> Result<(), ApiError> {
-        if collection_exists(storage, collection_id).await? {
-            Ok(())
-        } else {
-            Err(crate::storage_error(
-                "",
-                persistence::PersistenceError::CollectionNotFound(collection_id.clone()).into(),
-            ))
-        }
-    }
-
-    fn card_not_found(card_id: &str) -> ApiError {
-        (
-            StatusCode::NOT_FOUND,
-            Json(ErrorPayload {
-                error: format!("Card '{card_id}' wasn't found in any configured system or plugin"),
-            }),
-        )
-    }
 
     async fn mutate_card_quantities(
         storage: &mut PersistenceSystem,
@@ -1497,6 +1643,26 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         let collection_name = collection_name.unwrap_or_else(|| "New Collection".to_string());
         validate_collection_name(&collection_name)?;
 
+        // Importing under an existing deck's name would write orphaned rows into `cards` and
+        // report success. `import_csv` creates the collection with INSERT OR IGNORE, so it would
+        // leave the deck row alone and carry on
+        {
+            let storage = &state.1.lock().await.storage;
+            if storage
+                .get_collection_kind(&collection_name)
+                .await
+                .map_err(|e| crate::storage_error("Failed to verify collection", e))?
+                == Some(models::CollectionKind::Deck)
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorPayload {
+                        error: format!("'{collection_name}' is a deck; CSV import targets collections"),
+                    }),
+                ));
+            }
+        }
+
         let mut tmp = tempfile::NamedTempFile::new().map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1836,6 +2002,7 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .api_route("/add", post(add))
         .api_route("/remove/{id}", post(remove))
         .api_route("/rename/{id}", post(rename))
+        .api_route("/kind/{id}", post(set_kind))
         .api_route("/move/{id}", post(move_to))
         .api_route("/share/{id}", get(share_list).post(share_create))
         .api_route("/share/{id}/{token}", delete(share_revoke))
@@ -1857,6 +2024,120 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
         .route("/import", axum::routing::post(import))
         .route("/export/{id}", axum::routing::get(export).post(export_layout))
         .api_route("/csv_layouts", get(csv_layouts))
+}
+
+/// A shared deck's card list, in the same merged shape as a shared collection's.
+///
+/// Decks are bounded, so this reads the whole list and pages in memory. Rows are merged per
+/// `(uuid, finish, board)` and each carries the board it sits on, so a shared deck reads as the
+/// deck does rather than as one undifferentiated pile.
+async fn public_deck_cards(
+    state: &GathersState,
+    deck: &String,
+    query: &CollectionCardsQuery,
+    offset: usize,
+    limit: usize,
+) -> Result<(Vec<serde_json::Value>, usize), ApiError> {
+    let rows = {
+        let storage = &state.1.lock().await.storage;
+        storage
+            .deck(deck)
+            .cards()
+            .await
+            .map_err(|e| crate::storage_error("Failed to get cards from deck", e))?
+    };
+
+    let wanted: Vec<String> = if let Some(p) = query.provider.clone() {
+        vec![p]
+    } else {
+        query.providers
+            .as_deref()
+            .map(|s| s.split(',').map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    let enabled_plugins = enabled_plugin_providers(state).await;
+
+    let mut rows: Vec<_> = rows
+        .into_iter()
+        // Filtered before the total is taken, matching the collection count query: a page that
+        // served fewer rows than it claimed would paginate into nothing.
+        .filter(|r| !r.provider.starts_with("plugin-") || enabled_plugins.contains(&r.provider))
+        .filter(|r| wanted.is_empty() || wanted.contains(&r.provider))
+        .collect();
+
+    // Board is part of the key, so a shared deck shows its mainboard and sideboard apart as the
+    // deck view does, rather than folding them into one list
+    rows.sort_by(|a, b| (&a.board, &a.uuid, &a.finish).cmp(&(&b.board, &b.uuid, &b.finish)));
+    let mut merged: Vec<models::DeckCard> = Vec::new();
+    for row in rows {
+        match merged.last_mut() {
+            Some(prev)
+                if prev.uuid == row.uuid && prev.finish == row.finish && prev.board == row.board =>
+            {
+                prev.quantity = prev.quantity.saturating_add(row.quantity);
+                prev.want_quantity = prev.want_quantity.saturating_add(row.want_quantity);
+            }
+            _ => merged.push(row),
+        }
+    }
+
+    // Sorted after merging, so a database ORDER BY would have ordered the wrong rows.
+    // Matched exhaustively: a sort field added later should fail to compile here rather than
+    // be accepted and silently ignored.
+    if let Some(field) = &query.sort_by {
+        match field {
+            APICollectionSortField::TimeAdded => {
+                merged.sort_by(|a, b| a.time_added.cmp(&b.time_added))
+            }
+            APICollectionSortField::Quantity => merged.sort_by_key(|r| r.quantity),
+            APICollectionSortField::Provider => merged.sort_by(|a, b| a.provider.cmp(&b.provider)),
+            APICollectionSortField::WantQuantity => merged.sort_by_key(|r| r.want_quantity),
+        }
+        if query.sort_order == Some(APISortOrder::Desc) {
+            merged.reverse();
+        }
+    }
+
+    let total = merged.len();
+    let page: Vec<_> = merged.into_iter().skip(offset).take(limit).collect();
+
+    let mut ids_by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for row in &page {
+        ids_by_provider.entry(row.provider.clone()).or_default().push(row.uuid.clone());
+    }
+    let card_data = hydrate_collectibles(state, &ids_by_provider).await;
+
+    let cards = page
+        .into_iter()
+        .map(|row| {
+            let mut obj = card_data
+                .get(&row.uuid)
+                .map(card_to_public_json)
+                .unwrap_or_default();
+            let time_added = DateTime::parse_from_rfc3339(&row.time_added)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            obj.insert("id".to_string(), serde_json::Value::String(row.uuid));
+            obj.insert("finish".to_string(), serde_json::Value::String(row.finish));
+            obj.insert("quantity".to_string(), serde_json::Value::from(row.quantity));
+            obj.insert(
+                "wantQuantity".to_string(),
+                serde_json::Value::from(row.want_quantity),
+            );
+            // The board a row sits on, which a plain collection has no equivalent of; the shared
+            // page groups by it when it is there
+            obj.insert("board".to_string(), serde_json::Value::String(row.board));
+            obj.insert("collectionId".to_string(), serde_json::Value::String(deck.clone()));
+            obj.insert(
+                "timeAdded".to_string(),
+                serde_json::Value::String(time_added.to_rfc3339()),
+            );
+            obj.insert("provider".to_string(), serde_json::Value::String(row.provider));
+            serde_json::Value::Object(obj)
+        })
+        .collect();
+
+    Ok((cards, total))
 }
 
 /// Routes for read-only, shareable collection links. Distinct from
@@ -1901,6 +2182,22 @@ pub fn public_collection_routes() -> ApiRouter<GathersState> {
                     }),
                 )
             })?;
+
+        // A deck's cards live in `deck_cards`, so the collection queries below would report an
+        // empty page for one; serve the deck list instead
+        let kind = {
+            let storage = &state.1.lock().await.storage;
+            storage
+                .get_collection_kind(&collection_id)
+                .await
+                .map_err(|e| crate::storage_error("Failed to verify collection", e))?
+        };
+        if kind == Some(models::CollectionKind::Deck) {
+            let limit = query.limit.min(crate::MAX_PAGE_SIZE);
+            let (cards, total) =
+                public_deck_cards(&state, &collection_id, &query, query.offset, limit).await?;
+            return Ok(Json(PublicCollectionPage { cards, total }));
+        }
 
         let enabled_plugins = enabled_plugin_providers(&state).await;
         let collection_params = CollectionCardsParams {
@@ -2059,6 +2356,18 @@ mod value_breakdown_tests {
         assert_eq!(cur(&breakdown, "USD").wanted_value, 5.0);
         assert_eq!(breakdown.total_count, 1);
         assert_eq!(breakdown.priced_count, 1);
+    }
+
+    #[test]
+    fn wanted_foil_copy_is_priced_as_foil() {
+        // A deck can want a foil copy specifically; a collection only wants on the "" row
+        let cards = vec![card("a", "foil", 0, 2)];
+        let unit_prices = HashMap::from([("a".to_string(), usd(1.0, 6.0))]);
+        let purchase_totals = HashMap::new();
+
+        let breakdown = compute_value_breakdown(&cards, &unit_prices, &purchase_totals);
+
+        assert_eq!(cur(&breakdown, "USD").wanted_value, 12.0);
     }
 
     #[test]
@@ -2230,5 +2539,72 @@ mod value_breakdown_tests {
         assert_eq!(preferred_unit_prices(&prices, "USD"), Some(usd(1.0, 1.0)));
         // A currency nobody lists in falls back to cardmarket.
         assert_eq!(preferred_unit_prices(&prices, "GBP"), Some(priced(0.8, 2.0, "EUR")));
+    }
+}
+
+#[cfg(test)]
+mod collection_guard_tests {
+    use super::*;
+    use models::CollectionKind;
+    use persistence::SQLitePersistenceSystem;
+
+    async fn storage_with(name: &str, kind: CollectionKind) -> PersistenceSystem {
+        let mut storage = PersistenceSystem::SQLitePersistenceSystem(
+            SQLitePersistenceSystem::new(true, None).unwrap(),
+        );
+        storage.add_collection(name.to_string(), kind).await.unwrap();
+        storage
+    }
+
+    #[tokio::test]
+    async fn accepts_a_collection() {
+        let storage = storage_with("Binder", CollectionKind::Collection).await;
+        assert!(validate_collection(&storage, &"Binder".to_string()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unknown_collection() {
+        let storage = storage_with("Binder", CollectionKind::Collection).await;
+        let err = validate_collection(&storage, &"nope".to_string())
+            .await
+            .expect_err("no such collection");
+        assert!(err.1.error.contains("not found"), "{}", err.1.error);
+    }
+
+    /// The card-mutation endpoints all funnel through here, so this is what keeps a deck name
+    /// from writing an orphaned row into `cards`.
+    #[tokio::test]
+    async fn rejects_a_deck_and_points_at_the_deck_endpoint() {
+        let storage = storage_with("Burn", CollectionKind::Deck).await;
+        let err = validate_collection(&storage, &"Burn".to_string())
+            .await
+            .expect_err("a deck's cards do not live in `cards`");
+        assert!(err.1.error.contains("is a deck"), "{}", err.1.error);
+        assert!(err.1.error.contains("/api/deck/Burn/cards"), "{}", err.1.error);
+    }
+
+    /// `move_to` sends cards straight to `move_cards_between_collections`, which writes rows into
+    /// `cards` keyed by the destination name. A deck's contents are read from `deck_cards`, so
+    /// without this guard the cards would leave the source collection and be visible nowhere.
+    #[tokio::test]
+    async fn moving_cards_into_a_deck_is_refused() {
+        let storage = storage_with("Burn", CollectionKind::Deck).await;
+
+        let err = validate_collection(&storage, &"Burn".to_string())
+            .await
+            .expect_err("a deck cannot receive moved cards");
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.error.contains("is a deck"), "{}", err.1.error);
+    }
+
+    #[tokio::test]
+    async fn moving_cards_into_a_collection_is_allowed() {
+        let storage = storage_with("Binder", CollectionKind::Collection).await;
+        assert!(
+            validate_collection(&storage, &"Binder".to_string())
+                .await
+                .is_ok()
+        );
     }
 }

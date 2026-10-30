@@ -18,6 +18,7 @@ use tracing::{error, info, warn};
 
 use crate::collections::{collection_routes, public_collection_routes};
 use crate::collections::collections_models::APIUniqueMode;
+use crate::decks::{card_routes, deck_routes};
 use crate::mtg_api::mtg_routes;
 use crate::plugin_api::plugin_routes;
 use crate::pokemon_api::pokemon_routes;
@@ -27,6 +28,7 @@ use crate::settings_api::settings_routes;
 mod auto_download;
 mod backup_api;
 mod collections;
+mod decks;
 mod meta_api;
 mod mtg_api;
 mod plugin_api;
@@ -724,8 +726,9 @@ async fn get_system_info(
     Ok(Json(ret.get_system_info().await))
 }
 
-async fn serve_api(Extension(api): Extension<OpenApi>) -> impl axum::response::IntoResponse {
-    Json(api)
+async fn serve_api(Extension(api): Extension<Arc<OpenApi>>) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    Json(&*api).into_response()
 }
 
 fn openapi_doc() -> OpenApi {
@@ -745,6 +748,8 @@ fn api_router(api: &mut OpenApi) -> axum::Router<GathersState> {
         .nest("/api/riftbound", riftbound_routes())
         .nest("/api/pokemon", pokemon_routes())
         .nest("/api/collection", collection_routes())
+        .nest("/api/deck", deck_routes())
+        .nest("/api/cards", card_routes())
         .nest("/api/share", public_collection_routes())
         .nest("/api/settings", settings_routes())
         .nest("/api/plugins", plugin_routes())
@@ -1143,7 +1148,9 @@ async fn main() -> eyre::Result<()> {
         .layer(axum::middleware::from_fn_with_state(retrieval.clone(), feature_gate))
         .layer(axum::middleware::from_fn_with_state(allowed_origins, reject_cross_site))
         .layer(cors)
-        .layer(Extension(api))
+        // Behind an `Arc`: every route's layers are cloned for each connection,
+        // so a bare `OpenApi` costs ~230MB per open connection.
+        .layer(Extension(Arc::new(api)))
         .with_state((retrieval, storage));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
@@ -1234,7 +1241,14 @@ async fn reject_cross_site(
 
 /// Which setting, if any, has to be on for `path` to be served.
 fn required_feature(path: &str) -> Option<&'static str> {
-    if path.starts_with("/api/collection/") || path.starts_with("/api/share/") {
+    // `/api/deck/` counts as collections: a deck is a collection with a kind, so disabling
+    // collections has to close its endpoints too, not just hide them in the UI. `/api/cards/`
+    // likewise: availability reports what is owned and which decks hold it
+    if path.starts_with("/api/collection/")
+        || path.starts_with("/api/deck/")
+        || path.starts_with("/api/cards/")
+        || path.starts_with("/api/share/")
+    {
         return Some("collections");
     }
     let pricing = ["/api/mtg/prices", "/api/pokemon/prices"]
@@ -1465,6 +1479,11 @@ mod request_guard_tests {
     fn features_gate_their_endpoints() {
         assert_eq!(required_feature("/api/collection/list"), Some("collections"));
         assert_eq!(required_feature("/api/share/abc"), Some("collections"));
+        assert_eq!(required_feature("/api/deck/cards/Burn/list"), Some("collections"));
+        assert_eq!(required_feature("/api/deck/cards/Burn/move"), Some("collections"));
+        assert_eq!(required_feature("/api/deck/meta/Burn"), Some("collections"));
+        // Availability answers from `cards` and `deck_cards`, so it closes with them
+        assert_eq!(required_feature("/api/cards/availability"), Some("collections"));
         assert_eq!(required_feature("/api/mtg/prices"), Some("pricing"));
         assert_eq!(required_feature("/api/pokemon/prices/update"), Some("pricing"));
         assert_eq!(required_feature("/api/mtg/cards/search"), None);

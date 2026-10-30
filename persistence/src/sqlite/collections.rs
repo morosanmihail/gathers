@@ -1,14 +1,114 @@
-use models::CollectionID;
+use models::{CollectionID, CollectionKind, DEFAULT_BOARDS};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{CollectionInfo, PersistenceError};
 
-pub(super) fn add_collection(conn: &Connection, name: &CollectionID) -> eyre::Result<CollectionID> {
-    conn.execute(
-        "INSERT OR IGNORE INTO collection (name, can_remove) VALUES (?1, ?2)",
-        params![name, true],
+/// Creates a collection of the given kind.
+pub(super) fn add_collection(
+    conn: &Connection,
+    name: &CollectionID,
+    kind: CollectionKind,
+) -> eyre::Result<CollectionID> {
+    // `INSERT OR IGNORE` so re-adding an existing name is a no-op, including when the existing row
+    // has a *different* kind. A collection cannot be turned into a deck (or back) by re-adding it
+    // under the same name; set_collection_kind is the way to convert one
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO collection (name, can_remove, kind) VALUES (?1, ?2, ?3)",
+        params![name, true, kind.as_str()],
     )?;
+
+    // Only for a deck this call actually created: a no-op re-add must not resurrect boards the
+    // user has since deleted
+    if inserted > 0 && kind == CollectionKind::Deck {
+        super::deck_cards::create_default_boards(conn, name)?;
+    }
     Ok(name.clone())
+}
+
+/// Converts a collection to a deck or back, moving its cards between `cards` and `deck_cards`.
+///
+/// The two kinds store their cards in different tables, so this is a migration rather than a flag
+/// change: everything the collection holds is rewritten into the other table in one transaction,
+/// and the originals are dropped only once the copies are in place.
+///
+/// Purchase history is deliberately left where it is. It records what was paid and when, which
+/// stays true whatever the collection is called now, and a round trip through a deck would
+/// otherwise destroy it.
+///
+/// Returns `false` if there is no such collection. Converting to the kind it already has is a
+/// no-op, not an error.
+pub(super) fn set_collection_kind(
+    conn: &mut Connection,
+    name: &CollectionID,
+    kind: CollectionKind,
+) -> eyre::Result<bool> {
+    let Some(current) = get_collection_kind(conn, name)? else {
+        return Ok(false);
+    };
+    if current == kind {
+        return Ok(true);
+    }
+
+    let tx = conn.transaction()?;
+    match kind {
+        // Every card lands on the first default board: a collection has no notion of zones, so
+        // there is nothing to spread them across
+        CollectionKind::Deck => {
+            super::deck_cards::create_default_boards(&tx, name)?;
+            let board = DEFAULT_BOARDS[0];
+            tx.execute(
+                "INSERT INTO deck_cards (deck, uuid, finish, board, quantity, want_quantity, provider, timeadded, timeupdated)
+                 SELECT collection, uuid, finish, ?2, quantity, want_quantity, provider, timeadded, timeupdated
+                 FROM cards WHERE collection = ?1
+                 ON CONFLICT (deck, uuid, finish, board) DO UPDATE SET
+                   quantity = max(min(deck_cards.quantity + EXCLUDED.quantity, 2147483647), 0),
+                   want_quantity = max(min(deck_cards.want_quantity + EXCLUDED.want_quantity, 2147483647), 0)",
+                params![name, board],
+            )?;
+            tx.execute("DELETE FROM cards WHERE collection = ?1", params![name])?;
+        }
+        // Boards collapse: a collection is one undifferentiated pile, so the same card on two
+        // boards has to be summed rather than inserted twice against the (uuid, finish,
+        // collection) key
+        CollectionKind::Collection => {
+            tx.execute(
+                "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, provider, timeadded, timeupdated)
+                 SELECT uuid, finish, deck, SUM(quantity), SUM(want_quantity), MIN(provider), MIN(timeadded), MAX(timeupdated)
+                 FROM deck_cards WHERE deck = ?1 GROUP BY uuid, finish
+                 ON CONFLICT (uuid, finish, collection) DO UPDATE SET
+                   quantity = max(min(cards.quantity + EXCLUDED.quantity, 2147483647), 0),
+                   want_quantity = max(min(cards.want_quantity + EXCLUDED.want_quantity, 2147483647), 0)",
+                params![name],
+            )?;
+            tx.execute("DELETE FROM deck_cards WHERE deck = ?1", params![name])?;
+            tx.execute("DELETE FROM deck_boards WHERE deck = ?1", params![name])?;
+            // Build state describes a deck; a collection is never assembled or put in a box
+            tx.execute("DELETE FROM deck_meta WHERE deck = ?1", params![name])?;
+        }
+    }
+
+    tx.execute(
+        "UPDATE collection SET kind = ?2 WHERE name = ?1",
+        params![name, kind.as_str()],
+    )?;
+    tx.commit()?;
+    Ok(true)
+}
+
+/// A collection's kind, or `None` if no such collection exists.
+pub(super) fn get_collection_kind(
+    conn: &Connection,
+    name: &CollectionID,
+) -> eyre::Result<Option<CollectionKind>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT kind FROM collection WHERE name = ?1",
+            params![name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    raw.map(|k| k.parse::<CollectionKind>().map_err(eyre::Report::from))
+        .transpose()
 }
 
 /// `Some(can_remove)` if the collection exists.
@@ -41,6 +141,19 @@ pub(super) fn remove_collection(
         }
         if removable(conn, target)?.is_none() {
             return Err(PersistenceError::CollectionNotFound(target.clone()).into());
+        }
+        // Merging only makes sense between things that record ownership.
+        if get_collection_kind(conn, name)? == Some(CollectionKind::Deck) {
+            return Err(PersistenceError::InvalidInput(format!(
+                "Can't merge deck '{name}' into '{target}': a deck's cards are allocations, not owned cards"
+            ))
+            .into());
+        }
+        if get_collection_kind(conn, target)? == Some(CollectionKind::Deck) {
+            return Err(PersistenceError::InvalidInput(format!(
+                "Can't merge '{name}' into deck '{target}': a deck holds allocations, not owned cards"
+            ))
+            .into());
         }
         let query = "INSERT INTO cards (uuid, finish, collection, quantity, want_quantity, timeadded, timeupdated, provider)
             SELECT uuid, finish, ?1 as collection, quantity, want_quantity, timeadded, strftime('%Y-%m-%dT%H:%M:%SZ', 'now') as timeupdated, provider
@@ -92,14 +205,23 @@ pub(super) fn list_collections(
 }
 
 pub(super) fn list_collection_info(conn: &Connection) -> eyre::Result<Vec<CollectionInfo>> {
-    let mut stmt = conn.prepare("SELECT name, can_remove FROM collection")?;
+    let mut stmt = conn.prepare("SELECT name, can_remove, kind FROM collection")?;
     let rows = stmt.query_map(params![], |r| {
-        Ok(CollectionInfo {
-            name: r.get(0)?,
-            removable: r.get(1)?,
-        })
+        Ok((
+            r.get::<_, CollectionID>(0)?,
+            r.get::<_, bool>(1)?,
+            r.get::<_, String>(2)?,
+        ))
     })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    rows.map(|row| {
+        let (name, removable, kind) = row?;
+        Ok(CollectionInfo {
+            name,
+            removable,
+            kind: kind.parse()?,
+        })
+    })
+    .collect()
 }
 
 /// Must run inside a transaction, like `remove_collection`.
@@ -133,6 +255,7 @@ pub(super) fn rename_collection(
         "UPDATE share_links SET collection_id = ?1 WHERE collection_id = ?2",
         params![new_name, old_name],
     )?;
+    // `deck_cards` and `deck_meta` follow via ON UPDATE CASCADE; no manual handling needed
     Ok(())
 }
 

@@ -110,6 +110,12 @@ pub trait RetrievalSystemTrait {
     async fn update_prices(&self) -> eyre::Result<bool> {
         Ok(false)
     }
+
+    /// Forgets anything read from the price database, so the next lookup
+    /// reads whatever is at its path now. `update_prices` does this for the
+    /// instance it was called on (and its clones), but not for an instance
+    /// created separately, e.g. by reloading the system.
+    async fn reset_prices(&self) {}
 }
 
 #[enum_dispatch(RetrievalSystem)]

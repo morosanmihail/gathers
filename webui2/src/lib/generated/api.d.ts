@@ -1030,6 +1030,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collection/kind/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Converts a collection to a deck or back. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CollectionKindChange"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Collection"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/collection/move/{id}": {
         parameters: {
             query?: never;
@@ -1794,6 +1833,492 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deck/cards/{id}/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckCard"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/cards/{id}/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": number;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/cards/{id}/value_breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionValueBreakdown"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/cards/{id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /**
+             * @description A change applied to one card on one board.
+             *
+             *     Positive adds copies, negative removes them; each count is floored at zero. The two counts move
+             *     independently, so a copy can be acquired by sending `quantity: 1, wantQuantity: -1`.
+             *
+             *     Adding to a board the deck hasn't got declares it, board names being free-form.
+             */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeckCardAdjustment"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckCard"] | null;
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/cards/{id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Moves copies of a card from one of a deck's boards to another. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeckCardMove"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckCard"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/cards/{id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /**
+             * @description Moves copies of a card between a collection and one of a deck's boards.
+             *
+             *     A transfer rather than an allocation: the copies leave wherever they came from. Allocating a
+             *     card to a deck while keeping it in the collection is what the adjust endpoint is for.
+             */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeckCardTransfer"];
+                };
+            };
+            responses: {
+                /** @description How many copies a transfer actually moved, which is capped at what the source holds. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckCardTransferResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/boards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckBoard"][];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Renames one of a deck's boards, taking its cards with it. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BoardRename"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckBoard"][];
+                    };
+                };
+            };
+        };
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Adds a board to a deck. Already having one by that name is a no-op. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BoardCreate"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckBoard"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/boards/{id}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /**
+             * @description Sets the order of a deck's boards.
+             *
+             *     Boards left out keep their place after the ones listed, so a partial order can't drop one.
+             */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BoardReorder"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckBoard"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/boards/{id}/{board}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckBoard"][];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deck/meta/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether a deck is physically assembled, and where it is. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckMeta"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Whether a deck is physically assembled, and where it is. */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeckMeta"];
+                };
+            };
+            responses: {
+                /** @description Whether a deck is physically assembled, and where it is. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeckMeta"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cards/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AvailabilityRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CardAvailability"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/share/{token}": {
         parameters: {
             query?: never;
@@ -2241,6 +2766,11 @@ export interface components {
              */
             unique?: string | null;
         };
+        /**
+         * @description Server-local version of `models::CollectionKind` with `JsonSchema`.
+         * @enum {string}
+         */
+        APICollectionKind: "collection" | "deck";
         APICollectionSortField: ("TimeAdded" | "WantQuantity" | "Provider") | "Quantity";
         /** @enum {string} */
         APIEnergyType: "Fire" | "Water" | "Grass" | "Lightning" | "Psychic" | "Fighting" | "Darkness" | "Metal" | "Dragon" | "Fairy" | "Colorless" | "Energy";
@@ -2320,9 +2850,74 @@ export interface components {
              */
             provider: string | null;
         };
+        AvailabilityRequest: {
+            /** @description Card ids to report on. Empty yields an empty response. */
+            ids: string[];
+        };
+        /** @description Adds a board to a deck. Already having one by that name is a no-op. */
+        BoardCreate: {
+            board: string;
+        };
+        /** @description Renames one of a deck's boards, taking its cards with it. */
+        BoardRename: {
+            from: string;
+            to: string;
+        };
+        /**
+         * @description Sets the order of a deck's boards.
+         *
+         *     Boards left out keep their place after the ones listed, so a partial order can't drop one.
+         */
+        BoardReorder: {
+            boards: string[];
+        };
         BulkPricesQuery: {
             /** @default [] */
             ids: string[];
+        };
+        /** @description Where the copies of one card currently are. */
+        CardAvailability: {
+            /**
+             * Format: int32
+             * @description Copies allocated to decks that are currently built.
+             */
+            committed: number;
+            /**
+             * @description Which collections the owned copies are in, so a deck can show where the ones it is short
+             *     of are to be found.
+             */
+            copies: components["schemas"]["CardCopies"][];
+            /**
+             * Format: int32
+             * @description `owned - committed`. Goes negative when more copies are committed than owned, which is
+             *     reported rather than prevented.
+             */
+            free: number;
+            holdings: components["schemas"]["CardHolding"][];
+            id: string;
+            overCommitted: boolean;
+            /**
+             * Format: int32
+             * @description Copies owned across every collection.
+             */
+            owned: number;
+        };
+        /** @description How many copies of a card one collection holds. */
+        CardCopies: {
+            collection: string;
+            /** Format: int32 */
+            quantity: number;
+        };
+        /** @description One built deck's claim on a card, and where that deck physically is. */
+        CardHolding: {
+            /** @default  */
+            board: string;
+            deck: string;
+            /** @default  */
+            finish: string;
+            location?: string | null;
+            /** Format: int32 */
+            quantity: number;
         };
         CardIdentInner: {
             scryfallId: string;
@@ -2370,6 +2965,14 @@ export interface components {
         };
         Collection: {
             id: string;
+            /**
+             * @description Whether this holds owned cards or is a deck list.
+             *
+             *     Defaults to `collection`, so a client that predates decks, or one creating an ordinary
+             *     collection, can keep omitting it.
+             * @default collection
+             */
+            kind: components["schemas"]["APICollectionKind"];
         };
         CollectionAddResponse: {
             id: string;
@@ -2425,9 +3028,20 @@ export interface components {
             sort_by?: components["schemas"]["APICollectionSortField"] | null;
             sort_order?: components["schemas"]["APISortOrder"] | null;
         };
+        /** @description Converts a collection to a deck or back. */
+        CollectionKindChange: {
+            kind: components["schemas"]["APICollectionKind"];
+        };
         /** @description An entry of `/api/collection/list`. */
         CollectionListEntry: {
             id: string;
+            /**
+             * @description Whether this holds owned cards or is a deck list.
+             *
+             *     A client uses it to decide whether a card edit belongs on `/api/collection` or
+             *     `/api/deck`.
+             */
+            kind: components["schemas"]["APICollectionKind"];
             /**
              * @description False for the default collection, which can't be deleted (only
              *     emptied into another collection via `keepCardsInCollection`).
@@ -2595,8 +3209,10 @@ export interface components {
             untracked_value: number;
             /**
              * Format: double
-             * @description Total price of cards on the wishlist (`want_quantity`), independent of
-             *     what's owned. Not included in `total_value`.
+             * @description For a collection, the total price of cards on the wishlist
+             *     (`want_quantity`), independent of what's owned. For a deck, the price
+             *     of the wanted copies not yet had, i.e. what completing it would cost.
+             *     Not included in `total_value` either way.
              */
             wanted_value: number;
         };
@@ -2619,6 +3235,160 @@ export interface components {
             day: string;
             /** Format: double */
             price: number;
+        };
+        /** @description One zone of a deck, and where it sits in the deck's order. */
+        DeckBoard: {
+            board: string;
+            /** Format: int32 */
+            position: number;
+        };
+        /**
+         * @description A card allocated to one zone of one deck.
+         *
+         *     Distinct from `collections_models::CollectionCard` in carrying a `board`. It keeps the same
+         *     owned/wanted pair: a deck records both the copies it has to hand and the ones it still calls
+         *     for, and a card can be both at once.
+         */
+        DeckCard: {
+            /**
+             * @description Which zone of the deck this belongs to.
+             *
+             *     Free-form text the user can rename, rather than a fixed main/side pair: MTG has a mainboard
+             *     and sideboard (and a command zone for Commander), Riftbound has a main deck, a legend,
+             *     runes, and battlefields, and Pokemon has a single deck. A new deck starts with `"Mainboard"`
+             *     and `"Sideboard"`.
+             * @default
+             */
+            board: string;
+            /**
+             * @description Which printing/finish this allocation is for; see `collections_models::CardToAdd::finish`.
+             * @default
+             */
+            finish: string;
+            id: string;
+            /** @default  */
+            provider: string;
+            /**
+             * Format: int32
+             * @description Copies the deck has to hand.
+             */
+            quantity: number;
+            /**
+             * Format: date-time
+             * @default 1970-01-01T00:00:00Z
+             */
+            timeAdded: string;
+            /**
+             * Format: date-time
+             * @default 1970-01-01T00:00:00Z
+             */
+            timeUpdated: string;
+            /**
+             * Format: int32
+             * @description Copies the deck calls for. Not added to `quantity`: the two overlap, so a deck's size
+             *     counts the greater of them per card.
+             */
+            wantQuantity: number;
+        };
+        /**
+         * @description A change applied to one card on one board.
+         *
+         *     Positive adds copies, negative removes them; each count is floored at zero. The two counts move
+         *     independently, so a copy can be acquired by sending `quantity: 1, wantQuantity: -1`.
+         *
+         *     Adding to a board the deck hasn't got declares it, board names being free-form.
+         */
+        DeckCardAdjustment: {
+            /**
+             * @description Defaults to the deck's first board when omitted.
+             * @default
+             */
+            board: string;
+            /** @default  */
+            finish: string;
+            id: string;
+            /**
+             * @description Which system/plugin this card came from. Optional for the same reason as
+             *     `collections_models::CardToAdd::provider`: when omitted the server probes the configured
+             *     systems for the id.
+             * @default null
+             */
+            provider: string | null;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            quantity: number;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            wantQuantity: number;
+        };
+        /** @description Moves copies of a card from one of a deck's boards to another. */
+        DeckCardMove: {
+            /** @default  */
+            finish: string;
+            /** @default  */
+            fromBoard: string;
+            id: string;
+            /**
+             * Format: uint32
+             * @description Copies to move, unsigned as a transfer's count is. The two boards already say which way
+             *     they go, so there is nothing for a sign to mean.
+             * @default 0
+             */
+            quantity: number;
+            /** @default  */
+            toBoard: string;
+            /**
+             * Format: uint32
+             * @default 0
+             */
+            wantQuantity: number;
+        };
+        /**
+         * @description Moves copies of a card between a collection and one of a deck's boards.
+         *
+         *     A transfer rather than an allocation: the copies leave wherever they came from. Allocating a
+         *     card to a deck while keeping it in the collection is what the adjust endpoint is for.
+         */
+        DeckCardTransfer: {
+            /**
+             * @description Defaults to the deck's first board when omitted.
+             * @default
+             */
+            board: string;
+            /** @description The collection the copies come from, or go back to. */
+            collection: string;
+            /** @default  */
+            finish: string;
+            id: string;
+        } & ({
+            /** @constant */
+            direction: "intoDeck";
+            /** Format: uint32 */
+            quantity: number;
+        } | {
+            /** @constant */
+            direction: "outOfDeck";
+            /** Format: uint32 */
+            quantity: number;
+        });
+        /** @description How many copies a transfer actually moved, which is capped at what the source holds. */
+        DeckCardTransferResult: {
+            /** Format: int32 */
+            moved: number;
+        };
+        /** @description Whether a deck is physically assembled, and where it is. */
+        DeckMeta: {
+            /**
+             * @description A built deck is assembled in real life, so its cards are committed and unavailable to
+             *     another deck. An unbuilt deck is only a list.
+             */
+            built: boolean;
+            location?: string | null;
+            notes?: string | null;
         };
         DownloadProgressInfo: {
             /** Format: uint64 */

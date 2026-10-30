@@ -1335,6 +1335,164 @@ label.field-label {
 .rarity-M { color: #c06060; }
 
 /* ─── Responsive ───────────────────────────────────────── */
+/* ─── Decks ─────────────────────────────────────────────────────────────── */
+
+.tab-kind-glyph { margin-right: 4px; opacity: 0.75; }
+
+.add-collection-kind { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
+
+.deck-add-board,
+.deck-built-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.82rem;
+	color: var(--text2);
+	white-space: nowrap;
+}
+
+.deck-add-board .select { height: 28px; padding: 3px 6px; font-size: 0.82rem; }
+.deck-location-input { width: 210px; height: 28px; padding: 3px 8px; font-size: 0.82rem; }
+
+.deck-boards {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	padding: 8px 0;
+}
+
+.deck-board-header {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	padding: 0 4px 6px;
+	border-bottom: 1px solid var(--border);
+}
+
+.deck-board-title { font-size: 0.96rem; font-weight: 600; margin: 0; }
+.deck-board-count { font-size: 0.78rem; color: var(--text2); }
+.deck-board-empty { font-size: 0.82rem; color: var(--text2); padding: 10px 4px; }
+
+.deck-row-list { display: flex; flex-direction: column; }
+
+.deck-row {
+	display: grid;
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 4px;
+	border-bottom: 1px solid var(--border);
+	cursor: pointer;
+}
+
+.deck-row:hover { background: var(--surface2); }
+
+.deck-row-name { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.deck-row-finish { font-size: 0.7rem; color: var(--text2); text-transform: lowercase; }
+.deck-row-set { font-size: 0.78rem; color: var(--text2); }
+.deck-row-note { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.deck-row-controls {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+/* The dropdowns take columns of their own rather than wrapping under the steppers, which
+   doubled the height of every row. Fixed widths, since each row is a separate grid and only
+   matching tracks keep the columns aligned. */
+.deck-row-list.has-move .deck-row { grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 120px; }
+.deck-row-list.has-transfer .deck-row { grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 140px; }
+.deck-row-list.has-move.has-transfer .deck-row {
+	grid-template-columns: 1fr 110px minmax(0, 1.2fr) 168px 120px 140px;
+}
+.deck-row-select { min-width: 0; }
+.deck-row-select .deck-move-select { width: 100%; }
+
+/* Owned and wanted sit side by side and mean different things, so each stepper is labelled */
+.qty-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.qty-label {
+	font-size: 0.62rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text2);
+}
+
+.deck-move-select { height: 24px; padding: 1px 4px; font-size: 0.72rem; }
+
+/* Grid form of a deck board. The stepper is always visible, since changing a count is the
+   common edit; the move control appears on hover or keyboard focus, so a wall of tiles isn't
+   also a wall of dropdowns. */
+.deck-tile-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 4px 8px 6px;
+	border-top: 1px solid var(--border);
+}
+
+/* The move control shares the set code's line, pushed to the right and capped so a long board
+   name can't run past the tile's edge */
+.deck-tile-meta { align-items: center; }
+
+.deck-tile-move {
+	margin-left: auto;
+	max-width: 60%;
+	min-width: 0;
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+
+.deck-tile:hover .deck-tile-move,
+.deck-tile:focus-within .deck-tile-move { opacity: 1; }
+
+/* Coarse pointers have no hover, so the control would be unreachable. */
+@media (hover: none) {
+	.deck-tile-move { opacity: 1; }
+}
+
+.deck-action-error {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 20px 8px;
+	padding: 6px 10px;
+	border-radius: var(--radius);
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--danger);
+	font-size: 0.8rem;
+}
+
+/* On a tile the note sits between the card body and the controls, so it carries its own
+   padding rather than inheriting a row's. */
+.deck-tile-note { padding: 4px 8px 0; }
+
+.deck-badge {
+	font-size: 0.7rem;
+	padding: 1px 6px;
+	border-radius: var(--radius);
+	background: var(--surface3);
+	color: var(--text2);
+	white-space: nowrap;
+}
+
+.deck-badge-warn {
+	background: color-mix(in srgb, var(--danger) 18%, transparent);
+	color: var(--danger);
+}
+
+.deck-badge-want {
+	background: color-mix(in srgb, var(--accent) 18%, transparent);
+	color: var(--accent);
+}
+
+.deck-badge-built {
+	background: color-mix(in srgb, var(--success) 18%, transparent);
+	color: var(--success);
+	margin-left: 8px;
+}
+
 @media (max-width: 860px) {
 	.search-layout { grid-template-columns: 1fr; min-height: 0; }
 	.search-sidebar {
@@ -1417,3 +1575,32 @@ label.field-label {
 	.stats-grid { grid-template-columns: 1fr; }
 	.collections-overview { grid-template-columns: 1fr 1fr; }
 }
+
+/* Board management. Shown on demand rather than always: renaming and reordering boards is a
+   setup task, not something done while building a list. */
+.deck-board-manager {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px 20px;
+	margin: 0 20px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface2);
+}
+
+.deck-board-add { display: flex; gap: 8px; align-items: center; }
+.deck-board-add .input { flex: 1; max-width: 360px; }
+
+.deck-board-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.deck-board-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 0;
+}
+
+.deck-board-row-name { font-weight: 600; }
+.deck-board-row-count { font-size: 0.72rem; color: var(--text2); margin-right: auto; }
+.deck-board-row .input { height: 28px; padding: 2px 8px; margin-right: auto; max-width: 280px; }

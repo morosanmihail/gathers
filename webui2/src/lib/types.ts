@@ -8,6 +8,44 @@ export type ViewMode = 'grid' | 'list';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
 
 export type Collection = components['schemas']['CollectionListEntry'];
+export type CollectionKind = components['schemas']['APICollectionKind'];
+
+export function isDeck(collection: { kind: CollectionKind }): boolean {
+	return collection.kind === 'deck';
+}
+
+// Raw response from /api/deck/{id}/cards: no card details, one row per (uuid, finish, board).
+// Carries the same owned/wanted pair as a collection entry, plus the board it sits on.
+export type DeckEntry = components['schemas']['DeckCard'];
+
+/** A deck entry merged with its card detail fields, ready to render. */
+export interface DeckCard extends PartialBy<DeckEntry, 'timeAdded' | 'timeUpdated' | 'provider' | 'finish' | 'board'> {
+	name: string;
+	image?: string;
+	setCode?: string;
+	collectorNumber?: string;
+	rarity?: string;
+	imageUrl?: string;
+	finishes?: string[];
+}
+
+export type CardAvailability = components['schemas']['CardAvailability'];
+export type DeckMeta = components['schemas']['DeckMeta'];
+
+/**
+ * One zone of a deck. Names are free-form and user-editable, so they are shown
+ * verbatim rather than mapped through a label table; the server also decides
+ * the order, which is why these come from the API instead of the card rows.
+ */
+export type DeckBoard = components['schemas']['DeckBoard'];
+
+/** Which way a card transfer between a collection and a deck board goes. */
+export type TransferDirection = components['schemas']['DeckCardTransfer']['direction'];
+
+/** How many of a deck's slots a row fills: owned and wanted overlap, so never their sum. */
+export function deckSlots(card: { quantity: number; wantQuantity: number }): number {
+	return Math.max(card.quantity, card.wantQuantity);
+}
 
 export type SystemInfo = components['schemas']['SystemInfo'];
 // One way a system can collapse search results that share a card (MTG: prints / cards / art).

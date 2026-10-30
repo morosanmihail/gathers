@@ -1,8 +1,14 @@
+use std::num::NonZeroU32;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: String,
+    /// Whether this is a plain collection or a deck. Optional on the way out so older servers
+    /// deserialise, and skipped on the way in so `add_collection` keeps sending the pre-deck body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CollectionKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +182,21 @@ pub struct DatedPrice {
     pub price: f64,
 }
 
+/// `/api/{collection,deck}/cards/{id}/value_breakdown`: totals per currency.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueBreakdown {
+    pub currencies: Vec<CurrencyValue>,
+    pub priced_count: usize,
+    pub total_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyValue {
+    pub currency: String,
+    pub total_value: f64,
+    pub wanted_value: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueCardEntry {
     pub card_uuid: String,
@@ -230,4 +251,174 @@ pub struct MtgCard {
     pub type_line: String,
     #[serde(rename = "setName", default)]
     pub set_name: String,
+}
+
+// ── decks ────────────────────────────────────────────────────────────────────
+
+/// Whether a collection holds owned cards or is a deck list.
+///
+/// Serialised lowercase to match `APICollectionKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectionKind {
+    Collection,
+    Deck,
+}
+
+/// Body for `/api/collection/add` when the kind matters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionToAdd {
+    pub id: String,
+    pub kind: CollectionKind,
+}
+
+/// A card allocated to one board of a deck.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCard {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    /// Which zone of the deck: `"Mainboard"` and `"Sideboard"` by default, or whatever the user
+    /// has renamed them to.
+    #[serde(default)]
+    pub board: String,
+    pub quantity: i32,
+    /// Copies the deck calls for; never added to `quantity`, since the two overlap.
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
+    #[serde(default)]
+    pub provider: String,
+}
+
+impl DeckCard {
+    /// How many of the deck's slots this row accounts for.
+    pub fn slots(&self) -> i32 {
+        self.quantity.max(self.want_quantity)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCardAdjustment {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub quantity: i32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckCardMove {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    #[serde(rename = "fromBoard")]
+    pub from_board: String,
+    #[serde(rename = "toBoard")]
+    pub to_board: String,
+    #[serde(default)]
+    pub quantity: u32,
+    #[serde(rename = "wantQuantity", default)]
+    pub want_quantity: u32,
+}
+
+/// One zone of a deck, and where it sits in the deck's order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckBoard {
+    pub board: String,
+    pub position: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardCreate {
+    pub board: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardRename {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardReorder {
+    pub boards: Vec<String>,
+}
+
+/// Which way a transfer goes, and how many copies go that way.
+///
+/// The count rides on the variant so the two can't disagree; adjacently tagged, so the wire form
+/// is still a `direction` and a `quantity` field.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "direction", content = "quantity", rename_all = "camelCase")]
+pub enum Transfer {
+    IntoDeck(NonZeroU32),
+    OutOfDeck(NonZeroU32),
+}
+
+/// Moves copies between a collection and one of a deck's boards.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeckCardTransfer {
+    pub id: String,
+    #[serde(default)]
+    pub finish: String,
+    pub collection: String,
+    #[serde(default)]
+    pub board: String,
+    #[serde(flatten)]
+    pub transfer: Transfer,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeckCardTransferResult {
+    pub moved: i32,
+}
+
+/// Converts a collection to a deck or back.
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionKindChange {
+    pub kind: CollectionKind,
+}
+
+/// Whether a deck is physically assembled, and where it is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckMeta {
+    pub built: bool,
+    pub location: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AvailabilityRequest {
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CardAvailability {
+    pub id: String,
+    pub owned: i32,
+    pub committed: i32,
+    pub free: i32,
+    #[serde(rename = "overCommitted")]
+    pub over_committed: bool,
+    pub holdings: Vec<CardHolding>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CardHolding {
+    pub deck: String,
+    pub location: Option<String>,
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub finish: String,
+    pub quantity: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionRenameRequest {
+    pub new_id: String,
 }

@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn test_timeupdated_equals_timeadded_on_create() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 2, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card1".to_string(), "foil", 1, OLD_TIME, "").await.unwrap();
     assert_eq!(get_time_updated(&p, &col, "card1", "").await.unwrap(), OLD_TIME);
@@ -13,7 +13,7 @@ async fn test_timeupdated_equals_timeadded_on_create() {
 #[tokio::test]
 async fn test_timeupdated_changes_on_quantity_modification() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 2, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card1".to_string(), "", 3, OLD_TIME, "").await.unwrap();
     assert_ne!(get_time_updated(&p, &col, "card1", "").await.unwrap(), OLD_TIME);
@@ -22,7 +22,7 @@ async fn test_timeupdated_changes_on_quantity_modification() {
 #[tokio::test]
 async fn test_timeupdated_changes_on_foil_quantity_modification() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 2, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col, &"card1".to_string(), "foil", 2, OLD_TIME, "").await.unwrap();
     // Leaves 1 copy — the "foil" row survives (rather than being purged at
@@ -34,8 +34,8 @@ async fn test_timeupdated_changes_on_foil_quantity_modification() {
 #[tokio::test]
 async fn test_timeupdated_updated_on_move_source() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 5, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col_a, &"card1".to_string(), "foil", 2, OLD_TIME, "").await.unwrap();
 
@@ -50,8 +50,8 @@ async fn test_timeupdated_updated_on_move_source() {
 #[tokio::test]
 async fn test_timeupdated_updated_on_move_destination_existing_card() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 5, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col_b, &"card1".to_string(), "", 1, OLD_TIME, "").await.unwrap();
 
@@ -66,8 +66,8 @@ async fn test_timeupdated_updated_on_move_destination_existing_card() {
 #[tokio::test]
 async fn test_timeupdated_updated_on_remove_collection_merge() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col_a = p.add_collection("Collection A".to_string()).await.unwrap();
-    let col_b = p.add_collection("Collection B".to_string()).await.unwrap();
+    let col_a = new_collection(&mut p, "Collection A".to_string()).await;
+    let col_b = new_collection(&mut p, "Collection B".to_string()).await;
     p.add_card_to_collection(&col_a, &"card1".to_string(), "", 3, OLD_TIME, "").await.unwrap();
     p.add_card_to_collection(&col_b, &"card1".to_string(), "", 2, OLD_TIME, "").await.unwrap();
     p.remove_collection(&col_a, Some(col_b.clone())).await.unwrap();

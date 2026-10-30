@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn test_add_card_to_collection() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     let cid = add_card(&mut p, &col, &"12345".to_string(), 2, 1).await;
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 100)).await.unwrap();
@@ -30,7 +30,7 @@ async fn test_add_card_to_collection() {
 #[tokio::test]
 async fn test_add_cards_to_collection() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     let t = OLD_TIME.to_string();
 
     p.add_cards_to_collection(
@@ -77,7 +77,7 @@ async fn test_add_cards_to_collection() {
 #[tokio::test]
 async fn test_add_cards_to_collection_empty_slice() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     let result = p.add_cards_to_collection(&col, &[]).await.unwrap();
     assert!(result.is_empty());
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(0, 10)).await.unwrap();
@@ -87,7 +87,7 @@ async fn test_add_cards_to_collection_empty_slice() {
 #[tokio::test]
 async fn test_quantity_floor_cannot_go_negative() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     add_card(&mut p, &col, &"card1".to_string(), 3, 2).await;
     add_card(&mut p, &col, &"card1".to_string(), -100, -1).await;
@@ -110,7 +110,7 @@ async fn test_quantity_floor_cannot_go_negative() {
 #[tokio::test]
 async fn test_remove_never_added_card_creates_no_ghost_row() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     p.add_card_to_collection(&col, &"never-added".to_string(), "foil", -3, OLD_TIME, "")
         .await
@@ -123,7 +123,7 @@ async fn test_remove_never_added_card_creates_no_ghost_row() {
 #[tokio::test]
 async fn test_want_negative_on_never_wanted_card_creates_no_ghost_row() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     let card = p.adjust_want_quantity(&col, &"never-wanted".to_string(), -7, "").await.unwrap();
     assert_eq!(card.want_quantity, 0, "want floors at 0 even starting from nothing");
@@ -137,7 +137,7 @@ async fn test_want_negative_on_never_wanted_card_creates_no_ghost_row() {
 #[tokio::test]
 async fn test_get_cards_in_collection_paginated() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     for i in 0..10 {
         add_card(&mut p, &col, &(1000 + i).to_string(), 1, 0).await;
     }
@@ -162,7 +162,7 @@ async fn test_get_cards_in_collection_paginated() {
 #[tokio::test]
 async fn test_get_cards_count_with_providers_filter() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 2, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"mtg2".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"rb1".to_string(), "", 1, OLD_TIME, "RiftboundSQLite").await.unwrap();
@@ -185,7 +185,7 @@ async fn test_get_cards_count_with_providers_filter() {
 #[tokio::test]
 async fn test_adjust_want_quantity_creates_wishlist_only_row() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     let card = p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
     assert_eq!(card.quantity, 0);
@@ -201,7 +201,7 @@ async fn test_adjust_want_quantity_creates_wishlist_only_row() {
 #[tokio::test]
 async fn test_adjust_want_quantity_does_not_touch_owned_quantity() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 2, 1).await;
 
     p.adjust_want_quantity(&col, &"card1".to_string(), 4, "mtg").await.unwrap();
@@ -217,7 +217,7 @@ async fn test_adjust_want_quantity_does_not_touch_owned_quantity() {
 #[tokio::test]
 async fn test_adjust_want_quantity_accumulates() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     p.adjust_want_quantity(&col, &"card1".to_string(), 1, "mtg").await.unwrap();
     p.adjust_want_quantity(&col, &"card1".to_string(), 1, "mtg").await.unwrap();
@@ -231,7 +231,7 @@ async fn test_adjust_want_quantity_accumulates() {
 #[tokio::test]
 async fn test_adjust_want_quantity_clamps_negative_to_zero() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     p.adjust_want_quantity(&col, &"card1".to_string(), 2, "mtg").await.unwrap();
     let card = p.adjust_want_quantity(&col, &"card1".to_string(), -100, "mtg").await.unwrap();
@@ -241,7 +241,7 @@ async fn test_adjust_want_quantity_clamps_negative_to_zero() {
 #[tokio::test]
 async fn test_adjust_want_quantity_to_zero_purges_wishlist_only_row() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
 
     p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
     p.adjust_want_quantity(&col, &"card1".to_string(), -3, "mtg").await.unwrap();
@@ -253,7 +253,7 @@ async fn test_adjust_want_quantity_to_zero_purges_wishlist_only_row() {
 #[tokio::test]
 async fn test_owned_card_survives_want_quantity_cleared_to_zero() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Test Collection".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Test Collection".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 1, 0).await;
 
     p.adjust_want_quantity(&col, &"card1".to_string(), 3, "mtg").await.unwrap();
@@ -268,7 +268,7 @@ async fn test_owned_card_survives_want_quantity_cleared_to_zero() {
 #[tokio::test]
 async fn test_get_cards_count_no_provider_filter() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"card1".to_string(), "", 1, OLD_TIME, "A").await.unwrap();
     p.add_card_to_collection(&col, &"card2".to_string(), "", 1, OLD_TIME, "B").await.unwrap();
 
@@ -280,7 +280,7 @@ async fn test_get_cards_count_no_provider_filter() {
 
 async fn plugin_scope_fixture() -> (SQLitePersistenceSystem, String) {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     p.add_card_to_collection(&col, &"mtg1".to_string(), "", 1, OLD_TIME, "MagicSQLite").await.unwrap();
     p.add_card_to_collection(&col, &"book1".to_string(), "", 1, OLD_TIME, "plugin-books").await.unwrap();
     p.add_card_to_collection(&col, &"comic1".to_string(), "", 1, OLD_TIME, "plugin-comics").await.unwrap();
@@ -339,7 +339,7 @@ async fn test_plugin_scope_combines_with_provider_filter() {
 #[tokio::test]
 async fn test_quantities_saturate_instead_of_breaking_the_collection() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Big".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Big".to_string()).await;
     for _ in 0..2 {
         p.add_card_to_collection(&col, &"card1".to_string(), "", i32::MAX, OLD_TIME, "mtg").await.unwrap();
         p.adjust_want_quantity(&col, &"card1".to_string(), i32::MAX, "mtg").await.unwrap();
@@ -352,7 +352,7 @@ async fn test_quantities_saturate_instead_of_breaking_the_collection() {
 #[tokio::test]
 async fn test_paginated_with_huge_offset_and_limit() {
     let mut p = SQLitePersistenceSystem::new(true, None).unwrap();
-    let col = p.add_collection("Col".to_string()).await.unwrap();
+    let col = new_collection(&mut p, "Col".to_string()).await;
     add_card(&mut p, &col, &"card1".to_string(), 1, 0).await;
     let cards = p.get_cards_in_collection_paginated(&col, CollectionCardsParams::new(usize::MAX, 10)).await.unwrap();
     assert!(cards.is_empty());

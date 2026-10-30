@@ -7,6 +7,7 @@
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
 	import { searchMtg, searchRiftbound, searchPokemon, searchPlugin, addCardToCollection, providerFromActiveSystem, pricesFetcher, PAGE_SIZE } from '$lib/api';
 	import { app } from '$lib/state.svelte';
+	import { isDeck } from '$lib/types';
 	import { defaultFilters, finishLabel } from '$lib/types';
 	import type { AnyCard, CollectionCard, CardPrices, SearchFilters } from '$lib/types';
 	import { currencySymbol, finishPrice, preferredCurrency } from '$lib/currency.svelte';
@@ -40,9 +41,13 @@
 		}
 	});
 
+	// Adding from here goes through the collection endpoint, which rejects a deck, since a deck's
+	// cards live in a separate table. Offer only what can actually receive a card.
+	const addableCollections = $derived(app.collections.filter(c => !isDeck(c)));
+
 	$effect(() => {
-		if (app.collections.length > 0 && !addCollection) {
-			addCollection = app.collections[0].id;
+		if (addableCollections.length > 0 && !addCollection) {
+			addCollection = addableCollections[0].id;
 		}
 	});
 
@@ -302,7 +307,7 @@
 			<p>Add <strong>{addTarget.name}</strong>{addFinish ? ` (${finishLabel(addFinish)})` : ''} to:</p>
 			{#if app.collections.length > 0}
 				<select class="input" bind:value={addCollection} style="margin-bottom: 10px;">
-					{#each app.collections as col}
+					{#each addableCollections as col}
 						<option value={col.id}>{col.id}</option>
 					{/each}
 				</select>

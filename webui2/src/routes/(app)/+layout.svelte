@@ -5,12 +5,15 @@
 	import { app, applyTheme, setViewMode } from '$lib/state.svelte';
 	import { addCollection, invalidateCache } from '$lib/api';
 	import { themes } from '$lib/themes/index';
+	import { isDeck } from '$lib/types';
+	import type { CollectionKind } from '$lib/types';
 
 	let { children } = $props();
 
 	let themeOpen = $state(false);
 	let addColOpen = $state(false);
 	let newColName = $state('');
+	let newColKind = $state<CollectionKind>('collection');
 	let addColError = $state('');
 
 	onMount(async () => {
@@ -22,14 +25,40 @@
 		} else if (app.ready) {
 			// Collections disabled — redirect away from collection routes
 			const path = $page.url.pathname;
-			if (path === '/' || path.startsWith('/collection/')) goto('/search');
+			if (path === '/' || path.startsWith('/collection/') || path.startsWith('/deck/')) goto('/search');
 		}
 	});
 
-	// Derive current collection from URL
-	const currentCollection = $derived($page.url.pathname.startsWith('/collection/')
-		? decodeURIComponent($page.url.pathname.split('/')[2] ?? '')
-		: '');
+	// Derive current collection or deck from URL. Decks get a separate route, since their page has
+	// boards and a build state rather than prices and wants.
+	const currentCollection = $derived(
+		$page.url.pathname.startsWith('/collection/') || $page.url.pathname.startsWith('/deck/')
+			? decodeURIComponent($page.url.pathname.split('/')[2] ?? '')
+			: ''
+	);
+
+	// Grouped rather than interleaved, and divided the way the tab bar already divides its other
+	// groups: what is owned and what is to be played are different kinds of thing, and the deck
+	// glyph alone is easy to miss in a long row.
+	const collectionTabs = $derived(app.collections.filter((c) => !isDeck(c)));
+	const deckTabs = $derived(app.collections.filter((c) => isDeck(c)));
+
+	let tabBar = $state<HTMLElement | null>(null);
+
+	// The tab bar scrolls sideways rather than wrapping, and hides its scrollbar, so a tab past
+	// the right edge is reachable but invisible: land on one by URL and nothing on screen is
+	// marked current. Decks share the bar, so overflowing it is now ordinary.
+	$effect(() => {
+		// The active tab changes with the route, and the tabs themselves don't exist until the
+		// collections have loaded, so both are read here.
+		if (!$page.url.pathname || app.collections.length === 0 || !tabBar) return;
+
+		// `nearest` on both axes so an already-visible tab isn't moved, and the page doesn't jump
+		// vertically to chase one that isn't.
+		tabBar
+			.querySelector('.tab-item.active')
+			?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+	});
 
 
 	function selectTheme(t: string) {
@@ -43,12 +72,14 @@
 		if (!name) return;
 		addColError = '';
 		try {
-			await addCollection(name);
+			await addCollection(name, newColKind);
 			invalidateCache('collections');
 			await app.loadCollections();
+			const kind = newColKind;
 			newColName = '';
+			newColKind = 'collection';
 			addColOpen = false;
-			goto(`/collection/${encodeURIComponent(name)}`);
+			goto(`/${kind === 'deck' ? 'deck' : 'collection'}/${encodeURIComponent(name)}`);
 		} catch (err) {
 			addColError = String(err);
 		}
@@ -148,7 +179,7 @@
 		</div>
 
 		<!-- ─── Tab bar ─── -->
-		<div class="tab-bar">
+		<div class="tab-bar" bind:this={tabBar}>
 			<a href="/" class="tab-item" class:active={$page.url.pathname === '/'}>Home</a>
 			<a href="/search" class="tab-item" class:active={$page.url.pathname === '/search'}>
 				<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -157,15 +188,29 @@
 				Search
 			</a>
 
-			{#if app.collectionsEnabled && app.collections.length > 0}
+			{#if app.collectionsEnabled && collectionTabs.length > 0}
 				<div class="tab-divider"></div>
-				{#each app.collections as col}
+				{#each collectionTabs as col}
 					<a
 						href="/collection/{encodeURIComponent(col.id)}"
 						class="tab-item"
 						class:active={currentCollection === col.id}
 					>
 						{col.id}
+					</a>
+				{/each}
+			{/if}
+
+			{#if app.collectionsEnabled && deckTabs.length > 0}
+				<div class="tab-divider"></div>
+				{#each deckTabs as deck}
+					<a
+						href="/deck/{encodeURIComponent(deck.id)}"
+						class="tab-item"
+						class:active={currentCollection === deck.id}
+					>
+						<span class="tab-kind-glyph" title="Deck">🂠</span>
+						{deck.id}
 					</a>
 				{/each}
 			{/if}
@@ -179,9 +224,13 @@
 							class="input"
 							style="width: 160px; height: 28px; padding: 3px 8px; font-size: 0.82rem;"
 							bind:value={newColName}
-							placeholder="Collection name…"
+							placeholder={newColKind === 'deck' ? 'Deck name…' : 'Collection name…'}
 							autofocus
 						/>
+						<select class="select add-collection-kind" bind:value={newColKind} title="A deck holds a list you intend to play; a collection holds what you own">
+							<option value="collection">Collection</option>
+							<option value="deck">Deck</option>
+						</select>
 						<button type="submit" class="btn btn-sm btn-accent">Add</button>
 						<button type="button" class="btn btn-sm btn-ghost" onclick={() => addColOpen = false}>✕</button>
 						{#if addColError}<span style="color: var(--danger); font-size: 0.75rem;">{addColError}</span>{/if}

@@ -193,6 +193,39 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct Collection {
     pub id: String,
+    /// Whether this holds owned cards or is a deck list.
+    ///
+    /// Defaults to `collection`, so a client that predates decks, or one creating an ordinary
+    /// collection, can keep omitting it.
+    #[serde(default)]
+    pub kind: APICollectionKind,
+}
+
+/// Server-local version of `models::CollectionKind` with `JsonSchema`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum APICollectionKind {
+    #[default]
+    Collection,
+    Deck,
+}
+
+impl From<APICollectionKind> for models::CollectionKind {
+    fn from(value: APICollectionKind) -> Self {
+        match value {
+            APICollectionKind::Collection => models::CollectionKind::Collection,
+            APICollectionKind::Deck => models::CollectionKind::Deck,
+        }
+    }
+}
+
+impl From<models::CollectionKind> for APICollectionKind {
+    fn from(value: models::CollectionKind) -> Self {
+        match value {
+            models::CollectionKind::Collection => APICollectionKind::Collection,
+            models::CollectionKind::Deck => APICollectionKind::Deck,
+        }
+    }
 }
 
 /// An entry of `/api/collection/list`.
@@ -202,6 +235,11 @@ pub struct CollectionListEntry {
     /// False for the default collection, which can't be deleted (only
     /// emptied into another collection via `keepCardsInCollection`).
     pub removable: bool,
+    /// Whether this holds owned cards or is a deck list.
+    ///
+    /// A client uses it to decide whether a card edit belongs on `/api/collection` or
+    /// `/api/deck`.
+    pub kind: APICollectionKind,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -449,8 +487,10 @@ pub struct CurrencyValue {
     pub total_value: f64,
     pub profit: f64,
     pub untracked_value: f64,
-    /// Total price of cards on the wishlist (`want_quantity`), independent of
-    /// what's owned. Not included in `total_value`.
+    /// For a collection, the total price of cards on the wishlist
+    /// (`want_quantity`), independent of what's owned. For a deck, the price
+    /// of the wanted copies not yet had, i.e. what completing it would cost.
+    /// Not included in `total_value` either way.
     pub wanted_value: f64,
     /// Owned entries priced in this currency.
     pub priced_count: usize,
@@ -603,4 +643,10 @@ pub struct DatedPrice {
     /// UTC day it was recorded.
     pub day: chrono::NaiveDate,
     pub price: f64,
+}
+
+/// Converts a collection to a deck or back.
+#[derive(Deserialize, JsonSchema)]
+pub struct CollectionKindChange {
+    pub kind: APICollectionKind,
 }

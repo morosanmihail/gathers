@@ -5,6 +5,7 @@ mod sqlite;
 use enum_dispatch::enum_dispatch;
 use models::CardID;
 use models::CollectionCard;
+use models::{CardAvailability, CollectionKind, DeckBoard, DeckCard, DeckMeta};
 use models::CollectionID;
 use models::filters::SortOrder;
 
@@ -72,6 +73,8 @@ pub fn validate_currency(currency: &str) -> Result<(), String> {
 pub struct CollectionInfo {
     pub name: CollectionID,
     pub removable: bool,
+    /// Whether this holds owned cards or is a deck list.
+    pub kind: CollectionKind,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -129,6 +132,7 @@ pub trait PersistenceSystemTrait {
     fn add_collection(
         &mut self,
         name: CollectionID,
+        kind: CollectionKind,
     ) -> impl std::future::Future<Output = eyre::Result<String>>;
 
     /// Deletes a collection along with its cards, purchase history and share
@@ -155,6 +159,45 @@ pub trait PersistenceSystemTrait {
         &self,
         filter: Option<String>,
     ) -> impl std::future::Future<Output = eyre::Result<Vec<CollectionID>>>;
+
+    /// Whether a collection is a plain collection or a deck, or `None` if there is no such
+    /// collection.
+    ///
+    /// Callers that mutate a collection's cards should check this: a deck's cards live in a
+    /// separate table, so writing to `cards` under a deck's name would create orphaned rows.
+    fn get_collection_kind(
+        &self,
+        name: &CollectionID,
+    ) -> impl std::future::Future<Output = eyre::Result<Option<CollectionKind>>>;
+
+    /// Converts a collection to a deck or back, carrying its cards across to the other table.
+    ///
+    /// Converting to a deck puts everything on the first default board; converting back collapses
+    /// the boards into one pile, since a collection has no zones. Build state is dropped on the
+    /// way back, a collection never being assembled.
+    ///
+    /// `false` if there is no such collection.
+    fn set_collection_kind(
+        &mut self,
+        name: &CollectionID,
+        kind: CollectionKind,
+    ) -> impl std::future::Future<Output = eyre::Result<bool>>;
+
+    /// Every `(uuid, provider)` that appears in a collection or a deck, so a caller with access to
+    /// card names can work out which stored printings are the same card as the one being asked
+    /// about.
+    fn uuids_in_use(
+        &self,
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<(CardID, String)>>>;
+
+    /// Where the copies of each requested card currently are.
+    ///
+    /// How many are owned, how many are committed to *built* decks, and which decks those are.
+    /// Over-commitment is reported, never prevented.
+    fn card_availability(
+        &self,
+        uuids: &[CardID],
+    ) -> impl std::future::Future<Output = eyre::Result<Vec<CardAvailability>>>;
 
     fn list_collection_info(
         &self,
@@ -389,6 +432,18 @@ pub enum UpdateEntryResult {
     ValidationError(String),
 }
 
+/// Why a board rename did or didn't happen.
+///
+/// Renaming onto a name the deck already uses is refused rather than merged: folding one board's
+/// cards into another's silently is not what the user asked for, and it can't be undone.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoardRenameResult {
+    Renamed,
+    NoSuchBoard,
+    NameTaken,
+    InvalidName,
+}
+
 #[derive(Debug, Clone)]
 pub struct PurchaseSummary {
     /// ISO 4217 code `total_paid` is in.
@@ -408,4 +463,211 @@ pub struct PurchaseHistoryEntry {
     pub currency: String,
     pub provider: String,
     pub recorded_at: String,
+}
+
+/// Scoped read access to one deck, from [`PersistenceSystem::deck`].
+pub struct Deck<'a> {
+    storage: &'a SQLitePersistenceSystem,
+    name: CollectionID,
+}
+
+/// Scoped write access to one deck, from [`PersistenceSystem::deck_mut`].
+pub struct DeckMut<'a> {
+    storage: &'a mut SQLitePersistenceSystem,
+    name: CollectionID,
+}
+
+impl PersistenceSystem {
+    pub fn deck(&self, name: impl Into<CollectionID>) -> Deck<'_> {
+        match self {
+            Self::SQLitePersistenceSystem(storage) => storage.deck(name),
+        }
+    }
+
+    pub fn deck_mut(&mut self, name: impl Into<CollectionID>) -> DeckMut<'_> {
+        match self {
+            Self::SQLitePersistenceSystem(storage) => storage.deck_mut(name),
+        }
+    }
+}
+
+impl SQLitePersistenceSystem {
+    pub fn deck(&self, name: impl Into<CollectionID>) -> Deck<'_> {
+        Deck {
+            storage: self,
+            name: name.into(),
+        }
+    }
+
+    pub fn deck_mut(&mut self, name: impl Into<CollectionID>) -> DeckMut<'_> {
+        DeckMut {
+            storage: self,
+            name: name.into(),
+        }
+    }
+}
+
+impl Deck<'_> {
+    /// Every card in the deck, across all boards.
+    ///
+    /// Decks are bounded lists, so this is deliberately unpaginated.
+    pub async fn cards(&self) -> eyre::Result<Vec<DeckCard>> {
+        self.storage.deck_cards(&self.name).await
+    }
+
+    /// Slots in the deck, across all boards and finishes.
+    ///
+    /// A card counts the greater of its owned and wanted copies, not their sum.
+    pub async fn card_count(&self) -> eyre::Result<i64> {
+        self.storage.deck_card_count(&self.name).await
+    }
+
+    /// The deck's boards, in display order.
+    pub async fn boards(&self) -> eyre::Result<Vec<DeckBoard>> {
+        self.storage.deck_boards(&self.name).await
+    }
+
+    /// Build state and physical location.
+    ///
+    /// A deck with no stored row is simply not built.
+    pub async fn meta(&self) -> eyre::Result<DeckMeta> {
+        self.storage.deck_meta(&self.name).await
+    }
+}
+
+impl DeckMut<'_> {
+    /// Every card in the deck; see [`Deck::cards`].
+    pub async fn cards(&self) -> eyre::Result<Vec<DeckCard>> {
+        self.storage.deck_cards(&self.name).await
+    }
+
+    /// The deck's boards; see [`Deck::boards`].
+    pub async fn boards(&self) -> eyre::Result<Vec<DeckBoard>> {
+        self.storage.deck_boards(&self.name).await
+    }
+
+    /// Changes one card's owned and wanted counts on one board.
+    ///
+    /// Additive with respect to ownership: never touches `cards`, so putting a card in a deck
+    /// doesn't deduct it from any collection. Use [`DeckMut::take_card_from`] when the copies
+    /// should actually leave the collection. Returns `None` if the row emptied and was removed.
+    ///
+    /// Declares the board if the deck hasn't got one, board names being free-form.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn adjust_card(
+        &mut self,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: i32,
+        want_quantity: i32,
+        time_added: &str,
+        provider: &str,
+    ) -> eyre::Result<Option<DeckCard>> {
+        self.storage
+            .adjust_deck_card(
+                &self.name,
+                card_uuid,
+                finish,
+                board,
+                quantity,
+                want_quantity,
+                time_added,
+                provider,
+            )
+            .await
+    }
+
+    /// Moves copies of a card between two of the deck's boards, in one transaction so they can't
+    /// be duplicated or lost midway.
+    ///
+    /// Moving more than the source board holds moves what's there. Owned and wanted copies move
+    /// independently.
+    pub async fn move_card(
+        &mut self,
+        card_uuid: &CardID,
+        finish: &str,
+        from_board: &str,
+        to_board: &str,
+        quantity: u32,
+        want_quantity: u32,
+    ) -> eyre::Result<()> {
+        self.storage
+            .move_deck_card(
+                &self.name,
+                card_uuid,
+                finish,
+                from_board,
+                to_board,
+                quantity,
+                want_quantity,
+            )
+            .await
+    }
+
+    /// Adds a board unless the deck already has one by that name, placing it last.
+    pub async fn add_board(&mut self, board: &str) -> eyre::Result<Vec<DeckBoard>> {
+        self.storage.add_deck_board(&self.name, board).await
+    }
+
+    /// Renames one of the deck's boards, taking its cards with it.
+    pub async fn rename_board(&mut self, from: &str, to: &str) -> eyre::Result<BoardRenameResult> {
+        self.storage.rename_deck_board(&self.name, from, to).await
+    }
+
+    /// Removes a board and every card on it. `false` if the deck had no such board.
+    pub async fn delete_board(&mut self, board: &str) -> eyre::Result<bool> {
+        self.storage.delete_deck_board(&self.name, board).await
+    }
+
+    /// Reorders the deck's boards. Boards left out of the list keep their place after the ones in
+    /// it, so a partial order can't drop one.
+    pub async fn reorder_boards(&mut self, boards: &[String]) -> eyre::Result<Vec<DeckBoard>> {
+        self.storage.reorder_deck_boards(&self.name, boards).await
+    }
+
+    /// Moves copies of a card out of a collection and onto one of the deck's boards.
+    ///
+    /// A transfer rather than an allocation: the copies leave the collection. Returns how many
+    /// moved, which is capped at what the collection holds.
+    pub async fn take_card_from(
+        &mut self,
+        collection: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: u32,
+    ) -> eyre::Result<i32> {
+        self.storage
+            .move_card_into_deck(collection, &self.name, card_uuid, finish, board, quantity)
+            .await
+    }
+
+    /// Moves copies of a card off one of the deck's boards and into a collection.
+    ///
+    /// The reverse of [`DeckMut::take_card_from`]. Only copies the deck holds move: a wanted slot
+    /// is not a card.
+    pub async fn give_card_to(
+        &mut self,
+        collection: &CollectionID,
+        card_uuid: &CardID,
+        finish: &str,
+        board: &str,
+        quantity: u32,
+    ) -> eyre::Result<i32> {
+        self.storage
+            .move_card_out_of_deck(&self.name, collection, card_uuid, finish, board, quantity)
+            .await
+    }
+
+    pub async fn set_meta(
+        &mut self,
+        built: bool,
+        location: Option<&str>,
+        notes: Option<&str>,
+    ) -> eyre::Result<DeckMeta> {
+        self.storage
+            .set_deck_meta(&self.name, built, location, notes)
+            .await
+    }
 }
