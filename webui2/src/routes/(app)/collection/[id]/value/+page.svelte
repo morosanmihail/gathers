@@ -176,10 +176,9 @@
 	});
 
 	// ── History ─────────────────────────────────────────────────────────────
-	const series = $derived(history?.currencies ?? []);
-	let chosenCurrency = $state<string | null>(null);
-	const current = $derived(
-		series.find(s => s.currency === chosenCurrency) ?? series.find(s => s.currency === target) ?? series[0] ?? null
+	// Preferred currency first; a currency's position is its colour on the chart.
+	const series = $derived(
+		[...(history?.currencies ?? [])].sort((a, b) => Number(b.currency === target) - Number(a.currency === target))
 	);
 	const rangeStart = $derived.by(() => {
 		if (range.days === null) return '';
@@ -187,12 +186,18 @@
 		d.setUTCDate(d.getUTCDate() - range.days);
 		return d.toISOString().slice(0, 10);
 	});
-	const points = $derived((current?.points ?? []).filter(p => p.day >= rangeStart));
-	const seriesChange = $derived.by(() => {
-		if (points.length < 2) return null;
-		const first = points[0], last = points[points.length - 1];
-		return { abs: last.value - first.value, pct: first.value > 0 ? ((last.value - first.value) / first.value) * 100 : null, sameEntries: first.priced_count === last.priced_count };
-	});
+	const inRange = $derived(series.map(s => ({ ...s, points: s.points.filter(p => p.day >= rangeStart) })));
+	const days = $derived([...new Set(inRange.flatMap(s => s.points.map(p => p.day)))].sort());
+	const seriesChanges = $derived(inRange.flatMap(s => {
+		if (s.points.length < 2) return [];
+		const first = s.points[0], last = s.points[s.points.length - 1];
+		return [{
+			currency: s.currency,
+			abs: last.value - first.value,
+			pct: first.value > 0 ? ((last.value - first.value) / first.value) * 100 : null,
+			sameEntries: first.priced_count === last.priced_count
+		}];
+	}));
 	let showTable = $state(false);
 
 	// ── Formatting ──────────────────────────────────────────────────────────
@@ -304,40 +309,33 @@
 			<div class="panel-header">
 				<div>
 					<h2>Value over time</h2>
-					{#if current && points.length}
+					{#if days.length}
 						<div class="panel-sub">
-							{current.currency} · {points.length} snapshot{points.length === 1 ? '' : 's'} since {fmtDay(points[0].day)}
-							{#if seriesChange}
-								· <span class="strong">{signed({ currency: current.currency, value: seriesChange.abs })} {pct(seriesChange.pct)}</span>
-								{#if !seriesChange.sameEntries}<span class="muted">(includes cards whose prices started being recorded later)</span>{/if}
-							{/if}
+							{inRange.filter(s => s.points.length).map(s => s.currency).join(' + ')} · {days.length} snapshot{days.length === 1 ? '' : 's'} since {fmtDay(days[0])}
+							{#each seriesChanges as c (c.currency)}
+								· <span class="strong">{signed({ currency: c.currency, value: c.abs })} {pct(c.pct)}</span>
+							{/each}
+							{#if seriesChanges.some(c => !c.sameEntries)}<span class="muted">(includes cards whose prices started being recorded later)</span>{/if}
 						</div>
 					{/if}
 				</div>
 				<div class="panel-controls">
-					{#if series.length > 1}
-						<div class="seg" role="group" aria-label="Currency">
-							{#each series as s (s.currency)}
-								<button class:active={s.currency === current?.currency} aria-pressed={s.currency === current?.currency} onclick={() => (chosenCurrency = s.currency)}>{s.currency}</button>
-							{/each}
-						</div>
-					{/if}
-					{#if points.length}
+					{#if days.length}
 						<button class="btn btn-ghost btn-sm" onclick={() => (showTable = !showTable)} aria-pressed={showTable}>{showTable ? 'Chart' : 'Table'}</button>
 					{/if}
 				</div>
 			</div>
 			{#if history && !history.enabled}
 				{@render emptyNote('Price history is off. Turn it on in Settings to track how this collection’s value changes over time.')}
-			{:else if !current || !current.points.length}
+			{:else if !series.some(s => s.points.length)}
 				{@render emptyNote('No prices recorded for these cards yet. History builds up each time prices update.')}
-			{:else if !points.length}
+			{:else if !days.length}
 				{@render emptyNote(`No prices recorded in the last ${range.label}.`)}
 			{:else}
-				<ValueHistoryChart {points} currency={current.currency} entryCount={current.entry_count} {showTable} />
+				<ValueHistoryChart series={inRange} {showTable} />
 				<p class="note">
 					Value of the cards held now, at each day's recorded prices — copies sold or moved away don't count.
-					{#if series.length > 1}Each currency is charted separately; cards are valued in their retailer's currency.{/if}
+					{#if series.length > 1}Each card counts once: in {target} when it's priced in {target}, otherwise in the currency it is priced in. Lines aren't converted between currencies.{/if}
 				</p>
 			{/if}
 		</section>
