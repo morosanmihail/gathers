@@ -51,10 +51,7 @@ impl Db {
         find_card_with(&self.conn.lock().unwrap(), exp_name, card_number)
     }
 
-    /// Whether any card for `exp_name` is already saved. Used to skip
-    /// re-scraping a whole set once it has any data, on the assumption
-    /// that a set already in the db (even if stale) doesn't need
-    /// redownloading.
+    /// Whether any card for `exp_name` is already saved.
     pub fn has_set(&self, exp_name: &str) -> bool {
         let conn = self.conn.lock().unwrap();
         conn.query_row(

@@ -149,6 +149,27 @@ pub fn is_same_card(card: &Card, found: &Card) -> bool {
         || found.name.to_lowercase().starts_with(&card.name.to_lowercase())
 }
 
+/// Words a promo set's name carries besides its base name.
+const PROMO_WORDS: &[&str] = &["promo", "promos", "card", "cards"];
+
+/// Whether promo set `name` is TCGPlayer promo set `tcgp`, by base-name
+/// words: `name`'s base words (without "Promos") must start `tcgp`'s base
+/// words, optionally after a series code. Serebii names promo sets shorter
+/// than TCGPlayer, e.g. "Mega Promos" for "ME: Mega Evolution Promo", which
+/// is too different for the fuzzy match.
+fn is_promo_prefix_match(name: &str, tcgp: &str) -> bool {
+    let base = |n: &str| -> Vec<String> {
+        set_tokens(n).into_iter().filter(|t| !PROMO_WORDS.contains(&t.as_str())).collect()
+    };
+    let name = base(name);
+    let tcgp = base(tcgp);
+    if name.is_empty() {
+        return false;
+    }
+    tcgp.starts_with(&name)
+        || (tcgp.first().is_some_and(|t| is_series_code(t)) && tcgp[1..].starts_with(&name))
+}
+
 /// The TCGPlayer sets (by `url_val`) holding set `name`'s cards. Promo sets
 /// are matched by their base name. Other sets prefer structural matches
 /// (see `is_structural_match`); only when there are none does it fall back
@@ -175,6 +196,11 @@ pub fn find_set_from_tcgp<'a>(name: &str, tcgp_sets: &'a [TcgpSet]) -> Vec<&'a s
         let tcgp_has_promo = tcgp_norm.contains("promo");
 
         if name_has_promo != tcgp_has_promo {
+            continue;
+        }
+        if name_has_promo && is_promo_prefix_match(name, &ts.value) {
+            debug!("TCGP promo match: '{}' ~ '{name}'", ts.value);
+            matches.push(ts.url_val.as_str());
             continue;
         }
         if name_has_promo {
@@ -493,6 +519,11 @@ mod tests {
         "EX Team Rocket Returns",
         "SV: Scarlet & Violet Promo Cards",
         "SV: Scarlet & Violet 151",
+        "ME: Mega Evolution Promo",
+        "ME01: Mega Evolution",
+        "MEE: Mega Evolution Energies",
+        "XY Promos",
+        "SM Promos",
     ];
 
     fn found(name: &str) -> Vec<String> {
@@ -517,6 +548,17 @@ mod tests {
         assert_eq!(found("Silver Tempest"), ["SWSH12: Silver Tempest", "SWSH12: Silver Tempest Trainer Gallery"]);
         assert_eq!(found("Black Bolt"), ["SV: Black Bolt"]);
         assert_eq!(found("Base Set"), ["Base Set", "Base Set (Shadowless)"]);
+    }
+
+    #[test]
+    fn promo_sets_match_tcgp_names_with_extra_words() {
+        assert_eq!(found("Mega Promos"), ["ME: Mega Evolution Promo"]);
+        assert_eq!(found("Scarlet & Violet Promos"), ["SV: Scarlet & Violet Promo Cards"]);
+        assert_eq!(found("XY Promos"), ["XY Promos"]);
+        assert_eq!(found("SM Promos"), ["SM Promos"]);
+        assert_eq!(found("Mega Evolution"), ["ME01: Mega Evolution"]);
+        assert!(tcgp_set_belongs_to("Mega Promos", "ME Mega Evolution Promo"));
+        assert!(!tcgp_set_belongs_to("Mega Promos", "XY Promos"));
     }
 
     fn card(name: &str, number: &str, exp_name: &str, tcgp_set: &str) -> Card {

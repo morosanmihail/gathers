@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{info, warn};
 
 use crate::systems::pokemon::scraper::db::{Db, UpdateFields};
-use crate::systems::pokemon::scraper::models::Expansion;
+use crate::systems::pokemon::scraper::models::{Card, Expansion};
 
 pub struct RunOptions {
     pub recent: Option<usize>,
@@ -68,7 +68,22 @@ pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Re
     for set in &all_sets {
         pb.set_message(set.name.clone());
 
-        if db.has_set(&set.name) {
+        let serebii_cards = serebii::scrape_set_details(client, &set.page, &set.name)
+            .await
+            .map(|(_, cards)| cards)
+            .unwrap_or_else(|e| {
+                warn!("Serebii card fetch failed for '{}': {e}", set.name);
+                vec![]
+            });
+
+        // Skip a set only once every card Serebii lists for it is saved, so
+        // a set that was saved partially (or has had cards added since) is
+        // scraped again. Without Serebii's list, any saved card will do.
+        if db.has_set(&set.name)
+            && serebii_cards
+                .iter()
+                .all(|c| db.find_card(&c.exp_name, &c.exp_card_number).is_some())
+        {
             skipped += 1;
             pb.inc(1);
             continue;
@@ -82,7 +97,7 @@ pub async fn run_all(db: &Db, client: &reqwest::Client, opts: &RunOptions) -> Re
             ..Default::default()
         };
 
-        if let Err(e) = update_cards(db, client, &exp, &set.page, &tcgp_codes).await {
+        if let Err(e) = update_cards(db, client, &exp, serebii_cards, &tcgp_codes).await {
             warn!("Failed to update cards for '{}': {e}", set.name);
         }
         pb.inc(1);
@@ -99,17 +114,10 @@ async fn update_cards(
     db: &Db,
     client: &reqwest::Client,
     exp: &Expansion,
-    serebii_page: &str,
+    serebii_cards: Vec<Card>,
     tcgp_codes: &[crate::systems::pokemon::scraper::models::TcgpCode],
 ) -> Result<()> {
     info!("Updating cards for '{}'", exp.name);
-
-    let (_, serebii_cards) = serebii::scrape_set_details(client, serebii_page, &exp.name)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("Serebii card fetch failed for '{}': {e}", exp.name);
-            (String::new(), vec![])
-        });
 
     let tcgp_cards = tcgp::pull_set_cards(client, exp, tcgp_codes)
         .await
