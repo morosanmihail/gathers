@@ -200,14 +200,15 @@ mod tests {
         .unwrap();
         let retrieval = Arc::new(Mutex::new(state));
 
-        // A card update's reload swaps in a new instance, which loads the
+        // A card update's reload swaps in a new instance, which opens the
         // prices that are on disk before the new ones arrive.
         let previous = live_system::<Mtg>(&retrieval).await.unwrap();
         retrieval.lock().await.reload_mtg().unwrap();
+        let live = live_system::<Mtg>(&retrieval).await.unwrap();
+        assert_eq!(normal_price(&live).await, Some(1.0));
         write_prices(&dir, &prices, 2.0);
         previous.reset_prices().await;
 
-        let live = live_system::<Mtg>(&retrieval).await.unwrap();
         assert_eq!(normal_price(&live).await, Some(1.0));
 
         let returned = reset_live_prices::<Mtg>(&retrieval).await.unwrap();
