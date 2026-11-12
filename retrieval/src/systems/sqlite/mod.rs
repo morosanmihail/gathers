@@ -37,7 +37,9 @@ pub struct MagicSQLiteRetrievalSystem {
     connection: Arc<tokio::sync::Mutex<Connection>>,
     db_path: String,
     prices_path: Option<String>,
-    prices_cache: Arc<Mutex<Option<HashMap<String, CardPrices>>>>,
+    /// Connection to the prices DB, opened on first lookup and dropped by `reset_prices` so
+    /// the next lookup sees a freshly downloaded file (see `prices::open_prices`).
+    prices_conn: Arc<Mutex<Option<Connection>>>,
     /// SQL ranking which printing best represents a card in the `unique` modes, built once
     /// from the columns this database has (see `unique::build_rank_sql`).
     rank_sql: Arc<String>,
@@ -78,12 +80,13 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
     conn.busy_timeout(Duration::from_secs(5))?;
     // Search statements come in a handful of shapes; keep them prepared.
     conn.set_prepared_statement_cache_capacity(64);
-    // The DB is ~750MB and read-mostly: a bigger page cache and memory-mapped reads keep hot
-    // pages out of read() calls, and in-memory temp storage keeps sorts off disk. The default
-    // 2MB cache thrashes on a broad search.
+    // The DB is ~800MB and read-mostly: a bigger page cache and in-memory temp storage keep
+    // sorts off disk. The default 2MB cache thrashes on a broad search.
+    // No `mmap_size`: every mapped page a search touches stays in the process's RSS, so on a
+    // long-running server memory crept up towards the whole DB's size. Unmapped reads still
+    // come from the kernel's page cache, which the OS can reclaim.
     conn.execute_batch(
         "PRAGMA cache_size = -65536;
-         PRAGMA mmap_size = 1073741824;
          PRAGMA temp_store = MEMORY;",
     )?;
 
@@ -135,15 +138,6 @@ fn open_mtg_connection(path: &str) -> eyre::Result<Connection> {
 impl MagicSQLiteRetrievalSystem {
     pub fn new(db_path: Option<String>, prices_path: Option<String>) -> eyre::Result<Self> {
         let path = db_path.unwrap_or_else(|| "../data/testPrintings.db".to_string());
-        let prices_cache = if let Some(ref p) = prices_path {
-            if PathBuf::from(p).exists() {
-                Arc::new(Mutex::new(Some(prices::load_prices_file(p)?)))
-            } else {
-                Arc::new(Mutex::new(None))
-            }
-        } else {
-            Arc::new(Mutex::new(None))
-        };
         let conn = open_mtg_connection(&path)?;
         let rank_sql = Arc::new(unique::build_rank_sql(&conn));
         let token_base = tokens::token_select_base(&conn)?.map(Arc::new);
@@ -151,7 +145,7 @@ impl MagicSQLiteRetrievalSystem {
             connection: Arc::new(Mutex::new(conn)),
             db_path: path,
             prices_path,
-            prices_cache,
+            prices_conn: Arc::new(Mutex::new(None)),
             rank_sql,
             token_base,
         })
@@ -732,45 +726,24 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     }
 
     async fn get_card_prices(&self, uuid: &str) -> eyre::Result<Option<CardPrices>> {
-        let prices_path = match &self.prices_path {
-            Some(p) => p.clone(),
-            None => return Ok(None),
-        };
-        if !PathBuf::from(&prices_path).exists() {
-            return Ok(None);
-        }
-        let mut cache = self.prices_cache.lock().await;
-        if cache.is_none() {
-            *cache = Some(prices::load_prices_file(&prices_path)?);
-        }
-        Ok(cache.as_ref().and_then(|m| m.get(uuid)).cloned())
+        Ok(self.get_bulk_card_prices(vec![uuid.to_string()]).await?.remove(uuid))
     }
 
     async fn get_bulk_card_prices(
         &self,
         uuids: Vec<String>,
     ) -> eyre::Result<HashMap<String, CardPrices>> {
-        let prices_path = match &self.prices_path {
-            Some(p) => p.clone(),
-            None => return Ok(HashMap::new()),
+        let Some(prices_path) = &self.prices_path else {
+            return Ok(HashMap::new());
         };
-        if !PathBuf::from(&prices_path).exists() {
+        if uuids.is_empty() || !PathBuf::from(prices_path).exists() {
             return Ok(HashMap::new());
         }
-        let mut cache = self.prices_cache.lock().await;
-        if cache.is_none() {
-            *cache = Some(prices::load_prices_file(&prices_path)?);
+        let mut conn = self.prices_conn.lock().await;
+        if conn.is_none() {
+            *conn = Some(prices::open_prices(prices_path)?);
         }
-        let result = cache
-            .as_ref()
-            .map(|m| {
-                uuids
-                    .iter()
-                    .filter_map(|id| m.get(id).map(|p| (id.clone(), p.clone())))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(result)
+        prices::query_prices(conn.as_ref().expect("opened above"), &uuids)
     }
 
     async fn update_prices(&self) -> eyre::Result<bool> {
@@ -784,7 +757,7 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
     }
 
     async fn reset_prices(&self) {
-        *self.prices_cache.lock().await = None;
+        *self.prices_conn.lock().await = None;
     }
 
     async fn update_backend(&self) -> eyre::Result<bool> {

@@ -1028,14 +1028,14 @@ async fn test_get_bulk_card_prices_file_missing() {
 }
 
 #[tokio::test]
-async fn test_prices_cache_reuse() {
+async fn test_prices_connection_reuse() {
     let dir = TempDir::new().unwrap();
     let prices_path = write_dummy_prices(&dir);
     let system = system_with_prices(Some(prices_path));
 
     let first = system.get_card_prices("uuid-alpha").await.unwrap();
     let second = system.get_card_prices("uuid-beta").await.unwrap();
-    // Both calls succeed without error, proving cache is reused after first load.
+    // Both lookups go through the one prices connection opened by the first.
     assert!(first.is_some());
     assert!(second.is_some());
     assert_eq!(first.unwrap().uuid, "uuid-alpha");
