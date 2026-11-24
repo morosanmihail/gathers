@@ -11,14 +11,21 @@
 	import PriceHistoryChart from './PriceHistoryChart.svelte';
 	import RiftboundCardDetail from './RiftboundCardDetail.svelte';
 	import PokemonCardDetail from './PokemonCardDetail.svelte';
+	import FinishList from './FinishList.svelte';
+	import type { Money } from '$lib/currency.svelte';
 
 	interface Props {
 		card: AnyCard | CollectionCard | CardGroup | DeckCard;
 		onclose: () => void;
 		onWantChange?: (delta: number) => void;
+		/** Collection view only: change the owned quantity of one finish. */
+		onAdjust?: (finish: string, delta: number, purchase?: Money | null) => void;
+		/** Deck view only: change the row's Have (`quantity`) or Want count. */
+		onDeckAdjust?: (delta: number, field: 'quantity' | 'wantQuantity') => void;
 	}
 
-	let { card, onclose, onWantChange }: Props = $props();
+	let { card, onclose, onWantChange, onAdjust, onDeckAdjust }: Props = $props();
+	const deckRow = $derived(card as DeckCard);
 
 	const wantQty = $derived((card as CollectionCard).wantQuantity ?? 0);
 	// Only present when opened from the collection view (a CardGroup) —
@@ -82,12 +89,15 @@
 	);
 
 	let currentPrices = $state<CardPrices | null>(null);
+	// Keyed on the id rather than `card` itself, so an updated copy of the
+	// same card (after a quantity edit) doesn't refetch and blank the prices.
+	const cardId = $derived(card.id);
 	$effect(() => {
-		const key = `${provider}:${card.id}`;
+		const prov = provider, id = cardId;
 		currentPrices = null;
-		if (!app.pricingEnabled || !provider) return;
-		getCardPrices(provider, card.id).then(p => {
-			if (`${provider}:${card.id}` === key) currentPrices = p;
+		if (!app.pricingEnabled || !prov) return;
+		getCardPrices(prov, id).then(p => {
+			if (prov === provider && id === cardId) currentPrices = p;
 		});
 	});
 
@@ -204,8 +214,43 @@
 							</span>
 						</div>
 					{/if}
+					{#if onDeckAdjust}
+						{#if deckRow.finish}
+							<div class="card-detail-row">
+								<span class="card-detail-label">Finish</span>
+								<span>{finishLabel(deckRow.finish)}</span>
+							</div>
+						{/if}
+						<div class="card-detail-row">
+							<span class="card-detail-label" title="Copies this deck has to hand">Have</span>
+							<span class="qty-row">
+								<button class="qty-btn" disabled={(deckRow.quantity ?? 0) <= 0} onclick={() => onDeckAdjust(-1, 'quantity')}>−</button>
+								<span class="qty-val">{deckRow.quantity ?? 0}</span>
+								<button class="qty-btn add" onclick={() => onDeckAdjust(1, 'quantity')}>+</button>
+							</span>
+						</div>
+						<div class="card-detail-row">
+							<span class="card-detail-label" title="Copies this deck calls for">Want</span>
+							<span class="qty-row">
+								<button class="qty-btn" disabled={(deckRow.wantQuantity ?? 0) <= 0} onclick={() => onDeckAdjust(-1, 'wantQuantity')}>−</button>
+								<span class="qty-val">{deckRow.wantQuantity ?? 0}</span>
+								<button class="qty-btn add" onclick={() => onDeckAdjust(1, 'wantQuantity')}>+</button>
+							</span>
+						</div>
+					{/if}
 					{#if (card as CardGroup).entries}
-						{#if ownedFinishes.length > 0}
+						{#if onAdjust}
+							<div class="card-detail-row">
+								<span class="card-detail-label">Owned</span>
+								<div class="owned-editor">
+									<FinishList
+										group={card as CardGroup}
+										cardPrices={currentPrices ?? undefined}
+										{onAdjust}
+									/>
+								</div>
+							</div>
+						{:else if ownedFinishes.length > 0}
 							<div class="card-detail-row">
 								<span class="card-detail-label">Owned</span>
 								<span>
@@ -336,6 +381,11 @@
 		gap: 8px;
 		align-items: baseline;
 		font-size: 0.88rem;
+	}
+
+	.owned-editor {
+		min-width: 0;
+		align-self: center;
 	}
 
 	.price-finish {

@@ -56,7 +56,19 @@
 	let filterOpen = $state(false);
 	let historyOpen = $state(false);
 	let shareOpen = $state(false);
-	let detailCard = $state<CardGroup | null>(null);
+	// The detail modal tracks its card by id, so quantity edits made from it
+	// (or elsewhere) show straight away. Once the last copy goes the card
+	// drops out of `groups`; keep showing the opened copy, at zero.
+	let detailOpened = $state<CardGroup | null>(null);
+	const detailCard = $derived.by(() => {
+		if (!detailOpened) return null;
+		const id = detailOpened.id;
+		return groups.find(g => g.id === id) ?? {
+			...detailOpened,
+			wantQuantity: 0,
+			entries: detailOpened.entries.map(e => ({ ...e, quantity: 0, wantQuantity: 0 }))
+		};
+	});
 	let filterDebounce: ReturnType<typeof setTimeout> | null = null;
 
 	const filterActive = $derived(
@@ -186,7 +198,6 @@
 				cards = [...cards, { ...primary, finish: '', quantity: 0, wantQuantity }];
 			}
 			cards = cards.filter(c => (c.quantity ?? 0) > 0 || (c.wantQuantity ?? 0) > 0);
-			if (detailCard?.id === card.id) detailCard = { ...detailCard, wantQuantity };
 		} catch (e) {
 			console.error('[gathers] handleWantChange failed:', e);
 		}
@@ -292,7 +303,7 @@
 		{#if !loading}
 			<span class="page-subtitle">{total.toLocaleString()} entr{total !== 1 ? 'ies' : 'y'}</span>
 		{/if}
-		{#if app.viewMode === 'grid'}
+		{#if app.viewMode !== 'list'}
 			<div class="grid-sort">
 				<label class="page-subtitle" for="grid-sort-field">Sort by</label>
 				<select
@@ -394,7 +405,7 @@
 			{prices}
 			onAdjust={adjustCardQty}
 			onWantAdjust={handleWantChange}
-			onclick={(c) => detailCard = c as CardGroup}
+			onclick={(c) => detailOpened = c as CardGroup}
 			{sortBy}
 			{sortOrder}
 			onSortClick={handleSortClick}
@@ -434,8 +445,9 @@
 {#if detailCard}
 	<CardDetailModal
 		card={detailCard}
-		onclose={() => detailCard = null}
+		onclose={() => detailOpened = null}
 		onWantChange={(delta) => detailCard && handleWantChange(detailCard, delta)}
+		onAdjust={(finish, delta, purchase) => detailCard && adjustCardQty(detailCard, finish, delta, purchase)}
 	/>
 {/if}
 

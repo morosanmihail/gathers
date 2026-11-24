@@ -1,15 +1,17 @@
 <script lang="ts">
 	// One board of a deck: its cards plus the controls for changing quantities and shuffling
-	// cards between boards. Honours the global grid/list toggle, like every other card view.
+	// cards between boards. Honours the global grid/list/art toggle, like every other card view; in
+	// art view the side panel belongs to the page, since it is shared by every board.
 	//
 	// Deliberately not CardResultsList: a deck row has no price column but does have a board and
 	// an availability note, so reusing the collection row would have meant adding a deck flag to it
 	// and to everything it renders.
 	import type { CardAvailability, DeckCard, TransferDirection } from '$lib/types';
-	import { deckSlots, finishLabel } from '$lib/types';
+	import { deckRowKey, deckSlots, finishLabel } from '$lib/types';
 	import { app } from '$lib/state.svelte';
 	import CardImageTooltip from './CardImageTooltip.svelte';
 	import DeckTile from './DeckTile.svelte';
+	import CardArtTile from './CardArtTile.svelte';
 	import SetTooltip from './SetTooltip.svelte';
 
 	interface Props {
@@ -26,12 +28,24 @@
 		onMove: (card: DeckCard, toBoard: string) => void;
 		onTransfer?: (card: DeckCard, collection: string, direction: TransferDirection) => void;
 		onclick?: (card: DeckCard) => void;
+		/** Art view: the hovered card, for the page's side panel. */
+		onhover?: (card: DeckCard) => void;
+		/** Art view: `deckRowKey` of the card the side panel shows. */
+		activeKey?: string | null;
 	}
 
 	let {
 		deck, board, cards, availability = {}, boards, collections = [],
-		onAdjust, onMove, onTransfer, onclick
+		onAdjust, onMove, onTransfer, onclick, onhover, activeKey = null
 	}: Props = $props();
+
+	/** Art view badge: have/want while slots are unfilled, else the pile size. */
+	function artBadge(card: DeckCard): string | null {
+		const foil = card.finish ? '✦' : '';
+		const have = card.quantity ?? 0, want = card.wantQuantity ?? 0;
+		if (want > have) return `${have}/${want}${foil}`;
+		return have > 1 || foil ? `×${have}${foil}` : null;
+	}
 
 	// Wanting four and holding three is four cards of the board, not seven.
 	const count = $derived(cards.reduce((n, c) => n + deckSlots(c), 0));
@@ -68,7 +82,24 @@
 
 	{#if cards.length === 0}
 		<p class="deck-board-empty">Nothing on this board yet.</p>
-	{:else if app.viewMode === 'grid'}
+	{:else if app.viewMode === 'art'}
+		<!-- One tile per row, its slots stacked; unfilled slots are in the badge
+		     ("1/4") and a row with nothing held yet is dimmed. -->
+		<div class="art-grid">
+			{#each cards as card (deckRowKey(card))}
+				<CardArtTile
+					{card}
+					copies={deckSlots(card)}
+					badge={artBadge(card)}
+					badgeMuted={(card.quantity ?? 0) < (card.wantQuantity ?? 0)}
+					faded={(card.quantity ?? 0) === 0}
+					active={activeKey === deckRowKey(card)}
+					onhover={() => onhover?.(card)}
+					onclick={() => onclick?.(card)}
+				/>
+			{/each}
+		</div>
+	{:else if app.viewMode !== 'list'}
 		<div class="card-grid">
 			{#each cards as card (card.id + ':' + (card.finish ?? '') + ':' + (card.board ?? ''))}
 				<DeckTile

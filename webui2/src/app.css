@@ -335,6 +335,38 @@ label.field-label {
 	padding: 20px;
 }
 
+/* ─── Art view ─── image-only tiles with a hover panel on the right
+   (CardArtGrid for collections, the deck page for decks). The toolbar's zoom
+   slider sets --art-card-w (tile width) and --art-scale (relative to the
+   default size) on .art-view; see `artZoomStyle`. */
+.art-view {
+	--art-card-w: 150px;
+	--art-scale: 1;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 300px;
+	align-items: start;
+}
+
+/* Fixed-width columns rather than stretching ones, so every slider step
+   visibly resizes the cards instead of only changing the column count.
+   Capped at the grid's width, so the largest size still fits a phone. */
+.art-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, min(var(--art-card-w), 100%));
+	justify-content: start;
+	gap: clamp(8px, calc(14px * var(--art-scale)), 24px) clamp(6px, calc(12px * var(--art-scale)), 20px);
+	padding: 16px 20px 20px;
+	min-width: 0;
+}
+
+@media (max-width: 900px) {
+	.art-view { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+	.art-grid { padding: 10px 12px; justify-content: center; }
+}
+
 .card-tile {
 	position: relative;
 	background: var(--surface);

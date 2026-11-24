@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ArtZoomSlider from './ArtZoomSlider.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import CsvExportModal from './CsvExportModal.svelte';
 	import CsvImportModal from './CsvImportModal.svelte';
@@ -312,6 +313,10 @@
 			</svg>
 			Purchase history
 		</button>
+	{/if}
+
+	{#if app.viewMode === 'art'}
+		<ArtZoomSlider />
 	{/if}
 </div>
 
