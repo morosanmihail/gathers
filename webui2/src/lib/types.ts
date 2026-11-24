@@ -4,7 +4,9 @@ import type { components } from './generated/api';
 export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 export type Theme = string;
-export type ViewMode = 'grid' | 'list';
+// 'art' is for collections and decks (image-only tiles, copies stacked);
+// elsewhere it falls back to 'grid'.
+export type ViewMode = 'grid' | 'list' | 'art';
 export type Provider = 'MagicSQLite' | 'RiftboundSQLite' | 'PokemonSQLite' | 'Scryfall';
 
 export type Collection = components['schemas']['CollectionListEntry'];
@@ -45,6 +47,11 @@ export type TransferDirection = components['schemas']['DeckCardTransfer']['direc
 /** How many of a deck's slots a row fills: owned and wanted overlap, so never their sum. */
 export function deckSlots(card: { quantity: number; wantQuantity: number }): number {
 	return Math.max(card.quantity, card.wantQuantity);
+}
+
+/** Identifies one deck row: a card, in one finish, on one board. */
+export function deckRowKey(card: { id: string; finish?: string | null; board?: string | null }): string {
+	return `${card.id}:${card.finish ?? ''}:${card.board ?? ''}`;
 }
 
 export type SystemInfo = components['schemas']['SystemInfo'];

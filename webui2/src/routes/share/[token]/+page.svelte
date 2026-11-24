@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import CardResultsList from '$lib/components/CardResultsList.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
+	import ArtZoomSlider from '$lib/components/ArtZoomSlider.svelte';
 	import { getPublicCollectionCards } from '$lib/api';
 	import { app, setViewMode } from '$lib/state.svelte';
 	import { groupByCard } from '$lib/types';
@@ -107,6 +108,9 @@
 				<span>Shared collection</span>
 			</span>
 			<div class="header-spacer"></div>
+			{#if app.viewMode === 'art'}
+				<ArtZoomSlider />
+			{/if}
 			<div class="view-toggle" title="Toggle view">
 				<button
 					class="view-toggle-btn"
@@ -132,6 +136,18 @@
 						<rect x="0" y="4" width="14" height="2" rx="1"/>
 						<rect x="0" y="8" width="14" height="2" rx="1"/>
 						<rect x="0" y="12" width="14" height="2" rx="1"/>
+					</svg>
+				</button>
+				<button
+					class="view-toggle-btn"
+					class:active={app.viewMode === 'art'}
+					onclick={() => setViewMode('art')}
+					title="Art view"
+				>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+						<rect x="0" y="2" width="5" height="10" rx="1" opacity="0.5"/>
+						<rect x="4.5" y="1" width="5" height="11" rx="1" opacity="0.75"/>
+						<rect x="9" y="0" width="5" height="12" rx="1"/>
 					</svg>
 				</button>
 			</div>

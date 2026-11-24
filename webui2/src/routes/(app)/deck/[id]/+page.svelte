@@ -9,6 +9,8 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ShareLinksModal from '$lib/components/ShareLinksModal.svelte';
 	import CardDetailModal from '$lib/components/CardDetailModal.svelte';
+	import CardArtPanel from '$lib/components/CardArtPanel.svelte';
+	import ArtZoomSlider from '$lib/components/ArtZoomSlider.svelte';
 	import ConvertedTotal from '$lib/components/ConvertedTotal.svelte';
 	import { formatMoney, formatMoneyList } from '$lib/currency.svelte';
 	import {
@@ -17,8 +19,8 @@
 		getDeckMeta, setDeckMeta, getCardAvailability, getDeckValue,
 		renameCollection, deleteCollection, setCollectionKind, invalidateCache
 	} from '$lib/api';
-	import { app } from '$lib/state.svelte';
-	import { deckSlots, isDeck } from '$lib/types';
+	import { app, artZoomStyle } from '$lib/state.svelte';
+	import { deckRowKey, deckSlots, finishLabel, isDeck } from '$lib/types';
 	import type {
 		CardAvailability,
 		DeckBoard as DeckBoardInfo,
@@ -36,7 +38,25 @@
 	let availability = $state<Record<string, CardAvailability>>({});
 	let loading = $state(true);
 	let searchOpen = $state(false);
-	let detailCard = $state<DeckCard | null>(null);
+	// The detail modal tracks its row by key, so Have/Want edits made from it
+	// show straight away. Once both counts reach zero the row is dropped from
+	// `cards`; keep showing the opened copy, at zero, so it can be added back.
+	let detailOpened = $state<DeckCard | null>(null);
+	const detailCard = $derived.by(() => {
+		if (!detailOpened) return null;
+		const key = deckRowKey(detailOpened);
+		return cards.find((c) => deckRowKey(c) === key) ?? { ...detailOpened, quantity: 0, wantQuantity: 0 };
+	});
+	// Art view's side panel: the last hovered row across every board.
+	let hoveredKey = $state<string | null>(null);
+	const hovered = $derived(cards.find((c) => deckRowKey(c) === hoveredKey) ?? cards[0] ?? null);
+	const hoveredAvailability = $derived(hovered ? availability[hovered.id] : undefined);
+	const hoveredElsewhere = $derived(
+		(hoveredAvailability?.holdings ?? []).filter((h) => h.deck !== deckId)
+	);
+	const hoveredShort = $derived(
+		hoveredAvailability ? Math.max(0, hoveredAvailability.committed - hoveredAvailability.owned) : 0
+	);
 	let valueBreakdown = $state<ValueBreakdown | null>(null);
 	let valueHover = $state(false);
 	const currencyTotals = $derived(
@@ -154,7 +174,10 @@
 				card.provider,
 				want ? delta : 0
 			);
-			cards = cards
+			// The row may be gone already (both counts at zero) when the detail
+			// modal brings it back.
+			const present = cards.some((c) => sameRow(c, card));
+			cards = (present || delta <= 0 ? cards : [...cards, { ...card, quantity: 0, wantQuantity: 0 }])
 				.map((c) =>
 					sameRow(c, card) ? { ...c, [field]: Math.max(0, (c[field] ?? 0) + delta) } : c
 				)
@@ -433,6 +456,10 @@
 			</svg>
 			Delete deck
 		</button>
+
+		{#if app.viewMode === 'art'}
+			<ArtZoomSlider />
+		{/if}
 	</div>
 
 	{#if managingBoards}
@@ -558,21 +585,67 @@
 			<div class="empty-state-text">No cards in this deck yet. Use Search &amp; add above.</div>
 		</div>
 	{:else}
-		<div class="deck-boards">
-			{#each boards as board (board)}
-				<DeckBoard
-					deck={deckId}
-					{board}
-					cards={cardsOn(board)}
-					{availability}
-					{boards}
-					{collections}
-					onAdjust={adjust}
-					onMove={move}
-					onTransfer={transfer}
-					onclick={(c) => (detailCard = c)}
-				/>
-			{/each}
+		<div class:art-view={app.viewMode === 'art'} style={app.viewMode === 'art' ? artZoomStyle() : undefined}>
+			<div class="deck-boards">
+				{#each boards as board (board)}
+					<DeckBoard
+						deck={deckId}
+						{board}
+						cards={cardsOn(board)}
+						{availability}
+						{boards}
+						{collections}
+						onAdjust={adjust}
+						onMove={move}
+						onTransfer={transfer}
+						onclick={(c) => (detailOpened = c)}
+						onhover={(c) => (hoveredKey = deckRowKey(c))}
+						activeKey={hovered ? deckRowKey(hovered) : null}
+					/>
+				{/each}
+			</div>
+
+			{#if app.viewMode === 'art' && hovered}
+				<CardArtPanel card={hovered} onclick={() => (detailOpened = hovered)}>
+					{#if hovered.finish}
+						<dt>Finish</dt>
+						<dd>{finishLabel(hovered.finish)}</dd>
+					{/if}
+					{#if boards.length > 1}
+						<dt>Board</dt>
+						<dd>{hovered.board || '—'}</dd>
+					{/if}
+					<dt>Have</dt>
+					<dd>{hovered.quantity ?? 0}</dd>
+					<dt>Want</dt>
+					<dd>
+						{hovered.wantQuantity ?? 0}
+						{#if (hovered.wantQuantity ?? 0) > (hovered.quantity ?? 0)}
+							<span class="muted">({(hovered.wantQuantity ?? 0) - (hovered.quantity ?? 0)} to find)</span>
+						{/if}
+					</dd>
+					{#if hoveredAvailability?.copies?.length}
+						<dt>Owned in</dt>
+						<dd>
+							{#each hoveredAvailability.copies as c (c.collection)}
+								<div>{c.quantity} in {c.collection}</div>
+							{/each}
+						</dd>
+					{/if}
+					{#if hoveredElsewhere.length}
+						<dt>In decks</dt>
+						<dd>
+							{#each hoveredElsewhere as h (h.deck + ':' + h.board + ':' + h.finish)}
+								<div>{h.quantity} in {h.deck}{h.location ? ` (${h.location})` : ''}</div>
+							{/each}
+						</dd>
+					{/if}
+					{#if hoveredShort > 0}
+						<dt>Short</dt>
+						<dd>⚠ {hoveredShort} more committed than owned</dd>
+					{/if}
+				</CardArtPanel>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -623,5 +696,9 @@
 {/if}
 
 {#if detailCard}
-	<CardDetailModal card={detailCard} onclose={() => (detailCard = null)} />
+	<CardDetailModal
+		card={detailCard}
+		onclose={() => (detailOpened = null)}
+		onDeckAdjust={(delta, field) => detailCard && adjust(detailCard, delta, field)}
+	/>
 {/if}

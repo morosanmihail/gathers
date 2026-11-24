@@ -2,6 +2,7 @@
 	import type { Money } from '$lib/currency.svelte';
 	import CardTile from './CardTile.svelte';
 	import CardRow from './CardRow.svelte';
+	import CardArtGrid from './CardArtGrid.svelte';
 	import Pagination from './Pagination.svelte';
 	import type { AnyCard, CollectionCard, CardGroup, CardPrices, ViewMode } from '$lib/types';
 	import { priceLabel } from '$lib/currency.svelte';
@@ -51,7 +52,16 @@
 	}
 </script>
 
-{#if viewMode === 'grid'}
+{#if viewMode === 'art' && collectionMode}
+	<CardArtGrid
+		cards={cards as CardGroup[]}
+		{keyFn}
+		{selectable}
+		{prices}
+		{onclick}
+	/>
+{:else if viewMode !== 'list'}
+	<!-- 'art' outside a collection falls back to the grid. -->
 	<div class={gridClass} style={gridStyle}>
 		{#each cards as card (keyFn(card))}
 			<CardTile {card} {collectionMode} {selectable} {collection} price={cardPrice(card)} cardPrices={prices[card.id]} {onAdd} {onAddFinish} {onAddWanted} {onAdjust} {onWantAdjust} {onclick} />

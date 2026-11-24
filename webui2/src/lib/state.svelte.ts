@@ -2,12 +2,21 @@ import type { Collection, SystemInfo, Theme, ViewMode, CardSet, UniqueMode, Game
 import { listCollections, getSystemInfo, getSystemMeta } from './api';
 import { injectThemeStyles } from './themes/index';
 
+// Art view zoom: the card width, in px. Below the minimum the art is too
+// small to recognise; above the maximum a single card no longer fits a phone.
+export const ART_ZOOM_MIN = 90;
+export const ART_ZOOM_MAX = 320;
+export const ART_ZOOM_DEFAULT = 150;
+export const ART_ZOOM_STEP = 10;
+
 class AppState {
 	collections = $state<Collection[]>([]);
 	systemInfo = $state<SystemInfo | null>(null);
 	ready = $state(false);
 	theme = $state<Theme>('dark');
 	viewMode = $state<ViewMode>('grid');
+	/** Art view card width in px; see `setArtZoom`. */
+	artZoom = $state(ART_ZOOM_DEFAULT);
 	// Each game's search metadata (sets, card types, grouping modes), loaded on
 	// first use by `loadMeta`.
 	meta = $state<Partial<Record<GameKey, SystemMeta>>>({});
@@ -139,6 +148,26 @@ export function applyTheme(theme: Theme) {
 	if (typeof document !== 'undefined') {
 		document.documentElement.setAttribute('data-theme', theme);
 	}
+}
+
+const clampZoom = (px: number) =>
+	Math.min(ART_ZOOM_MAX, Math.max(ART_ZOOM_MIN, Math.round(px / ART_ZOOM_STEP) * ART_ZOOM_STEP));
+
+try {
+	const saved = Number(localStorage.getItem('gathers-art-zoom'));
+	if (saved) app.artZoom = clampZoom(saved);
+} catch { /* no storage: keep the default */ }
+
+/** CSS variables for an art view at the current zoom: the card width, and
+ *  the scale relative to the default that badges, gaps and stack offsets
+ *  follow. */
+export function artZoomStyle(): string {
+	return `--art-card-w: ${app.artZoom}px; --art-scale: ${app.artZoom / ART_ZOOM_DEFAULT};`;
+}
+
+export function setArtZoom(px: number) {
+	app.artZoom = clampZoom(px);
+	try { localStorage.setItem('gathers-art-zoom', String(app.artZoom)); } catch { /* not persisted */ }
 }
 
 // Persist view mode
