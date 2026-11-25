@@ -28,7 +28,7 @@ pub(crate) async fn scrape_to_path(path: &str) -> eyre::Result<()> {
     .await
 }
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, collections::HashSet, path::PathBuf, sync::Arc};
 
 use ::models::{
     Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
@@ -165,6 +165,17 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
             }
             conditions.push(format!("({})", any.join(" OR ")));
         }
+        // `variants` is a JSON array of names, e.g. `["Normal","Reverse Holofoil"]`; match a
+        // whole quoted name so "Holofoil" doesn't also match "Reverse Holofoil".
+        if let Some(finishes) = filters.finishes.as_ref().filter(|f| !f.is_empty()) {
+            let mut any = Vec::new();
+            for f in finishes {
+                any.push(format!("variants LIKE ?{i}"));
+                params.push(format!("%\"{f}\"%"));
+                i += 1;
+            }
+            conditions.push(format!("({})", any.join(" OR ")));
+        }
         if let Some(pokedex) = &filters.pokedex {
             conditions.push(format!("pokedex = ?{i}"));
             params.push(pokedex.to_string());
@@ -276,6 +287,24 @@ impl RetrievalSystemTrait for PokemonSQLiteRetrievalSystem {
         )?;
         let types = stmt.query_map([], |row| row.get::<_, String>(0))?;
         Ok(types.flatten().collect())
+    }
+
+    async fn get_finishes(&self) -> eyre::Result<Vec<String>> {
+        let conn = self.connection.lock().await;
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT variants FROM cards WHERE variants IS NOT NULL AND variants <> ''",
+        )?;
+        let lists = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut finishes: Vec<String> = lists
+            .flatten()
+            .filter_map(|list| serde_json::from_str::<Vec<String>>(&list).ok())
+            .flatten()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        // "Normal" (the default finish) first, then alphabetical.
+        finishes.sort_by_key(|f| (f != "Normal", f.clone()));
+        Ok(finishes)
     }
 
     async fn get_random_card(&self) -> eyre::Result<Option<Card>> {

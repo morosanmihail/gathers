@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 
+use ::models::mtg::FoilStyle;
 use ::models::{
     Card, CardID, CardPrices, CollectorNumber, Set, SetCode,
     filters::{CardSearchFilters, SortField, SortOrder, UNIQUE_PRINTS, UniqueMode},
@@ -46,6 +47,31 @@ pub struct MagicSQLiteRetrievalSystem {
     /// `select_base` for the `tokens` table (see `tokens::token_select_base`), or `None` when
     /// the database has no tokens.
     token_base: Option<Arc<String>>,
+    /// The foil styles this database's printings come in, read from its promo types when the
+    /// system opens (see `load_foil_styles`).
+    foil_styles: Arc<Vec<FoilStyle>>,
+}
+
+/// The foil styles named by any promo type in `cards` (and `tokens`, when there are tokens).
+/// Empty for a database without the column, or not downloaded yet.
+fn load_foil_styles(conn: &Connection, with_tokens: bool) -> Vec<FoilStyle> {
+    let mut query = String::from("SELECT DISTINCT promoTypes FROM cards WHERE promoTypes IS NOT NULL");
+    if with_tokens {
+        query.push_str(" UNION SELECT DISTINCT promoTypes FROM tokens WHERE promoTypes IS NOT NULL");
+    }
+    let lists: Vec<String> = match conn.prepare(&query) {
+        Ok(mut stmt) => match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => vec![],
+        },
+        Err(_) => vec![],
+    };
+    let promo_types: HashSet<String> = lists
+        .iter()
+        .flat_map(|list| list.split(',').map(|p| p.trim().to_string()))
+        .filter(|p| !p.is_empty())
+        .collect();
+    ::models::mtg::foil_styles(promo_types)
 }
 
 /// Largest `skip`/`limit` a search honours (see `search_cards`): far beyond
@@ -141,6 +167,7 @@ impl MagicSQLiteRetrievalSystem {
         let conn = open_mtg_connection(&path)?;
         let rank_sql = Arc::new(unique::build_rank_sql(&conn));
         let token_base = tokens::token_select_base(&conn)?.map(Arc::new);
+        let foil_styles = Arc::new(load_foil_styles(&conn, token_base.is_some()));
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             db_path: path,
@@ -148,6 +175,7 @@ impl MagicSQLiteRetrievalSystem {
             prices_conn: Arc::new(Mutex::new(None)),
             rank_sql,
             token_base,
+            foil_styles,
         })
     }
 }
@@ -161,6 +189,53 @@ const FRONT_FACE_UUID: &str = "CASE WHEN a.side IS NULL THEN a.uuid ELSE \
      COALESCE((SELECT f.uuid FROM cards AS f \
      WHERE f.setCode = a.setCode AND f.number = a.number ORDER BY f.side LIMIT 1), a.uuid) END";
 
+/// SQL condition (over a `cards AS a` or `tokens AS a` row) for `CardSearchFilters::finishes`:
+/// the printing comes in at least one of `names` (see `models::mtg::finish_names`). "Foil" is
+/// an ordinary foil, one with none of the database's `styles`; a style name needs a foil
+/// finish and one of that style's promo types. A name that isn't a finish matches nothing.
+/// `None` when `names` is empty. Promo types come from the database itself, so they're bound
+/// as parameters: `bind` takes each value and returns its placeholder (e.g. `?7`).
+pub(super) fn finishes_condition(
+    names: &[String],
+    styles: &[FoilStyle],
+    bind: &mut dyn FnMut(String) -> String,
+) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    // `finishes` and `promoTypes` are ", "-separated lists.
+    let in_list = |column: &str, placeholder: &str| {
+        format!("(',' || REPLACE(COALESCE(a.{column}, ''), ' ', '') || ',') LIKE '%,' || {placeholder} || ',%'")
+    };
+    let has_finish = |finish: &str| in_list("finishes", &format!("'{finish}'"));
+    let mut has_style = |style: &FoilStyle| -> String {
+        let any: Vec<String> = style
+            .promo_types
+            .iter()
+            .map(|p| in_list("promoTypes", &bind(p.clone())))
+            .collect();
+        format!("({})", any.join(" OR "))
+    };
+    let mut any = Vec::new();
+    for name in names {
+        let condition = match name.to_lowercase().as_str() {
+            "normal" | "nonfoil" => has_finish("nonfoil"),
+            "etched" => has_finish("etched"),
+            "foil" if styles.is_empty() => has_finish("foil"),
+            "foil" => {
+                let styled: Vec<String> = styles.iter().map(&mut has_style).collect();
+                format!("({} AND NOT ({}))", has_finish("foil"), styled.join(" OR "))
+            }
+            other => match styles.iter().find(|s| s.label.eq_ignore_ascii_case(other)) {
+                Some(style) => format!("({} AND {})", has_finish("foil"), has_style(style)),
+                None => "0".to_string(),
+            },
+        };
+        any.push(condition);
+    }
+    Some(format!("({})", any.join(" OR ")))
+}
+
 /// `SELECT ... FROM ...` clause shared by `search_cards` and `get_cards_by_ids`, kept in
 /// sync with the column names `SqlCard::from_row` reads by name.
 fn select_base() -> String {
@@ -173,7 +248,7 @@ fn select_base() -> String {
         "SELECT a.uuid, a.name, a.setCode, a.rarity, a.artist, a.colorIdentity, a.text, \
          b.scryfallId, a.number, a.subtypes, a.supertypes, a.types, a.manaCost, a.manaValue, \
          a.type, a.power, a.toughness, a.loyalty, a.defense, a.keywords, a.colors, a.finishes, \
-         a.isReserved, a.isPromo, a.isReprint, a.borderColor, a.frameEffects, a.isFullArt, \
+         a.promoTypes, a.isReserved, a.isPromo, a.isReprint, a.borderColor, a.frameEffects, a.isFullArt, \
          a.watermark, a.flavorText, s.name AS set_name, {legality_cols} \
          FROM cards as a \
          JOIN cardIdentifiers as b ON a.uuid = b.uuid \
@@ -385,6 +460,16 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
             }
             conditions.push(format!("({})", any.join(" OR ")));
         }
+        if let Some(names) = filters.finishes.as_deref() {
+            let mut bind = |value: String| {
+                params.push(value);
+                i += 1;
+                format!("?{}", i - 1)
+            };
+            if let Some(condition) = finishes_condition(names, &self.foil_styles, &mut bind) {
+                conditions.push(condition);
+            }
+        }
         if let Some(min) = filters.mana_value_min {
             conditions.push(format!("a.manaValue >= ?{i}"));
             params.push(min.to_string());
@@ -531,7 +616,13 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         // (few: the whole table is ~10k rows) are merged into the cards' by sort order, so
         // the cards needed are every one that could land before the end of the page.
         let tokens = match &self.token_base {
-            Some(_) => tokens::search_tokens(&conn, &filters, mode, skip.saturating_add(limit))?,
+            Some(_) => tokens::search_tokens(
+                &conn,
+                &filters,
+                &self.foil_styles,
+                mode,
+                skip.saturating_add(limit),
+            )?,
             None => vec![],
         };
         let (skip, limit, merge_from) = if tokens.is_empty() {
@@ -685,6 +776,10 @@ impl RetrievalSystemTrait for MagicSQLiteRetrievalSystem {
         })?;
         let rows: Vec<(Option<String>, i64)> = rows.flatten().collect();
         Ok(common_types(rows, MIN_TYPE_PRINTINGS))
+    }
+
+    async fn get_finishes(&self) -> eyre::Result<Vec<String>> {
+        Ok(::models::mtg::finish_names(&self.foil_styles))
     }
 
     async fn get_random_card(&self) -> eyre::Result<Option<Card>> {

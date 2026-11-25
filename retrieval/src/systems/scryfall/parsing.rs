@@ -176,6 +176,7 @@ pub fn parse_card(card: &Map<String, Value>) -> Option<Card> {
         ),
         legalities: parse_legalities(card.get("legalities")),
         finishes: parse_string_array(card.get("finishes")),
+        foil_style: models::mtg::foil_style(&parse_string_array(card.get("promo_types"))),
         is_reserved: card
             .get("reserved")
             .and_then(Value::as_bool)

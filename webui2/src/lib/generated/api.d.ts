@@ -2686,6 +2686,11 @@ export interface components {
             defense?: string | null;
             finishes: string[];
             flavorText?: string | null;
+            /**
+             * @description Display name of the printing's special foil treatment (e.g. "Surge Foil"), describing
+             *     its `foil` finish only. Absent for ordinary foils.
+             */
+            foilStyle?: string | null;
             frameEffects: string[];
             id: string;
             isFullArt: boolean;
@@ -2733,6 +2738,12 @@ export interface components {
             defense?: string | null;
             domains?: components["schemas"]["APICardDomain"][] | null;
             energy_types?: components["schemas"]["APIEnergyType"][] | null;
+            /**
+             * @description Finishes a card must come in at least one of, by the names the game's `/meta` lists
+             *     under `finishes` (e.g. `["Foil", "Surge Foil"]`), matched case-insensitively. In a
+             *     collection search this matches each entry's own finish rather than the printing's.
+             */
+            finishes?: string[] | null;
             is_full_art?: boolean | null;
             is_promo?: boolean | null;
             is_reprint?: boolean | null;
@@ -2821,6 +2832,11 @@ export interface components {
         APISystemMeta: {
             /** @description Values for `APICardSearchFilters::any_types`, sorted. */
             card_types: string[];
+            /**
+             * @description Values for `APICardSearchFilters::finishes`, the game's default finish first. Empty
+             *     when the game has no finish data to filter on.
+             */
+            finishes: string[];
             sets: components["schemas"]["Set"][];
             /**
              * @description Values for `APICardSearchFilters::unique`, default first. Empty when

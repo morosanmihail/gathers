@@ -60,6 +60,7 @@ pub struct SqlCard {
     pub colors: String,
     pub legalities: HashMap<String, String>,
     pub finishes: String,
+    pub promo_types: String,
     pub is_reserved: bool,
     pub is_promo: bool,
     pub is_reprint: bool,
@@ -120,6 +121,9 @@ impl SqlCard {
             legalities,
             finishes: row
                 .get::<_, Option<String>>("finishes")?
+                .unwrap_or_default(),
+            promo_types: row
+                .get::<_, Option<String>>("promoTypes")?
                 .unwrap_or_default(),
             // mtgjson stores these boolean columns as 1 for true and NULL (not 0) for false.
             is_reserved: row.get::<_, Option<bool>>("isReserved")?.unwrap_or(false),
@@ -182,6 +186,7 @@ impl From<SqlCard> for MagicCard {
         let keywords = split_list(&value.keywords);
         let finishes = split_list(&value.finishes);
         let frame_effects = split_list(&value.frame_effects);
+        let foil_style = ::models::mtg::foil_style(&split_list(&value.promo_types));
         MagicCard {
             id: value.id,
             name: value.name,
@@ -209,6 +214,7 @@ impl From<SqlCard> for MagicCard {
             colors,
             legalities: value.legalities,
             finishes,
+            foil_style,
             is_reserved: value.is_reserved,
             is_promo: value.is_promo,
             is_reprint: value.is_reprint,

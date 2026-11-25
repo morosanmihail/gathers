@@ -476,6 +476,21 @@ async fn hydrate_collectibles(
     out
 }
 
+/// Whether a collection entry's own finish is one of `filters.finishes` (any finish when there
+/// are none). The entry's finish is named the way the game's `/meta` names it: `""` is
+/// "Normal", and an MTG foil with a special style goes by that style ("Surge Foil").
+fn matches_entry_finish(entry_finish: &str, card: &AnyCollectible, filters: &APICardSearchFilters) -> bool {
+    let Some(wanted) = filters.finishes.as_ref().filter(|f| !f.is_empty()) else {
+        return true;
+    };
+    let name = match (entry_finish, card) {
+        ("", _) => "Normal",
+        ("foil", AnyCollectible::Known(Card::Magic(m))) => m.foil_style.as_deref().unwrap_or("foil"),
+        (finish, _) => finish,
+    };
+    wanted.iter().any(|w| w.eq_ignore_ascii_case(name))
+}
+
 fn matches_card_filters(card: &AnyCollectible, filters: &APICardSearchFilters) -> bool {
     match card {
         AnyCollectible::Known(card) => matches_known_card_filters(card, filters),
@@ -1756,7 +1771,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .filter(|cc| {
                 card_data
                     .get(&cc.uuid)
-                    .map(|card| matches_card_filters(card, &filters))
+                    .map(|card| {
+                        matches_card_filters(card, &filters)
+                            && matches_entry_finish(&cc.finish, card, &filters)
+                    })
                     .unwrap_or(false)
             })
             .collect();
@@ -1837,7 +1855,10 @@ pub fn collection_routes() -> ApiRouter<GathersState> {
             .filter(|cc| {
                 card_data
                     .get(&cc.uuid)
-                    .map(|card| matches_card_filters(card, &filters))
+                    .map(|card| {
+                        matches_card_filters(card, &filters)
+                            && matches_entry_finish(&cc.finish, card, &filters)
+                    })
                     .unwrap_or(false)
             })
             .count();
@@ -2606,5 +2627,39 @@ mod collection_guard_tests {
                 .await
                 .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod finish_filter_tests {
+    use super::*;
+
+    fn filters(finishes: &[&str]) -> APICardSearchFilters {
+        APICardSearchFilters {
+            finishes: Some(finishes.iter().map(|f| f.to_string()).collect()),
+            ..Default::default()
+        }
+    }
+
+    fn magic(foil_style: Option<&str>) -> AnyCollectible {
+        AnyCollectible::Known(Card::Magic(models::MagicCard {
+            foil_style: foil_style.map(String::from),
+            ..Default::default()
+        }))
+    }
+
+    #[test]
+    fn entries_match_by_their_own_finish() {
+        let surge = magic(Some("Surge Foil"));
+        assert!(matches_entry_finish("foil", &surge, &filters(&["surge foil"])));
+        assert!(!matches_entry_finish("foil", &surge, &filters(&["Foil"])));
+        // The nonfoil copy of a printing whose foil is a surge foil is just normal.
+        assert!(matches_entry_finish("", &surge, &filters(&["Normal"])));
+        assert!(!matches_entry_finish("", &surge, &filters(&["Surge Foil"])));
+
+        let plain = magic(None);
+        assert!(matches_entry_finish("foil", &plain, &filters(&["Foil"])));
+        assert!(matches_entry_finish("etched", &plain, &filters(&["Etched", "Foil"])));
+        assert!(matches_entry_finish("foil", &plain, &APICardSearchFilters::default()));
     }
 }

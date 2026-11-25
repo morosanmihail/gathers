@@ -3,6 +3,9 @@ use models::filters::CardSearchFilters;
 /// Scryfall returns at most this many cards per page of search results.
 pub const PAGE_SIZE: usize = 175;
 
+/// The finishes a Scryfall search can filter by: just the plain ones its `is:` keywords cover.
+pub(super) const SCRYFALL_FINISHES: &[&str] = &["Normal", "Foil", "Etched"];
+
 /// Wraps a value in double quotes for Scryfall's query syntax, escaping any
 /// literal double-quotes, so values containing spaces or commas (card names,
 /// artist names, oracle text snippets) are treated as one term instead of
@@ -51,6 +54,21 @@ pub fn build_query_string(filters: &CardSearchFilters) -> String {
     // Any one of the types will do.
     if let Some(any_types) = filters.any_types.as_ref().filter(|t| !t.is_empty()) {
         let any: Vec<String> = any_types.iter().map(|t| format!("type:{t}")).collect();
+        query.push(format!("({})", any.join(" or ")));
+    }
+
+    // Any one of the finishes will do. Scryfall's `is:` keywords only know the plain finishes
+    // (see `SCRYFALL_FINISHES`), so "Foil" here is any foil; other names match nothing.
+    if let Some(finishes) = filters.finishes.as_ref().filter(|f| !f.is_empty()) {
+        let any: Vec<&str> = finishes
+            .iter()
+            .map(|f| match f.to_lowercase().as_str() {
+                "normal" | "nonfoil" => "is:nonfoil",
+                "foil" => "is:foil",
+                "etched" => "is:etched",
+                _ => "-is:nonfoil -is:foil -is:etched",
+            })
+            .collect();
         query.push(format!("({})", any.join(" or ")));
     }
 
@@ -254,6 +272,15 @@ mod tests {
             build_query_string(&filters),
             "kw:\"Flying\" pow:4 tou:4 loy:3 defense:5"
         );
+    }
+
+    #[test]
+    fn finishes_are_alternatives() {
+        let filters = CardSearchFilters {
+            finishes: Some(vec!["Foil".to_string(), "Etched".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(build_query_string(&filters), "(is:foil or is:etched)");
     }
 
     #[test]

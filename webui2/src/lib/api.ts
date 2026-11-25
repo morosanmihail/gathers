@@ -1035,6 +1035,7 @@ function buildSearchBody(filters: SearchFilters): Partial<ApiSearchFilters> {
 	if (filters.domains.length) body.domains = filters.domains as ApiSearchFilters['domains'];
 	if (filters.energyTypes.length) body.energy_types = filters.energyTypes as ApiSearchFilters['energy_types'];
 	if (filters.cardTypes.length) body.any_types = filters.cardTypes;
+	if (filters.finishes.length) body.finishes = filters.finishes;
 	const pokedex = parseInt(filters.pokedex, 10);
 	if (!isNaN(pokedex)) body.pokedex = pokedex;
 	if (filters.sortBy) body.sort_by = filters.sortBy as ApiSearchFilters['sort_by'];

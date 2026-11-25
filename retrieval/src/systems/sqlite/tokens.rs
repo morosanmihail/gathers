@@ -73,7 +73,7 @@ pub(super) fn token_select_base(conn: &Connection) -> eyre::Result<Option<String
          COALESCE(a.subtypes, '') AS subtypes, COALESCE(a.supertypes, '') AS supertypes, \
          COALESCE(a.types, '') AS types, a.manaCost, NULL AS manaValue, a.type, a.power, \
          a.toughness, NULL AS loyalty, NULL AS defense, a.keywords, a.colors, a.finishes, \
-         NULL AS isReserved, a.isPromo, a.isReprint, a.borderColor, a.frameEffects, a.isFullArt, \
+         a.promoTypes, NULL AS isReserved, a.isPromo, a.isReprint, a.borderColor, a.frameEffects, a.isFullArt, \
          a.watermark, a.flavorText, {set_name} AS set_name, {legality_cols} \
          FROM tokens AS a \
          JOIN tokenIdentifiers AS b ON a.uuid = b.uuid"
@@ -180,6 +180,7 @@ pub(super) fn merge<'a>(
 pub(super) fn search_tokens(
     conn: &Connection,
     filters: &CardSearchFilters,
+    foil_styles: &[::models::mtg::FoilStyle],
     mode: &str,
     max: usize,
 ) -> eyre::Result<Vec<(String, SortValue)>> {
@@ -262,6 +263,15 @@ pub(super) fn search_tokens(
             })
             .collect();
         conditions.push(format!("({})", any.join(" OR ")));
+    }
+    if let Some(names) = filters.finishes.as_deref() {
+        let mut bind = |value: String| {
+            params.push(Value::Text(value));
+            format!("?{}", params.len())
+        };
+        if let Some(condition) = super::finishes_condition(names, foil_styles, &mut bind) {
+            conditions.push(condition);
+        }
     }
     for (column, value) in [
         ("a.isPromo", filters.is_promo),

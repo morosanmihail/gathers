@@ -101,7 +101,7 @@
 					// collection flow collects is dropped here
 					: adjustDeckCard(collection, card.id, finish, deckBoard, 1, providerFromActiveSystem(activeSystem))
 			);
-			toast = `Added ${card.name}${finish ? ` (${finishLabel(finish)})` : ''}`;
+			toast = `Added ${card.name}${finish ? ` (${finishLabel(finish, card)})` : ''}`;
 			setTimeout(() => toast = '', 2000);
 			onAdded?.();
 		} catch {

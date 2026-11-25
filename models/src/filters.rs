@@ -72,6 +72,9 @@ pub struct CardSearchFilters {
     /// `types`, which requires all of them.
     #[serde(alias = "anyTypes")]
     pub any_types: Option<Vec<String>>,
+    /// Finishes (as the system's `SystemMeta::finishes` names them, e.g. "Foil", "Surge Foil",
+    /// "Reverse Holofoil") a card must be printed in at least one of. Matched case-insensitively.
+    pub finishes: Option<Vec<String>>,
     /// MTG-only: minimum mana value (converted mana cost), inclusive.
     #[serde(alias = "manaValueMin")]
     pub mana_value_min: Option<f64>,

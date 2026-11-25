@@ -133,7 +133,7 @@
 					<div class="deck-row-name">
 						<CardImageTooltip {card} />
 						{#if card.finish}
-							<span class="deck-row-finish">{finishLabel(card.finish)}</span>
+							<span class="deck-row-finish">{finishLabel(card.finish, card)}</span>
 						{/if}
 					</div>
 

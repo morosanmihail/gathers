@@ -609,7 +609,7 @@
 				<CardArtPanel card={hovered} onclick={() => (detailOpened = hovered)}>
 					{#if hovered.finish}
 						<dt>Finish</dt>
-						<dd>{finishLabel(hovered.finish)}</dd>
+						<dd>{finishLabel(hovered.finish, hovered)}</dd>
 					{/if}
 					{#if boards.length > 1}
 						<dt>Board</dt>

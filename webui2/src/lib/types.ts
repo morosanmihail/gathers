@@ -29,6 +29,7 @@ export interface DeckCard extends PartialBy<DeckEntry, 'timeAdded' | 'timeUpdate
 	rarity?: string;
 	imageUrl?: string;
 	finishes?: string[];
+	foilStyle?: string | null;
 }
 
 export type CardAvailability = components['schemas']['CardAvailability'];
@@ -119,6 +120,8 @@ export interface CollectionCard extends PartialBy<CollectionEntry, 'timeAdded' |
 	// which finishes the "add another version" picker offers. Absent for
 	// games with no such catalog data yet (Riftbound).
 	finishes?: string[];
+	// MTG only: the printing's special foil treatment, see `finishLabel`.
+	foilStyle?: string | null;
 }
 
 // One card (by uuid), grouped back together from its individual per-finish
@@ -146,9 +149,15 @@ export function groupByCard(cards: CollectionCard[]): CardGroup[] {
 
 // Human label for a finish value — "" (the default/primary finish) reads
 // as "Normal", anything else is title-cased as-is (MTG's "foil"/"etched",
-// a Pokemon variant like "reverse holo", ...).
-export function finishLabel(finish: string): string {
+// a Pokemon variant like "reverse holo", ...). Pass the card when there is
+// one: an MTG printing with a special foil treatment (`foilStyle`, e.g.
+// "Surge Foil") names its "foil" finish after it.
+export function finishLabel(finish: string, card?: object | null): string {
 	if (!finish) return 'Normal';
+	if (finish === 'foil') {
+		const style = (card as { foilStyle?: string | null } | null | undefined)?.foilStyle;
+		if (style) return style;
+	}
 	return finish.charAt(0).toUpperCase() + finish.slice(1);
 }
 
@@ -205,6 +214,10 @@ export interface SearchFilters {
 	// Card types (from the game's `SystemMeta.card_types`); a card matching
 	// any one of them is kept.
 	cardTypes: string[];
+	// Finishes / foil styles (from the game's `SystemMeta.finishes`, e.g.
+	// "Foil", "Surge Foil", "Reverse Holofoil"); a card in any one of them is
+	// kept. In a collection this is each entry's own finish.
+	finishes: string[];
 	sortBy: string;
 	sortOrder: 'Asc' | 'Desc';
 	// How results sharing a card are collapsed — one of the active system's
@@ -286,6 +299,7 @@ export function defaultFilters(): SearchFilters {
 		energyTypes: [],
 		pokedex: '',
 		cardTypes: [],
+		finishes: [],
 		sortBy: 'Name',
 		sortOrder: 'Asc',
 		unique: '',
