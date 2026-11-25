@@ -439,3 +439,36 @@ async fn test_search_any_types_matches_either_type() {
     // 79 gear + 12 runes in the fixture.
     assert_eq!(cards.len(), 91);
 }
+
+#[tokio::test]
+async fn test_finishes_come_from_price_db() {
+    let dir = TempDir::new().unwrap();
+    let system = priced_system(&dir);
+    assert_eq!(system.get_finishes().await.unwrap(), vec!["Normal", "Foil"]);
+
+    let search = |finish: &str| CardSearchFilters {
+        finishes: Some(vec![finish.to_string()]),
+        ..Default::default()
+    };
+    let ids = |cards: Vec<Card>| -> Vec<String> {
+        let mut ids: Vec<String> = cards
+            .into_iter()
+            .map(|c| match c {
+                Card::Riftbound(r) => r.id,
+                _ => panic!("expected Riftbound card"),
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    let foil = system.search_cards(search("foil"), None, Some(100)).await.unwrap();
+    assert_eq!(ids(foil), vec!["ogn-269-298", "sfd-162-221"]);
+    let normal = system.search_cards(search("Normal"), None, Some(100)).await.unwrap();
+    assert_eq!(ids(normal), vec!["sfd-162-221"]);
+}
+
+#[tokio::test]
+async fn test_no_finishes_without_price_db() {
+    let system = RiftboundSQLiteRetrievalSystem::new(None, None).unwrap();
+    assert!(system.get_finishes().await.unwrap().is_empty());
+}

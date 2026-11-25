@@ -65,6 +65,7 @@
 		if (params.has('collectorNumber')) { overrides.collectorNumber = str('collectorNumber'); hasFilter = true; }
 		if (params.has('colors'))          { overrides.colorIdentities = str('colors').split(',').filter(Boolean); hasFilter = true; }
 		if (params.has('types'))           { overrides.cardTypes = str('types').split(',').filter(Boolean); hasFilter = true; }
+		if (params.has('finishes'))        { overrides.finishes = str('finishes').split(',').filter(Boolean); hasFilter = true; }
 		if (params.has('sortBy'))          overrides.sortBy = str('sortBy');
 		if (params.has('sortOrder'))       overrides.sortOrder = str('sortOrder') as 'Asc' | 'Desc';
 		if (params.has('unique'))          overrides.unique = str('unique');
@@ -124,6 +125,7 @@
 		if (filters.collectorNumber)         params.set('collectorNumber', filters.collectorNumber);
 		if (filters.colorIdentities.length)  params.set('colors', filters.colorIdentities.join(','));
 		if (filters.cardTypes.length)        params.set('types', filters.cardTypes.join(','));
+		if (filters.finishes.length)         params.set('finishes', filters.finishes.join(','));
 		if (filters.sortBy !== 'Name')       params.set('sortBy', filters.sortBy);
 		if (filters.sortOrder !== 'Asc')     params.set('sortOrder', filters.sortOrder);
 		if (filters.unique)                  params.set('unique', filters.unique);
@@ -211,7 +213,7 @@
 			await app.withOp(`Adding ${addTarget.name}`, () =>
 				addCardToCollection(addCollection, addTarget!.id, addFinish, 1, purchase, providerFromActiveSystem(activeSystem))
 			);
-			toast = `Added "${addTarget.name}"${addFinish ? ` (${finishLabel(addFinish)})` : ''} to ${addCollection}`;
+			toast = `Added "${addTarget.name}"${addFinish ? ` (${finishLabel(addFinish, addTarget)})` : ''} to ${addCollection}`;
 			setTimeout(() => toast = '', 3000);
 		} catch (e) {
 			toast = `Error: ${e}`;
@@ -304,7 +306,7 @@
 	<div class="confirm-overlay" role="dialog" aria-modal="true">
 		<div class="confirm-box">
 			<h4>Add to collection</h4>
-			<p>Add <strong>{addTarget.name}</strong>{addFinish ? ` (${finishLabel(addFinish)})` : ''} to:</p>
+			<p>Add <strong>{addTarget.name}</strong>{addFinish ? ` (${finishLabel(addFinish, addTarget)})` : ''} to:</p>
 			{#if app.collections.length > 0}
 				<select class="input" bind:value={addCollection} style="margin-bottom: 10px;">
 					{#each addableCollections as col}

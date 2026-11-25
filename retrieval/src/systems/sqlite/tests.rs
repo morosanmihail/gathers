@@ -2069,3 +2069,77 @@ async fn test_meta_gathers_sets_card_types_and_unique_modes() {
     let modes: Vec<_> = meta.unique_modes.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(modes, vec!["prints", "cards", "art"]);
 }
+
+#[tokio::test]
+async fn test_foil_style_comes_from_promo_types() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("foil.db");
+    std::fs::copy("../data/testPrintings.db", &path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE cards SET promoTypes = 'universesbeyond, surgefoil' WHERE name = 'Grave Titan'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let system =
+        MagicSQLiteRetrievalSystem::new(Some(path.to_string_lossy().into_owned()), None).unwrap();
+
+    let search = |name: &str| CardSearchFilters {
+        name: Some(name.to_string()),
+        ..Default::default()
+    };
+    let cards = system.search_cards(search("Grave Titan"), None, None).await.unwrap();
+    let card = as_magic(cards.first().expect("expected Grave Titan"));
+    assert_eq!(card.foil_style.as_deref(), Some("Surge Foil"));
+
+    let cards = system.search_cards(search("Goblin King"), None, None).await.unwrap();
+    let card = as_magic(cards.first().expect("expected Goblin King"));
+    assert_eq!(card.foil_style, None);
+}
+
+#[tokio::test]
+async fn test_search_by_finish() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("finish.db");
+    std::fs::copy("../data/testPrintings.db", &path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE cards SET finishes = 'foil', promoTypes = 'surgefoil, universesbeyond' \
+         WHERE name = 'Grave Titan'",
+        [],
+    )
+    .unwrap();
+    conn.execute("UPDATE cards SET finishes = 'foil, nonfoil' WHERE name = 'Goblin King'", [])
+        .unwrap();
+    drop(conn);
+    let system =
+        MagicSQLiteRetrievalSystem::new(Some(path.to_string_lossy().into_owned()), None).unwrap();
+
+    let names = |finishes: &[&str]| {
+        let filters = CardSearchFilters {
+            finishes: Some(finishes.iter().map(|f| f.to_string()).collect()),
+            ..Default::default()
+        };
+        let system = system.clone();
+        async move {
+            let cards = system.search_cards(filters, None, Some(100_000)).await.unwrap();
+            cards.iter().map(|c| as_magic(c).name.clone()).collect::<Vec<_>>()
+        }
+    };
+
+    // A surge foil is found by its style, and isn't an ordinary foil.
+    let surge = names(&["surge foil"]).await;
+    assert!(surge.contains(&"Grave Titan".to_string()), "{surge:?}");
+    assert!(!surge.contains(&"Goblin King".to_string()));
+    let foil = names(&["Foil"]).await;
+    assert!(foil.contains(&"Goblin King".to_string()));
+    assert!(!foil.contains(&"Grave Titan".to_string()));
+    let normal = names(&["Normal"]).await;
+    assert!(normal.contains(&"Goblin King".to_string()));
+    assert!(!normal.contains(&"Grave Titan".to_string()));
+    // Any one of several will do; an unknown name matches nothing.
+    let either = names(&["Surge Foil", "Foil"]).await;
+    assert!(either.contains(&"Grave Titan".to_string()) && either.contains(&"Goblin King".to_string()));
+    assert!(names(&["Sparkly"]).await.is_empty());
+}

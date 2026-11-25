@@ -78,6 +78,11 @@ class AppState {
 		return this.meta[game]?.card_types ?? [];
 	}
 
+	/** Finishes `game` can be filtered by, empty until `loadMeta(game)` has finished. */
+	finishes(game: GameKey): string[] {
+		return this.meta[game]?.finishes ?? [];
+	}
+
 	async loadMeta(game: GameKey) {
 		if (this.meta[game]) return;
 		try {

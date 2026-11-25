@@ -19,6 +19,7 @@
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
 	function toggleCardType(t: string) { set('cardTypes', toggleInList(filters.cardTypes, t)); }
+	function toggleFinish(f: string) { set('finishes', toggleInList(filters.finishes, f)); }
 
 	// Provider string for each installed game, '' if that game isn't configured
 	const mtgProvider  = $derived(app.systems.find(s => s === 'MagicSQLite' || s === 'Scryfall') ?? '');
@@ -38,6 +39,15 @@
 		if (showRift) groups.push({ game: 'Riftbound', types: app.cardTypes('riftbound') });
 		if (showPoke) groups.push({ game: 'Pokémon', types: app.cardTypes('pokemon') });
 		return groups.filter(g => g.types.length);
+	});
+	// Finishes of every game shown, matched against each entry's own finish.
+	// Games share names like "Normal" and "Foil", so they're listed once.
+	const finishOptions = $derived.by(() => {
+		const all: string[] = [];
+		if (showMtg) all.push(...app.finishes('mtg'));
+		if (showRift) all.push(...app.finishes('riftbound'));
+		if (showPoke) all.push(...app.finishes('pokemon'));
+		return [...new Set(all)];
 	});
 	$effect(() => {
 		if (showMtg) app.loadMeta('mtg');
@@ -109,6 +119,24 @@
 							{/each}
 						</div>
 					{/each}
+				</div>
+			</details>
+		{/if}
+
+		{#if finishOptions.length}
+			<details class="cfilter-types">
+				<summary class="input cfilter-input" title="Entries in any selected finish match">
+					{filters.finishes.length ? `Finishes (${filters.finishes.length})` : 'Any finish'}
+				</summary>
+				<div class="cfilter-types-menu">
+					<div class="cfilter-energy-chips">
+						{#each finishOptions as f}
+							<label class="chip-checkbox" class:checked={filters.finishes.includes(f)}>
+								<input type="checkbox" checked={filters.finishes.includes(f)} onchange={() => toggleFinish(f)} />
+								{f}
+							</label>
+						{/each}
+					</div>
 				</div>
 			</details>
 		{/if}

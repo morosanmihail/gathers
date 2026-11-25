@@ -200,7 +200,7 @@
 					{#if printedFinishes.length > 1}
 						<div class="card-detail-row">
 							<span class="card-detail-label">Finishes</span>
-							<span>{printedFinishes.map(finishLabel).join(', ')}</span>
+							<span>{printedFinishes.map((f) => finishLabel(f, card)).join(', ')}</span>
 						</div>
 					{/if}
 					{#if currentPriceRows.length > 0}
@@ -208,7 +208,7 @@
 							<span class="card-detail-label">Price</span>
 							<span>
 								{#each currentPriceRows as row, i (row.finish)}
-									{i > 0 ? ' · ' : ''}{#if currentPriceRows.length > 1}<span class="price-finish">{finishLabel(row.finish)}</span>{' '}{/if}<strong>{row.text}</strong>
+									{i > 0 ? ' · ' : ''}{#if currentPriceRows.length > 1}<span class="price-finish">{finishLabel(row.finish, card)}</span>{' '}{/if}<strong>{row.text}</strong>
 								{/each}
 								{#if priceSource}<span class="price-source">at {retailerLabel(priceSource)}</span>{/if}
 							</span>
@@ -218,7 +218,7 @@
 						{#if deckRow.finish}
 							<div class="card-detail-row">
 								<span class="card-detail-label">Finish</span>
-								<span>{finishLabel(deckRow.finish)}</span>
+								<span>{finishLabel(deckRow.finish, card)}</span>
 							</div>
 						{/if}
 						<div class="card-detail-row">
@@ -255,7 +255,7 @@
 								<span class="card-detail-label">Owned</span>
 								<span>
 									{#each ownedFinishes as entry, i (entry.finish ?? '')}
-										{i > 0 ? ', ' : ''}{entry.quantity} {finishLabel(entry.finish ?? '')}
+										{i > 0 ? ', ' : ''}{entry.quantity} {finishLabel(entry.finish ?? '', card)}
 									{/each}
 								</span>
 							</div>
@@ -287,6 +287,7 @@
 				cardId={card.id}
 				initialFinish={ownedFinishes[0]?.finish ?? ownFinish ?? ''}
 				{currentPrices}
+				{card}
 			/>
 		</div>
 	</div>

@@ -23,9 +23,11 @@
 		initialFinish?: string;
 		/** Current prices, to put the card's preferred retailer first. */
 		currentPrices?: CardPrices | null;
+		/** The card itself, so a special foil reads as e.g. "Surge Foil". */
+		card?: object;
 	}
 
-	let { provider, cardId, initialFinish = '', currentPrices = null }: Props = $props();
+	let { provider, cardId, initialFinish = '', currentPrices = null, card }: Props = $props();
 
 	const MAX_SERIES = 3;
 	const HEIGHT = 220;
@@ -271,7 +273,7 @@
 				<div class="ph-sub">
 					{[
 						...(allSeries.length === 1 ? [retailerLabel(allSeries[0].retailer)] : []),
-						finishLabel(finish),
+						finishLabel(finish, card),
 						currency,
 						`${days.length} snapshot${days.length === 1 ? '' : 's'} since ${fmtDay(days[0], true)}`,
 					].join(' · ')}
@@ -284,7 +286,7 @@
 				{#if finishes.length > 1}
 					<div class="seg" role="group" aria-label="Finish">
 						{#each finishes as f (f)}
-							<button class:active={f === finish} aria-pressed={f === finish} onclick={() => { chosenFinish = f; hoverIdx = null; }}>{finishLabel(f)}</button>
+							<button class:active={f === finish} aria-pressed={f === finish} onclick={() => { chosenFinish = f; hoverIdx = null; }}>{finishLabel(f, card)}</button>
 						{/each}
 					</div>
 				{/if}

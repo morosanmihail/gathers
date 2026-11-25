@@ -81,6 +81,10 @@ pub struct APICardSearchFilters {
     /// matches artifacts and enchantments alike. `types` requires all of them.
     #[serde(alias = "anyTypes")]
     pub any_types: Option<Vec<String>>,
+    /// Finishes a card must come in at least one of, by the names the game's `/meta` lists
+    /// under `finishes` (e.g. `["Foil", "Surge Foil"]`), matched case-insensitively. In a
+    /// collection search this matches each entry's own finish rather than the printing's.
+    pub finishes: Option<Vec<String>>,
     #[serde(alias = "manaValueMin")]
     pub mana_value_min: Option<f64>,
     #[serde(alias = "manaValueMax")]
@@ -156,6 +160,7 @@ impl From<APICardSearchFilters> for models::filters::CardSearchFilters {
             supertypes: value.supertypes,
             types: value.types,
             any_types: value.any_types,
+            finishes: value.finishes,
             mana_value_min: value.mana_value_min,
             mana_value_max: value.mana_value_max,
             colors: value

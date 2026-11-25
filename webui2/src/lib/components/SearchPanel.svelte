@@ -2,6 +2,7 @@
 	import type { SearchFilters, CardSet, TriState } from '$lib/types';
 	import { legalityFormats, borderColors, colorOptions, riftboundDomains, pokemonEnergyTypes, toggleInList } from '$lib/types';
 	import { app } from '$lib/state.svelte';
+	import PillSelect from './PillSelect.svelte';
 
 	interface Props {
 		filters: SearchFilters;
@@ -42,7 +43,6 @@
 	function toggleActualColor(color: string) { set('colors', toggleInList(filters.colors, color)); }
 	function toggleDomain(d: string) { set('domains', toggleInList(filters.domains, d)); }
 	function toggleEnergy(e: string) { set('energyTypes', toggleInList(filters.energyTypes, e)); }
-	function toggleCardType(t: string) { set('cardTypes', toggleInList(filters.cardTypes, t)); }
 
 	const isPlugin = $derived(activeSystem?.startsWith('plugin:') ?? false);
 	const showMtg  = $derived(!activeSystem || activeSystem === 'Scryfall' || (activeSystem.includes('Magic') || (activeSystem.includes('Sql') && !activeSystem.includes('Rift') && !activeSystem.includes('Pokemon'))));
@@ -88,6 +88,26 @@
 				: [...baseSortOptions, { value: 'Artist', label: 'Artist' }]
 	);
 </script>
+
+{#snippet typeField(types: string[])}
+	{#if types.length}
+	<div class="field">
+		<span class="field-label" title="Cards of any selected type match">Card Type</span>
+		<PillSelect label="Card type" placeholder="Any type" options={types}
+			selected={filters.cardTypes} onchange={(v) => set('cardTypes', v)} />
+	</div>
+	{/if}
+{/snippet}
+
+{#snippet finishField(finishes: string[])}
+	{#if finishes.length}
+	<div class="field">
+		<span class="field-label" title="Cards printed in any selected finish match">Finish</span>
+		<PillSelect label="Finish" placeholder="Any finish" options={finishes}
+			selected={filters.finishes} onchange={(v) => set('finishes', v)} />
+	</div>
+	{/if}
+{/snippet}
 
 <div class="search-panel">
 	{#if !compact}<h2>Search</h2>{/if}
@@ -179,20 +199,9 @@
 					</div>
 				</div>
 
-				{#if app.cardTypes('mtg').length}
-				<div class="field">
-					<span class="field-label" title="Cards of any selected type match">Card Type</span>
-					<div class="checkbox-group">
-						{#each app.cardTypes('mtg') as t}
-							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
-								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
-									onchange={() => toggleCardType(t)} />
-								{t}
-							</label>
-						{/each}
-					</div>
-				</div>
-				{/if}
+				{@render typeField(app.cardTypes('mtg'))}
+
+				{@render finishField(app.finishes('mtg'))}
 
 				<div class="field">
 					<select class="input" value={filters.rarity}
@@ -329,20 +338,9 @@
 					</div>
 				</div>
 
-				{#if app.cardTypes('riftbound').length}
-				<div class="field">
-					<span class="field-label" title="Cards of any selected type match">Card Type</span>
-					<div class="checkbox-group">
-						{#each app.cardTypes('riftbound') as t}
-							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
-								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
-									onchange={() => toggleCardType(t)} />
-								{t}
-							</label>
-						{/each}
-					</div>
-				</div>
-				{/if}
+				{@render typeField(app.cardTypes('riftbound'))}
+
+				{@render finishField(app.finishes('riftbound'))}
 
 				<div class="field">
 					<select class="input" value={filters.rarity}
@@ -375,20 +373,9 @@
 					</div>
 				</div>
 
-				{#if app.cardTypes('pokemon').length}
-				<div class="field">
-					<span class="field-label" title="Cards of any selected type match">Card Type</span>
-					<div class="checkbox-group">
-						{#each app.cardTypes('pokemon') as t}
-							<label class="chip-checkbox" class:checked={filters.cardTypes.includes(t)}>
-								<input type="checkbox" value={t} checked={filters.cardTypes.includes(t)}
-									onchange={() => toggleCardType(t)} />
-								{t}
-							</label>
-						{/each}
-					</div>
-				</div>
-				{/if}
+				{@render typeField(app.cardTypes('pokemon'))}
+
+				{@render finishField(app.finishes('pokemon'))}
 
 				<div class="field">
 					<input class="input" type="number" min="1" placeholder="National Pokédex #" value={filters.pokedex}

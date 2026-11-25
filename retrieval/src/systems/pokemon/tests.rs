@@ -957,3 +957,28 @@ async fn test_search_any_types_matches_either_type() {
         .collect();
     assert_eq!(types, ["Stadium".to_string(), "Tool".to_string()].into());
 }
+
+#[tokio::test]
+async fn test_finishes_list_every_variant_normal_first() {
+    let system = setup_test_db().await;
+    let finishes = system.get_finishes().await.unwrap();
+    assert_eq!(finishes.first().map(String::as_str), Some("Normal"));
+    assert!(finishes.contains(&"Reverse Holofoil".to_string()));
+    assert!(finishes.contains(&"1st Edition Holofoil".to_string()));
+}
+
+#[tokio::test]
+async fn test_search_by_finish_matches_whole_variant_names() {
+    let system = setup_test_db().await;
+    let filters = CardSearchFilters {
+        finishes: Some(vec!["Holofoil".to_string()]),
+        ..Default::default()
+    };
+    let cards = system.search_cards(filters, None, Some(5000)).await.unwrap();
+    assert!(!cards.is_empty());
+    for card in &cards {
+        let Card::Pokemon(p) = card else { panic!("expected Pokemon card") };
+        // "Reverse Holofoil" alone doesn't count as "Holofoil".
+        assert!(p.finishes.contains(&"Holofoil".to_string()), "{:?}", p.finishes);
+    }
+}

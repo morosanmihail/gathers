@@ -52,6 +52,9 @@ pub struct SystemMeta {
     pub sets: Vec<Set>,
     /// Values for `CardSearchFilters::any_types`.
     pub card_types: Vec<String>,
+    /// Values for `CardSearchFilters::finishes`: every finish (foil style) a card of this game
+    /// can be printed in, by display name.
+    pub finishes: Vec<String>,
     /// Values for `CardSearchFilters::unique`, default first.
     pub unique_modes: Vec<filters::UniqueMode>,
 }

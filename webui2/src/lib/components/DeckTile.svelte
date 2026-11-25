@@ -53,7 +53,7 @@
 	onkeydown={(e) => e.key === 'Enter' && onclick?.(card)}
 >
 	<div class="card-tile-qty">
-		{deckSlots(card)}{#if card.finish}&nbsp;{finishLabel(card.finish)}{/if}
+		{deckSlots(card)}{#if card.finish}&nbsp;{finishLabel(card.finish, card)}{/if}
 	</div>
 
 	{#if imgUrl}

@@ -50,6 +50,33 @@ impl RiftboundSQLiteRetrievalSystem {
     }
 }
 
+impl RiftboundSQLiteRetrievalSystem {
+    /// Ids of the cards printed in at least one of `finishes` (TCGCSV subtype names such as
+    /// "Foil", case-insensitive), going by which ones the price db lists a price for. `None`
+    /// when there's no price db to tell, so a search leaves the filter out.
+    async fn card_ids_with_finishes(&self, finishes: &[String]) -> eyre::Result<Option<Vec<String>>> {
+        let finishes: Vec<String> = finishes.iter().map(|f| f.to_lowercase()).collect();
+        let found = self
+            .prices
+            .with(|conn| {
+                let query = format!(
+                    "SELECT DISTINCT c.cardId FROM card_products AS c \
+                     JOIN prices AS p ON p.productId = c.productId \
+                     WHERE lower(p.subTypeName) IN ({})",
+                    sql_placeholders(finishes.len())
+                );
+                let mut stmt = conn.prepare(&query)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(&finishes), |row| {
+                    row.get::<_, String>(0)
+                })?;
+                Ok(rows.flatten().collect::<Vec<_>>())
+            })
+            .await;
+        // An unreadable price db is treated like a missing one rather than failing the search.
+        Ok(found.ok().flatten())
+    }
+}
+
 const CREATE_CARDS_TABLE: &str = "CREATE TABLE IF NOT EXISTS cards (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -162,6 +189,11 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
         skip: Option<usize>,
         limit: Option<usize>,
     ) -> eyre::Result<Vec<Card>> {
+        // Looked up before taking the cards connection: the price db has its own lock.
+        let with_finishes = match filters.finishes.as_ref().filter(|f| !f.is_empty()) {
+            Some(finishes) => self.card_ids_with_finishes(finishes).await?,
+            None => None,
+        };
         let conn = self.connection.lock().await;
         let mut query =
             "SELECT id, name, set_id, rarity, artists, domains, text, image_url, code, type FROM cards"
@@ -232,6 +264,15 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
                 i += 1;
             }
             conditions.push(format!("({})", any.join(" OR ")));
+        }
+        if let Some(ids) = with_finishes {
+            if ids.is_empty() {
+                conditions.push("0".to_string());
+            } else {
+                let placeholders: Vec<String> = (i..i + ids.len()).map(|n| format!("?{n}")).collect();
+                conditions.push(format!("id IN ({})", placeholders.join(", ")));
+                params.extend(ids);
+            }
         }
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
@@ -310,6 +351,28 @@ impl RetrievalSystemTrait for RiftboundSQLiteRetrievalSystem {
             })
         })?;
         Ok(iter.flatten().collect())
+    }
+
+    /// The finishes TCGCSV lists a price for ("Normal", "Foil"), "Normal" first. The card data
+    /// itself has no finishes, so this is empty without a price db, and nothing is offered.
+    async fn get_finishes(&self) -> eyre::Result<Vec<String>> {
+        let finishes = self
+            .prices
+            .with(|conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT DISTINCT p.subTypeName FROM prices AS p \
+                     JOIN card_products AS c ON c.productId = p.productId",
+                )?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                Ok(rows.flatten().collect::<Vec<_>>())
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let mut finishes = finishes;
+        finishes.sort_by_key(|f| (f != "Normal", f.clone()));
+        Ok(finishes)
     }
 
     async fn get_card_types(&self) -> eyre::Result<Vec<String>> {

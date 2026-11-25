@@ -32,7 +32,7 @@
 	{#each rows as entry (entry.finish ?? '')}
 		<QtyControls
 			quantity={entry.quantity ?? 0}
-			label={finishLabel(entry.finish ?? '')}
+			label={finishLabel(entry.finish ?? '', group)}
 			price={finishPrice(cardPrices, entry.finish ?? '')}
 			{busy}
 			onAdjust={(delta, purchase) => onAdjust(entry.finish ?? '', delta, purchase)}
@@ -44,7 +44,7 @@
 			<div class="add-finish-row">
 				<select class="add-finish-select" bind:value={addingFinish}>
 					{#each toAdd as f (f)}
-						<option value={f}>{finishLabel(f)}</option>
+						<option value={f}>{finishLabel(f, group)}</option>
 					{/each}
 				</select>
 				<button class="qty-btn add" title="Add this finish" onclick={() => { onAdjust(addingFinish ?? '', 1); addingFinish = null; }}>✓</button>

@@ -98,6 +98,7 @@
 				<AddDropdown
 					onAdd={onAdd ? () => onAdd(card) : undefined}
 					{finishes}
+					{card}
 					onAddFinish={onAddFinish ? (finish) => onAddFinish(card, finish) : undefined}
 					onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
 				/>

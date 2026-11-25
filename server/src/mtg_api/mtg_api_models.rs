@@ -108,6 +108,10 @@ pub struct APICard {
     pub colors: Vec<APICardColour>,
     pub legalities: HashMap<String, String>,
     pub finishes: Vec<String>,
+    /// Display name of the printing's special foil treatment (e.g. "Surge Foil"), describing
+    /// its `foil` finish only. Absent for ordinary foils.
+    #[serde(rename = "foilStyle", default, skip_serializing_if = "Option::is_none")]
+    pub foil_style: Option<String>,
     #[serde(rename = "isReserved")]
     pub is_reserved: bool,
     #[serde(rename = "isPromo")]
@@ -157,6 +161,7 @@ impl From<MagicCard> for APICard {
             colors: value.colors.into_iter().map(Into::into).collect(),
             legalities: value.legalities,
             finishes: value.finishes,
+            foil_style: value.foil_style,
             is_reserved: value.is_reserved,
             is_promo: value.is_promo,
             is_reprint: value.is_reprint,

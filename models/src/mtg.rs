@@ -33,6 +33,12 @@ pub struct MagicCard {
     /// Format name -> legality status (e.g. "modern" -> "Legal").
     pub legalities: HashMap<String, String>,
     pub finishes: Vec<String>,
+    /// Display name of this printing's special foil treatment (e.g. "Surge Foil",
+    /// "Step-and-Compleat Foil"), from its promo types — see [`foil_style`]. Only describes
+    /// the `foil` finish: a printing that also comes in nonfoil is still a plain nonfoil card.
+    /// `None` for ordinary foils and cards with no foil.
+    #[serde(default)]
+    pub foil_style: Option<String>,
     pub is_reserved: bool,
     pub is_promo: bool,
     pub is_reprint: bool,
@@ -111,6 +117,7 @@ impl Default for MagicCard {
             colors: vec![],
             legalities: HashMap::new(),
             finishes: vec![],
+            foil_style: None,
             is_reserved: false,
             is_promo: false,
             is_reprint: false,
@@ -122,6 +129,107 @@ impl Default for MagicCard {
             set_name: "".to_string(),
         }
     }
+}
+
+/// Foil treatments whose promo type doesn't end in "foil" (see [`foil_style_key`]). A
+/// promo type starting with one of these counts too, for colour variants like `neoninkred`.
+const FOILS_NAMED_OTHERWISE: &[&str] = &[
+    "oilslick",
+    "stepandcompleat",
+    "doublerainbow",
+    "textured",
+    "embossed",
+    "gilded",
+    "neonink",
+];
+
+/// Display names that can't be generated from the promo type, which runs words together.
+const FOIL_LABEL_OVERRIDES: &[(&str, &str)] = &[
+    ("stepandcompleat", "Step-and-Compleat Foil"),
+    ("chocobotrackfoil", "Chocobo Track Foil"),
+    ("firstplacefoil", "First Place Foil"),
+    ("dragonscalefoil", "Dragon Scale Foil"),
+    ("doublerainbow", "Double Rainbow Foil"),
+    ("oilslick", "Oil Slick Foil"),
+    ("neonink", "Neon Ink Foil"),
+];
+
+/// The foil style a promo type (mtgjson `promoTypes`, Scryfall `promo_types`) names, as a
+/// key shared by all its variants, or `None` when it isn't a foil treatment. MTGJSON has no
+/// such flag: a promo type is one when its name ends in "foil" (`surgefoil`, `raisedfoil`)
+/// or it's one of the few named otherwise ([`FOILS_NAMED_OTHERWISE`]).
+pub fn foil_style_key(promo_type: &str) -> Option<&str> {
+    if let Some(key) = FOILS_NAMED_OTHERWISE.iter().find(|k| promo_type.starts_with(*k)) {
+        return Some(key);
+    }
+    (promo_type.len() > "foil".len() && promo_type.ends_with("foil")).then_some(promo_type)
+}
+
+/// The display name of the foil style `key` (from [`foil_style_key`]): "surgefoil" reads
+/// "Surge Foil", "textured" "Textured Foil", except for the [`FOIL_LABEL_OVERRIDES`].
+pub fn foil_style_label(key: &str) -> String {
+    if let Some((_, label)) = FOIL_LABEL_OVERRIDES.iter().find(|(k, _)| *k == key) {
+        return (*label).to_string();
+    }
+    let stem = key.strip_suffix("foil").unwrap_or(key);
+    let mut chars = stem.chars();
+    match chars.next() {
+        Some(first) => format!("{}{} Foil", first.to_uppercase(), chars.as_str()),
+        None => "Foil".to_string(),
+    }
+}
+
+/// The display name of the special foil treatment named in `promo_types`, if any (see
+/// [`MagicCard::foil_style`]). When there are several, a treatment named otherwise wins over
+/// a plain "...foil" one, since those are the specific looks (ONE's oil slick foils are also
+/// tagged `raisedfoil`); ties go alphabetically.
+pub fn foil_style<S: AsRef<str>>(promo_types: &[S]) -> Option<String> {
+    promo_types
+        .iter()
+        .filter_map(|p| foil_style_key(p.as_ref()))
+        .min_by_key(|key| (!FOILS_NAMED_OTHERWISE.contains(key), *key))
+        .map(foil_style_label)
+}
+
+/// A foil style found in a card database, with every promo type that names it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoilStyle {
+    /// Display name, e.g. "Surge Foil".
+    pub label: String,
+    /// The promo types meaning this style, e.g. `["neonink", "neoninkred", ...]`.
+    pub promo_types: Vec<String>,
+}
+
+/// Groups the distinct promo types a database uses into its foil styles, sorted by label.
+/// Promo types that aren't foil treatments are dropped.
+pub fn foil_styles<S: AsRef<str>>(promo_types: impl IntoIterator<Item = S>) -> Vec<FoilStyle> {
+    let mut by_key: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for p in promo_types {
+        let p = p.as_ref();
+        if let Some(key) = foil_style_key(p) {
+            let types = by_key.entry(key.to_string()).or_default();
+            if !types.iter().any(|t| t == p) {
+                types.push(p.to_string());
+            }
+        }
+    }
+    let mut styles: Vec<FoilStyle> = by_key
+        .into_iter()
+        .map(|(key, promo_types)| FoilStyle { label: foil_style_label(&key), promo_types })
+        .collect();
+    styles.sort_by(|a, b| a.label.cmp(&b.label));
+    styles
+}
+
+/// Every finish name an MTG search can filter by: the plain finishes, then each foil style
+/// in `styles`. These are the labels the UI shows for a finish, so a filter reads the same
+/// as a card.
+pub fn finish_names(styles: &[FoilStyle]) -> Vec<String> {
+    ["Normal", "Foil", "Etched"]
+        .into_iter()
+        .map(String::from)
+        .chain(styles.iter().map(|s| s.label.clone()))
+        .collect()
 }
 
 impl Display for CardColour {
@@ -205,6 +313,36 @@ mod tests {
         assert_eq!(c.rarity, Rarity::Common);
         assert_eq!(c.card_identifiers.id, "-1");
         assert!(c.color_identity.is_empty());
+    }
+
+    #[test]
+    fn test_foil_style() {
+        assert_eq!(foil_style(&["universesbeyond", "surgefoil"]).as_deref(), Some("Surge Foil"));
+        assert_eq!(foil_style(&["oilslick", "raisedfoil"]).as_deref(), Some("Oil Slick Foil"));
+        assert_eq!(foil_style(&["raisedfoil"]).as_deref(), Some("Raised Foil"));
+        assert_eq!(foil_style(&["neoninkred"]).as_deref(), Some("Neon Ink Foil"));
+        assert_eq!(foil_style(&["stepandcompleat"]).as_deref(), Some("Step-and-Compleat Foil"));
+        assert_eq!(foil_style(&["textured"]).as_deref(), Some("Textured Foil"));
+        // A new "...foil" promo type is picked up without being listed anywhere.
+        assert_eq!(foil_style(&["sparklefoil"]).as_deref(), Some("Sparkle Foil"));
+        assert_eq!(foil_style(&["boosterfun", "prerelease", "fnm"]), None);
+        assert_eq!(foil_style::<&str>(&[]), None);
+    }
+
+    #[test]
+    fn test_foil_styles_group_variants() {
+        let styles = foil_styles(["surgefoil", "neonink", "neoninkred", "prerelease", "surgefoil"]);
+        assert_eq!(
+            styles,
+            vec![
+                FoilStyle {
+                    label: "Neon Ink Foil".into(),
+                    promo_types: vec!["neonink".into(), "neoninkred".into()],
+                },
+                FoilStyle { label: "Surge Foil".into(), promo_types: vec!["surgefoil".into()] },
+            ]
+        );
+        assert_eq!(finish_names(&styles), vec!["Normal", "Foil", "Etched", "Neon Ink Foil", "Surge Foil"]);
     }
 
     #[test]

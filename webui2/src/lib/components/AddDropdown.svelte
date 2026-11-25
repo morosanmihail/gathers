@@ -12,11 +12,13 @@
 		// finish, "foil", "etched", ...). When non-empty, one "Add 1 <finish>"
 		// item is shown per finish instead of the single `onAdd` item.
 		finishes?: string[];
+		// The card being added, so a special foil reads as e.g. "Surge Foil".
+		card?: object;
 		onAddFinish?: (finish: string) => void;
 		onAddWanted?: () => void;
 	}
 
-	let { onAdd, finishes = [], onAddFinish, onAddWanted }: Props = $props();
+	let { onAdd, finishes = [], onAddFinish, onAddWanted, card }: Props = $props();
 
 	const perFinish = $derived(finishes.length > 0 && !!onAddFinish);
 	const itemCount = $derived((perFinish ? finishes.length : (onAdd ? 1 : 0)) + (onAddWanted ? 1 : 0));
@@ -69,7 +71,7 @@
 		{#if perFinish}
 			{#each finishes as f (f)}
 				<button class="add-dropdown-item" role="menuitem" onclick={(e) => pick(e, () => onAddFinish?.(f))}>
-					Add 1 {finishLabel(f)}
+					Add 1 {finishLabel(f, card)}
 				</button>
 			{/each}
 		{:else if onAdd}

@@ -65,7 +65,7 @@
 				<dt>Price</dt>
 				<dd>
 					{#each priceRows as row (row.finish)}
-						<div>{#if priceRows.length > 1}<span class="muted">{finishLabel(row.finish)}</span> {/if}<strong>{row.text}</strong></div>
+						<div>{#if priceRows.length > 1}<span class="muted">{finishLabel(row.finish, hovered)}</span> {/if}<strong>{row.text}</strong></div>
 					{/each}
 				</dd>
 			{/if}
@@ -75,7 +75,7 @@
 					<span class="muted">None</span>
 				{:else}
 					{#each owned as e (e.finish ?? '')}
-						<div>{e.quantity} × {finishLabel(e.finish ?? '')}</div>
+						<div>{e.quantity} × {finishLabel(e.finish ?? '', hovered)}</div>
 					{/each}
 					{#if owned.length > 1}<div class="muted">{totalOwned} total</div>{/if}
 				{/if}

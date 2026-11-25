@@ -173,6 +173,10 @@ impl RetrievalSystemTrait for ScryfallRetrievalSystem {
         Ok(parsing::parse_sets_response(&json))
     }
 
+    async fn get_finishes(&self) -> eyre::Result<Vec<String>> {
+        Ok(query::SCRYFALL_FINISHES.iter().map(|f| f.to_string()).collect())
+    }
+
     async fn get_card_types(&self) -> eyre::Result<Vec<String>> {
         let client = reqwest::Client::new();
         let response = client

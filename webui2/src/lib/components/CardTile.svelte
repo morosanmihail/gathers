@@ -97,7 +97,7 @@
 	</div>
 	{#if finishTooltip.visible}
 		<div use:portal class="finish-hover-tooltip" style={finishTooltip.style} role="tooltip">
-			{finishes.map(finishLabel).join(', ')}
+			{finishes.map((f) => finishLabel(f, card)).join(', ')}
 		</div>
 	{/if}
 
@@ -145,6 +145,7 @@
 			<AddDropdown
 				onAdd={onAdd ? () => onAdd(card) : undefined}
 				{finishes}
+				{card}
 				onAddFinish={onAddFinish ? (finish) => onAddFinish(card, finish) : undefined}
 				onAddWanted={onAddWanted ? () => onAddWanted(card) : undefined}
 			/>

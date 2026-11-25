@@ -76,12 +76,20 @@ pub trait RetrievalSystemTrait {
     /// Every card type a search's `any_types` can usefully filter by, sorted.
     async fn get_card_types(&self) -> eyre::Result<Vec<String>>;
 
+    /// Every finish a search's `finishes` can filter by, by display name. Empty (the default)
+    /// when the system has no finish data to filter on.
+    async fn get_finishes(&self) -> eyre::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     /// Everything a search can be narrowed by, in one call.
     async fn get_meta(&self) -> eyre::Result<models::SystemMeta> {
-        let (sets, card_types) = tokio::join!(self.get_sets(), self.get_card_types());
+        let (sets, card_types, finishes) =
+            tokio::join!(self.get_sets(), self.get_card_types(), self.get_finishes());
         Ok(models::SystemMeta {
             sets: sets?,
             card_types: card_types?,
+            finishes: finishes?,
             unique_modes: self.unique_modes(),
         })
     }

@@ -15,6 +15,9 @@ pub struct APISystemMeta {
     pub sets: Vec<Set>,
     /// Values for `APICardSearchFilters::any_types`, sorted.
     pub card_types: Vec<String>,
+    /// Values for `APICardSearchFilters::finishes`, the game's default finish first. Empty
+    /// when the game has no finish data to filter on.
+    pub finishes: Vec<String>,
     /// Values for `APICardSearchFilters::unique`, default first. Empty when
     /// the system has nothing to choose between.
     pub unique_modes: Vec<APIUniqueMode>,
@@ -33,6 +36,7 @@ pub(crate) async fn system_meta(system: RetrievalSystem) -> Result<Json<APISyste
     Ok(Json(APISystemMeta {
         sets: meta.sets,
         card_types: meta.card_types,
+        finishes: meta.finishes,
         unique_modes: meta.unique_modes.into_iter().map(Into::into).collect(),
     }))
 }

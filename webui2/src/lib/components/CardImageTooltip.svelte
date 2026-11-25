@@ -62,7 +62,7 @@
 	<div use:portal class="card-img-tooltip" style={tooltip.style}>
 		<img src={resolvedUrl} alt={card.name} width="200" />
 		{#if finishes.length}
-			<div class="card-img-finishes">{finishes.map(finishLabel).join(', ')}</div>
+			<div class="card-img-finishes">{finishes.map((f) => finishLabel(f, card)).join(', ')}</div>
 		{/if}
 	</div>
 {/if}
